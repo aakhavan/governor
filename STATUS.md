@@ -1,11 +1,11 @@
 # STATUS: governor
 
-Updated 22 Oct 2026 16:18. Run `20261022-161043`.
+Updated 22 Oct 2026 16:36. Run `20261022-161043`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
-| G1 | Foundation from the Sprint 4 import (core package, green build, fct_invoices, metadata store) | mechanical | - | passed | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-22T16:18:54 |
-| G2a | Metric definitions, golden-set loader, result checker | design | - | pending | 0/2 |  | - | - | - |
+| G1 | Foundation from the Sprint 4 import (core package, green build, fct_invoices, metadata store) | mechanical | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-22T16:18:54 |
+| G2a | Metric definitions, golden-set loader, result checker | design | - | passed | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-22T16:36:50 |
 | G2b | Golden set with gold SQL, frozen split, review table | design | yes | pending | 0/2 |  | - | - | - |
 | G3 | Evaluation harness, metrics, self-test systems, baseline | design | - | pending | 0/2 |  | - | - | - |
 | G4 | Catalog and metric cards, hybrid schema retrieval, recall@k on gold tables | mechanical | - | pending | 0/2 |  | - | - | - |
@@ -19,6 +19,6 @@ Updated 22 Oct 2026 16:18. Run `20261022-161043`.
 | G10a | Tune on the tune split, then freeze the prompts | design | - | pending | 0/2 |  | - | - | - |
 | G10b | Holdout once, eval report, README, demo script | design | yes | pending | 0/2 |  | - | - | - |
 
-Cost so far (reported + notional): $2.67 of $80.00 run budget; 2 agent call(s).
+Cost so far (reported + notional): $3.69 of $80.00 run budget; 4 agent call(s).
 
-Next: G1 is passed: `factory resume`.
+Next: G2a is passed: `factory resume`.

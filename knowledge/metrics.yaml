@@ -1,0 +1,180 @@
+# Metric definitions for governor-ask. Each sql is a SELECT over allowlisted marts
+# (knowledge/access.yaml) with explicit columns. Snapshot metrics resolve "now" to the
+# green build's as_of date (artifacts/green/as_of.txt), written here as a literal:
+# DATE '2026-10-22'. Update the literal when as_of is re-pinned.
+# days_outstanding in fct_invoices is already computed against as_of by the build.
+version: 1
+
+metrics:
+  - id: mrr
+    label: Monthly recurring revenue
+    definition: >-
+      Sum of the monthly plan price of every subscription active in the latest month
+      on or before as_of, in euros. A subscription counts in a month when it started
+      before the month ended and was not cancelled before the month started.
+    sql: |
+      SELECT month_start, SUM(mrr) AS mrr_eur
+      FROM mrr_monthly
+      WHERE month_start = (SELECT MAX(month_start) FROM mrr_monthly WHERE month_start <= DATE '2026-10-22')
+      GROUP BY month_start
+    grain: snapshot (latest month on or before as_of)
+    time_column: mrr_monthly.month_start
+    synonyms: [monthly recurring revenue, recurring revenue, run rate per month, current mrr]
+    owner: finance
+
+  - id: arr
+    label: Annual recurring revenue
+    definition: >-
+      MRR of the latest month on or before as_of multiplied by 12, in euros.
+    sql: |
+      SELECT month_start, SUM(mrr) * 12 AS arr_eur
+      FROM mrr_monthly
+      WHERE month_start = (SELECT MAX(month_start) FROM mrr_monthly WHERE month_start <= DATE '2026-10-22')
+      GROUP BY month_start
+    grain: snapshot (latest month on or before as_of)
+    time_column: mrr_monthly.month_start
+    synonyms: [annual recurring revenue, annualised recurring revenue, annual run rate, arr]
+    owner: finance
+
+  - id: active_subscriptions
+    label: Active subscriptions
+    definition: >-
+      Number of subscriptions included in MRR in the latest month on or before as_of.
+    sql: |
+      SELECT month_start, SUM(active_subscriptions) AS active_subscriptions
+      FROM mrr_monthly
+      WHERE month_start = (SELECT MAX(month_start) FROM mrr_monthly WHERE month_start <= DATE '2026-10-22')
+      GROUP BY month_start
+    grain: snapshot (latest month on or before as_of)
+    time_column: mrr_monthly.month_start
+    synonyms: [active subs, live subscriptions, current subscriptions, subscriber count]
+    owner: finance
+
+  - id: churned_subscriptions
+    label: Churned subscriptions (monthly)
+    definition: >-
+      Per month, the subscriptions lost against the previous month, summed per account:
+      for each account, the previous month's active subscriptions minus this month's
+      (zero when it did not drop; an account with no row this month lost all of them).
+      The marts hold no subscription-level history, so a cancellation and a new
+      subscription on the same account in the same month net out. The first month of
+      the window has no previous month and is not reported.
+    sql: |
+      WITH months AS (
+          SELECT DISTINCT month_start FROM mrr_monthly
+      ),
+      prev AS (
+          SELECT months.month_start, mrr_monthly.account_id, mrr_monthly.active_subscriptions
+          FROM months
+          INNER JOIN mrr_monthly
+              ON mrr_monthly.month_start = months.month_start - INTERVAL 1 MONTH
+      )
+      SELECT
+          prev.month_start,
+          SUM(GREATEST(prev.active_subscriptions - COALESCE(cur.active_subscriptions, 0), 0)) AS churned_subscriptions
+      FROM prev
+      LEFT JOIN mrr_monthly AS cur
+          ON cur.account_id = prev.account_id AND cur.month_start = prev.month_start
+      WHERE prev.month_start <= DATE '2026-10-22'
+      GROUP BY prev.month_start
+      ORDER BY prev.month_start
+    grain: month
+    time_column: mrr_monthly.month_start
+    synonyms: [churn, churned subs, cancelled subscriptions, lost subscriptions, subscription churn]
+    owner: finance
+
+  - id: invoiced_revenue
+    label: Invoiced revenue (monthly)
+    definition: >-
+      Sum of invoice amounts issued in each calendar month, in euros. Void invoices are
+      excluded.
+    sql: |
+      SELECT CAST(DATE_TRUNC('month', issued_at) AS DATE) AS month_start, SUM(amount_eur) AS invoiced_eur
+      FROM fct_invoices
+      WHERE status <> 'void' AND issued_at < DATE '2026-10-22' + INTERVAL 1 DAY
+      GROUP BY 1
+      ORDER BY 1
+    grain: month
+    time_column: fct_invoices.issued_at
+    synonyms: [billings, billed revenue, invoiced amount, invoiced, revenue billed]
+    owner: finance
+
+  - id: collected_revenue
+    label: Collected revenue (monthly)
+    definition: >-
+      Sum of payments taken in each calendar month, in euros (cash basis).
+    sql: |
+      SELECT CAST(DATE_TRUNC('month', revenue_date) AS DATE) AS month_start, SUM(amount_eur) AS collected_eur
+      FROM fct_revenue_daily
+      WHERE revenue_date <= DATE '2026-10-22'
+      GROUP BY 1
+      ORDER BY 1
+    grain: month
+    time_column: fct_revenue_daily.revenue_date
+    synonyms: [cash collected, collections, payments received, received revenue, cash revenue]
+    owner: finance
+
+  - id: outstanding_receivables
+    label: Outstanding receivables
+    definition: >-
+      Unpaid amount (invoice amount minus payments) over all non-void invoices that are
+      not fully paid as of as_of, in euros, with the number of such invoices.
+    sql: |
+      SELECT COUNT(invoice_id) AS open_invoices, SUM(amount_eur - paid_amount_eur) AS outstanding_eur
+      FROM fct_invoices
+      WHERE status <> 'void' AND NOT is_fully_paid
+    grain: snapshot (as_of)
+    time_column: fct_invoices.issued_at
+    synonyms: [accounts receivable, AR, open balance, unpaid invoices amount, receivables]
+    owner: finance
+
+  - id: overdue_invoices
+    label: Overdue invoices
+    definition: >-
+      Non-void invoices not fully paid that have been outstanding for more than 30 days
+      at as_of: their count and unpaid amount in euros.
+    sql: |
+      SELECT COUNT(invoice_id) AS overdue_invoices, SUM(amount_eur - paid_amount_eur) AS overdue_eur
+      FROM fct_invoices
+      WHERE status <> 'void' AND NOT is_fully_paid AND days_outstanding > 30
+    grain: snapshot (as_of)
+    time_column: fct_invoices.issued_at
+    synonyms: [overdue, past due invoices, late invoices, overdue receivables, invoices over 30 days]
+    owner: finance
+
+  - id: net_new_mrr
+    label: Net new MRR (monthly)
+    definition: >-
+      Change in total MRR against the previous month, in euros. The first month of the
+      window has no previous month and is not reported.
+    sql: |
+      WITH totals AS (
+          SELECT month_start, SUM(mrr) AS mrr_eur
+          FROM mrr_monthly
+          WHERE month_start <= DATE '2026-10-22'
+          GROUP BY month_start
+      )
+      SELECT cur.month_start, cur.mrr_eur - prev.mrr_eur AS net_new_mrr_eur
+      FROM totals AS cur
+      INNER JOIN totals AS prev ON prev.month_start = cur.month_start - INTERVAL 1 MONTH
+      ORDER BY cur.month_start
+    grain: month
+    time_column: mrr_monthly.month_start
+    synonyms: [mrr growth, mrr change, net mrr movement, new mrr]
+    owner: finance
+
+  - id: arpa
+    label: Average revenue per account
+    definition: >-
+      MRR of the latest month on or before as_of divided by the number of accounts with
+      at least one active subscription that month, in euros.
+    sql: |
+      SELECT month_start, SUM(mrr) / COUNT(DISTINCT account_id) AS arpa_eur
+      FROM mrr_monthly
+      WHERE active_subscriptions > 0
+        AND month_start = (SELECT MAX(month_start) FROM mrr_monthly WHERE month_start <= DATE '2026-10-22')
+      GROUP BY month_start
+    grain: snapshot (latest month on or before as_of)
+    time_column: mrr_monthly.month_start
+    synonyms: [arpa, average revenue per customer, arpu, revenue per account]
+    owner: finance
