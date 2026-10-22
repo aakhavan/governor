@@ -1,0 +1,25 @@
+# dbt unique_id -> team.
+# Source systems: crm is sales-ops, billing is finance-data, payments is payments-platform.
+# int_invoices_with_payments is finance-data because the grain is the invoice.
+# int_payments_with_accounts is payments-platform because the grain is the payment.
+
+source.billing_mart.crm.accounts: sales-ops
+source.billing_mart.billing.plans: finance-data
+source.billing_mart.billing.subscriptions: finance-data
+source.billing_mart.billing.invoices: finance-data
+source.billing_mart.payments.payments: payments-platform
+
+model.billing_mart.stg_crm__accounts: sales-ops
+model.billing_mart.stg_billing__plans: finance-data
+model.billing_mart.stg_billing__subscriptions: finance-data
+model.billing_mart.stg_billing__invoices: finance-data
+model.billing_mart.stg_payments__payments: payments-platform
+model.billing_mart.int_invoices_with_payments: finance-data
+model.billing_mart.int_payments_with_accounts: payments-platform
+model.billing_mart.int_subscription_periods: finance-data
+model.billing_mart.dim_accounts: sales-ops
+model.billing_mart.fct_revenue_daily: finance-data
+model.billing_mart.mrr_monthly: finance-data
+
+exposure.billing_mart.finance_dashboard: finance-data
+exposure.billing_mart.collections_report: sales-ops

@@ -1,0 +1,31 @@
+version: 2
+
+exposures:
+  - name: finance_dashboard
+    type: dashboard
+    maturity: medium
+    description: Finance dashboard of daily cash revenue and monthly recurring revenue.
+    label: Finance dashboard
+    owner:
+      name: finance-data
+      email: finance-data@example.com
+    depends_on:
+      - ref('fct_revenue_daily')
+      - ref('mrr_monthly')
+    config:
+      meta:
+        owner: finance-data
+
+  - name: collections_report
+    type: analysis
+    maturity: medium
+    description: Sales report of lifetime billed, paid and open balance by account.
+    label: Collections report
+    owner:
+      name: sales-ops
+      email: sales-ops@example.com
+    depends_on:
+      - ref('dim_accounts')
+    config:
+      meta:
+        owner: sales-ops

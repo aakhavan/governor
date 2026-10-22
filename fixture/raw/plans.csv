@@ -1,0 +1,7 @@
+plan_id,plan_name,monthly_price_eur
+plan_free,Free,0.00
+plan_starter,Starter,29.00
+plan_growth,Growth,99.00
+plan_business,Business,249.00
+plan_scale,Scale,499.00
+plan_enterprise,Enterprise,799.00

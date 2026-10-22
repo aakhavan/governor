@@ -1,0 +1,118 @@
+# dbt 1.12: freshness and loaded_at_field sit under config.
+version: 2
+
+sources:
+  - name: crm
+    description: Sales CRM export. Owned by sales-ops.
+    schema: raw
+    config:
+      meta:
+        owner: sales-ops
+    tables:
+      - name: accounts
+        description: One row per customer account.
+        config:
+          freshness:
+            warn_after:
+              count: 12
+              period: hour
+            error_after:
+              count: 24
+              period: hour
+          loaded_at_field: _loaded_at
+        columns:
+          - name: account_id
+            description: Primary key from the CRM.
+          - name: company_name
+            description: Account name shown to sales.
+          - name: contact_name
+            description: Person to contact at the account. PII.
+          - name: contact_email
+            description: Email for that contact. PII.
+          - name: country
+            description: Country the account is billed from.
+          - name: created_at
+            description: When the account was created in the CRM.
+          - name: _loaded_at
+            description: When this row was loaded into the warehouse. Freshness uses this column.
+
+  - name: billing
+    description: Subscription billing export. Owned by finance-data. No freshness column.
+    schema: raw
+    config:
+      meta:
+        owner: finance-data
+    tables:
+      - name: plans
+        description: Price list. One row per plan.
+        columns:
+          - name: plan_id
+            description: Primary key.
+          - name: plan_name
+            description: Plan name shown on the invoice.
+          - name: monthly_price_eur
+            description: Recurring price for one month, in euros. Never negative.
+      - name: subscriptions
+        description: One row per subscription. Cancelled rows keep cancelled_at; active and past_due leave it null.
+        columns:
+          - name: subscription_id
+            description: Primary key.
+          - name: account_id
+            description: Account that holds the subscription.
+          - name: plan_id
+            description: Plan the subscription is on.
+          - name: status
+            description: active, cancelled, or past_due.
+          - name: started_at
+            description: When the subscription started.
+          - name: cancelled_at
+            description: When the subscription was cancelled. Null while it is still in force.
+      - name: invoices
+        description: One row per invoice issued to a subscription.
+        columns:
+          - name: invoice_id
+            description: Primary key.
+          - name: subscription_id
+            description: Subscription this invoice bills.
+          - name: account_id
+            description: Account billed, matching the subscription's account.
+          - name: issued_at
+            description: When the invoice was issued.
+          - name: amount_eur
+            description: Invoice amount in euros. Never null.
+          - name: status
+            description: open, paid, or void.
+
+  - name: payments
+    description: Payment service provider export. Owned by payments-platform.
+    schema: raw
+    config:
+      meta:
+        owner: payments-platform
+    tables:
+      - name: payments
+        description: One row per payment against an invoice. A paid invoice may have two rows when the charge was split.
+        config:
+          freshness:
+            warn_after:
+              count: 12
+              period: hour
+            error_after:
+              count: 24
+              period: hour
+          loaded_at_field: _loaded_at
+        columns:
+          - name: payment_id
+            description: Primary key.
+          - name: invoice_id
+            description: Invoice this payment settles.
+          - name: paid_at
+            description: When the payment was taken.
+          - name: amount_eur
+            description: Payment amount in euros. Never null.
+          - name: method
+            description: card, sepa, or bank_transfer.
+          - name: card_last4
+            description: Last four digits of the card. Null unless method is card. PII.
+          - name: _loaded_at
+            description: When this row was loaded into the warehouse. Freshness uses this column.

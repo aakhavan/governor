@@ -1,0 +1,96 @@
+version: 2
+
+models:
+  - name: int_invoices_with_payments
+    description: One row per invoice, with the payments against it summed. Unpaid invoices have a paid amount of zero.
+    config:
+      meta:
+        owner: finance-data
+    columns:
+      - name: invoice_id
+        description: Primary key. One row per invoice.
+        data_tests:
+          - unique
+          - not_null
+      - name: subscription_id
+        description: Subscription this invoice bills.
+        data_tests:
+          - not_null
+      - name: account_id
+        description: Account billed.
+        data_tests:
+          - not_null
+      - name: issued_at
+        description: When the invoice was issued.
+        data_tests:
+          - not_null
+      - name: amount_eur
+        description: Invoice amount in euros.
+        data_tests:
+          - not_null
+      - name: status
+        description: open, paid, or void.
+        data_tests:
+          - not_null
+      - name: payment_count
+        description: How many payments settled this invoice. Zero when none have arrived.
+        data_tests:
+          - not_null
+      - name: paid_amount_eur
+        description: Sum of payment amounts. Zero when the invoice is unpaid.
+        data_tests:
+          - not_null
+
+  - name: int_payments_with_accounts
+    description: One row per payment, with the account billed on its invoice. This is the input to daily cash revenue.
+    config:
+      meta:
+        owner: payments-platform
+    columns:
+      - name: payment_id
+        description: Primary key. One row per payment.
+        data_tests:
+          - unique
+          - not_null
+      - name: invoice_id
+        description: Invoice this payment settles.
+      - name: account_id
+        description: Account billed on that invoice.
+      - name: paid_at
+        description: When the payment was taken.
+      - name: amount_eur
+        description: Payment amount in euros.
+      - name: method
+        description: card, sepa, or bank_transfer.
+
+  - name: int_subscription_periods
+    description: One row per subscription per month it was active, priced from its plan. This is the input to monthly MRR.
+    config:
+      meta:
+        owner: finance-data
+    columns:
+      - name: period_id
+        description: Primary key. Subscription id and the month start.
+        data_tests:
+          - unique
+          - not_null
+      - name: month_start
+        description: First day of the month this row covers.
+        data_tests:
+          - not_null
+      - name: subscription_id
+        description: Subscription that was active in the month.
+        data_tests:
+          - not_null
+      - name: account_id
+        description: Account that holds the subscription.
+        data_tests:
+          - not_null
+      - name: plan_id
+        description: Plan the subscription is on.
+        data_tests:
+          - not_null
+      - name: monthly_price_eur
+        description: Plan price for the month, in euros. Zero for the free plan.
+        data_tests:
+          - not_null

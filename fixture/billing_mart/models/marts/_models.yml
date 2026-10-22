@@ -1,0 +1,88 @@
+version: 2
+
+models:
+  - name: dim_accounts
+    description: One row per account, with lifetime billed, paid and open balance. Contact name and email are PII.
+    config:
+      meta:
+        owner: sales-ops
+    columns:
+      - name: account_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: company_name
+        description: Account name shown to sales.
+      - name: contact_name
+        description: Person to contact at the account. PII.
+      - name: contact_email
+        description: Email for that contact. PII.
+      - name: country
+        description: Country the account is billed from.
+      - name: created_at
+        description: When the account was created in the CRM.
+        data_tests:
+          - not_null
+      - name: lifetime_billed_eur
+        description: Sum of invoice amounts for this account, including void invoices. Zero when the account has no invoices.
+      - name: lifetime_paid_eur
+        description: Sum of payments against those invoices. Zero when nothing has been paid.
+      - name: open_balance_eur
+        description: Lifetime billed minus lifetime paid. Zero when the account is settled or has no invoices.
+
+  - name: fct_revenue_daily
+    description: Cash revenue by account and day, summed from int_payments_with_accounts.
+    config:
+      meta:
+        owner: finance-data
+    columns:
+      - name: revenue_id
+        description: Primary key. Account id and the revenue date.
+        data_tests:
+          - unique
+          - not_null
+      - name: revenue_date
+        description: Day the payments were taken.
+        data_tests:
+          - not_null
+      - name: account_id
+        description: Account the revenue belongs to.
+        data_tests:
+          - not_null
+      - name: payment_count
+        description: Payments included in the day's amount.
+        data_tests:
+          - not_null
+      - name: amount_eur
+        description: Sum of payment amounts that day, in euros.
+        data_tests:
+          - not_null
+
+  - name: mrr_monthly
+    description: Monthly recurring revenue by account. Sum of plan prices for subscriptions active in the month.
+    config:
+      meta:
+        owner: finance-data
+    columns:
+      - name: mrr_id
+        description: Primary key. Account id and the month start.
+        data_tests:
+          - unique
+          - not_null
+      - name: month_start
+        description: First day of the month.
+        data_tests:
+          - not_null
+      - name: account_id
+        description: Account the MRR belongs to.
+        data_tests:
+          - not_null
+      - name: active_subscriptions
+        description: Subscriptions included in the month's MRR.
+        data_tests:
+          - not_null
+      - name: mrr
+        description: Monthly recurring revenue in euros. Zero is allowed. Negative is a failed test.
+        data_tests:
+          - not_null

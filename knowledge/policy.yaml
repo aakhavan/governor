@@ -1,0 +1,4 @@
+# column -> PII tag. profile_column must not return values for these.
+contact_name: name
+contact_email: email
+card_last4: payment_card

@@ -1,0 +1,221 @@
+# Generic test arguments sit under arguments (dbt 1.12).
+# Primary-key unique/not_null and relationships stay at error. Every other
+# staging test warns, so a bad value does not stop the build on the model
+# next to the source.
+version: 2
+
+models:
+  - name: stg_crm__accounts
+    description: Typed copy of CRM accounts. One row per account.
+    config:
+      meta:
+        owner: sales-ops
+    columns:
+      - name: account_id
+        description: Primary key. Stable account identifier from the CRM.
+        data_tests:
+          - unique
+          - not_null
+      - name: company_name
+        description: Account name shown to sales.
+      - name: contact_name
+        description: Person to contact at the account. PII.
+      - name: contact_email
+        description: Email for that contact. PII.
+      - name: country
+        description: Country the account is billed from.
+      - name: created_at
+        description: When the account was created in the CRM.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: _loaded_at
+        description: When this row was loaded into the warehouse. Freshness uses this column.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+
+  - name: stg_billing__plans
+    description: Typed copy of the price list. One row per plan.
+    config:
+      meta:
+        owner: finance-data
+    columns:
+      - name: plan_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: plan_name
+        description: Plan name shown on the invoice.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: monthly_price_eur
+        description: Recurring price for one month, in euros. Never negative.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+
+  - name: stg_billing__subscriptions
+    description: Typed copy of subscriptions. One row per subscription.
+    config:
+      meta:
+        owner: finance-data
+    columns:
+      - name: subscription_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: account_id
+        description: Account that holds the subscription.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+          - relationships:
+              arguments:
+                to: "ref('stg_crm__accounts')"
+                field: account_id
+      - name: plan_id
+        description: Plan the subscription is on.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+          - relationships:
+              arguments:
+                to: "ref('stg_billing__plans')"
+                field: plan_id
+      - name: status
+        description: active, cancelled, or past_due.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+          - accepted_values:
+              arguments:
+                values: ["active", "cancelled", "past_due"]
+              config:
+                severity: warn
+      - name: started_at
+        description: When the subscription started.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: cancelled_at
+        description: When the subscription was cancelled. Null while it is still in force.
+
+  - name: stg_billing__invoices
+    description: Typed copy of invoices. One row per invoice.
+    config:
+      meta:
+        owner: finance-data
+    columns:
+      - name: invoice_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: subscription_id
+        description: Subscription this invoice bills.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+          - relationships:
+              arguments:
+                to: "ref('stg_billing__subscriptions')"
+                field: subscription_id
+      - name: account_id
+        description: Account billed, matching the subscription's account.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+          - relationships:
+              arguments:
+                to: "ref('stg_crm__accounts')"
+                field: account_id
+      - name: issued_at
+        description: When the invoice was issued.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: amount_eur
+        description: Invoice amount in euros. Never null.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: status
+        description: open, paid, or void.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+          - accepted_values:
+              arguments:
+                values: ["open", "paid", "void"]
+              config:
+                severity: warn
+
+  - name: stg_payments__payments
+    description: Typed copy of payments. One row per payment.
+    config:
+      meta:
+        owner: payments-platform
+    columns:
+      - name: payment_id
+        description: Primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: invoice_id
+        description: Invoice this payment settles.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+          - relationships:
+              arguments:
+                to: "ref('stg_billing__invoices')"
+                field: invoice_id
+      - name: paid_at
+        description: When the payment was taken.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: amount_eur
+        description: Payment amount in euros. Never null.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: method
+        description: card, sepa, or bank_transfer.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+          - accepted_values:
+              arguments:
+                values: ["card", "sepa", "bank_transfer"]
+              config:
+                severity: warn
+      - name: card_last4
+        description: Last four digits of the card. Null unless method is card. PII.
+      - name: _loaded_at
+        description: When this row was loaded into the warehouse. Freshness uses this column.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn

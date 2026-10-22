@@ -1,0 +1,12 @@
+billing_mart:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      # build_green.py sets the absolute path. A manual dbt build from this
+      # directory uses warehouse.duckdb next to this file.
+      path: "{{ env_var('BILLING_MART_DUCKDB', 'warehouse.duckdb') }}"
+      schema: main
+      # One thread. A second thread opens a second DuckDB connection and
+      # the file lock fails on Windows.
+      threads: 1

@@ -1,0 +1,29 @@
+name: billing_mart
+version: "1.0.0"
+config-version: 2
+profile: billing_mart
+
+# Singular test only. There is no packages.yml and this project does not run dbt deps.
+require-dbt-version: [">=1.12.0", "<1.13.0"]
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+# Fixed business window. Keep in sync with fixture/generate_raw.py:
+# history starts on window_start; the last MRR month is window_month_end.
+vars:
+  window_start: "2025-04-01"
+  window_month_end: "2026-09-01"
+
+models:
+  billing_mart:
+    +materialized: table
+    staging:
+      +schema: staging
+    intermediate:
+      +schema: intermediate
+    marts:
+      +schema: marts
