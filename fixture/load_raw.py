@@ -12,8 +12,9 @@ from pathlib import Path
 import duckdb
 
 import generate_raw
+from governor.core import paths
 
-FIXTURE_DIR = Path(__file__).resolve().parent
+FIXTURE_DIR = paths.FIXTURE
 WAREHOUSE = FIXTURE_DIR / "billing_mart" / "warehouse.duckdb"
 RAW_DIR = FIXTURE_DIR / "raw"
 

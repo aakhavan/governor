@@ -9,7 +9,7 @@ from __future__ import annotations
 from langchain_core.embeddings import Embeddings
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-from triage.config import (
+from governor.core.config import (
     CHAT_MODEL,
     EMBED_BACKEND,
     EMBED_MODEL,

@@ -1,6 +1,7 @@
 """Build meta.duckdb from a dbt artifacts directory.
 
-``python -m triage.harvest <artifacts_dir>`` writes ``<artifacts_dir>/meta.duckdb``.
+``python -m governor.core.harvest <artifacts_dir> [--out <path>]`` writes
+``<artifacts_dir>/meta.duckdb``, or ``<path>`` when ``--out`` is given.
 Each incident run later gets its own copy, and ``diff_since_green`` compares
 checksums between the two.
 
@@ -27,7 +28,7 @@ from pathlib import Path
 import duckdb
 import yaml
 
-from triage.config import PROJECT_DIR
+from governor.core import paths
 
 TABLE_NAMES = (
     "nodes",
@@ -166,25 +167,30 @@ def harvest(
     artifacts_dir: str | Path,
     owners_path: str | Path | None = None,
     policy_path: str | Path | None = None,
+    out: str | Path | None = None,
 ) -> dict[str, int]:
-    """Write ``<artifacts_dir>/meta.duckdb`` and return a row count per table.
+    """Write ``<artifacts_dir>/meta.duckdb`` (or ``out``) and return a row count per table.
 
     Running it again replaces the seven tables in that file.
     """
     artifacts_dir = Path(artifacts_dir)
     tables = load_tables(artifacts_dir, owners_path, policy_path)
-    _write_meta(artifacts_dir / _META_DB, tables)
+    _write_meta(Path(out) if out is not None else artifacts_dir / _META_DB, tables)
     return {name: len(tables[name]) for name in TABLE_NAMES}
 
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry. Prints one ``name count`` line per table."""
     args = list(sys.argv[1:] if argv is None else argv)
+    out = None
+    if len(args) == 3 and args[1] == "--out":
+        out = args[2]
+        args = args[:1]
     if len(args) != 1:
-        print("usage: python -m triage.harvest <artifacts_dir>", file=sys.stderr)
+        print("usage: python -m governor.core.harvest <artifacts_dir> [--out <path>]", file=sys.stderr)
         return 2
     try:
-        counts = harvest(args[0])
+        counts = harvest(args[0], out=out)
     except HarvestError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -197,8 +203,8 @@ def _knowledge_paths(
     owners_path: str | Path | None,
     policy_path: str | Path | None,
 ) -> tuple[Path, Path]:
-    default_owners = PROJECT_DIR / "knowledge" / "owners.yaml"
-    default_policy = PROJECT_DIR / "knowledge" / "policy.yaml"
+    default_owners = paths.KNOWLEDGE / "owners.yaml"
+    default_policy = paths.KNOWLEDGE / "policy.yaml"
     return (
         Path(owners_path) if owners_path is not None else default_owners,
         Path(policy_path) if policy_path is not None else default_policy,

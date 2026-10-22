@@ -1,6 +1,7 @@
 """Hybrid search over runbooks, post-mortems, and catalog cards.
 
-Dense vectors live in a local Chroma collection under ``.state/chroma``.
+Dense vectors live in a local Chroma collection under ``.state/chroma``
+(``chromadb`` is optional and imported only by the index functions).
 BM25 is rebuilt from ``.state/chunks.jsonl`` when the index is loaded.
 The two ranked lists are fused with reciprocal rank fusion, k=60.
 
@@ -24,14 +25,15 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from triage.config import CHROMA_DIR, CHUNKS_PATH, PROJECT_DIR
-from triage.schemas import Hit, SearchKnowledgeResult, as_untrusted
+from governor.core import paths
+from governor.core.config import CHROMA_DIR, CHUNKS_PATH
+from governor.core.schemas import Hit, SearchKnowledgeResult, as_untrusted
 
-KNOWLEDGE_DIR = PROJECT_DIR / "knowledge"
-GREEN_META = PROJECT_DIR / "artifacts" / "green" / "meta.duckdb"
+KNOWLEDGE_DIR = paths.KNOWLEDGE
+GREEN_META = paths.META
 COLLECTION_NAME = "triage_knowledge"
 COLLECTION_METADATA = {"hnsw:space": "cosine"}
-BUILD_COMMAND = "uv run python -m triage.retrieval --build"
+BUILD_COMMAND = "uv run python -m governor.core.retrieval --build"
 MISSING_INDEX = f"Retrieval index is not built. run: {BUILD_COMMAND}"
 
 # Each retriever contributes its own top 10. top_k is applied after fusion.
@@ -247,7 +249,7 @@ def build_index() -> dict:
 
     import chromadb
 
-    from triage.llm import get_embeddings
+    from governor.core.llm import get_embeddings
 
     CHROMA_DIR.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(CHROMA_DIR))
@@ -355,7 +357,7 @@ def _dense(collection, chunks: list[Chunk], query: str, corpus: str, k: int) -> 
     if not matched:
         return []
     n_results = min(k, len(matched))
-    from triage.llm import get_embeddings
+    from governor.core.llm import get_embeddings
 
     vector = get_embeddings().embed_query(query)
     result = collection.query(

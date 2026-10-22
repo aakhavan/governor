@@ -6,9 +6,9 @@ from collections import defaultdict
 
 import pytest
 
-from triage.config import PROJECT_DIR
-from triage.harvest import as_graph, load_tables
-from triage.lineage import (
+from governor.core import paths
+from governor.core.harvest import as_graph, load_tables
+from governor.core.lineage import (
     descendants,
     downstream,
     failing_nodes,
@@ -33,7 +33,7 @@ GRAPH = {
 
 ORDER = ["source", "stg", "int_model", "mart", "exposure", "side"]
 
-GREEN = PROJECT_DIR / "artifacts" / "green"
+GREEN = paths.GREEN
 PAYMENTS = "source.billing_mart.payments.payments"
 INT_PAYMENTS = "model.billing_mart.int_payments_with_accounts"
 FCT_REVENUE = "model.billing_mart.fct_revenue_daily"
@@ -205,6 +205,7 @@ def test_green_manifest_descendants_path_and_root_failures():
         "model.billing_mart.int_invoices_with_payments",
         "model.billing_mart.int_payments_with_accounts",
         "model.billing_mart.dim_accounts",
+        "model.billing_mart.fct_invoices",
         "model.billing_mart.fct_revenue_daily",
         "exposure.billing_mart.collections_report",
         "exposure.billing_mart.finance_dashboard",

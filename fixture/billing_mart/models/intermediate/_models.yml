@@ -40,6 +40,8 @@ models:
         description: Sum of payment amounts. Zero when the invoice is unpaid.
         data_tests:
           - not_null
+      - name: last_paid_at
+        description: When the latest payment against this invoice was taken. Null when none have arrived.
 
   - name: int_payments_with_accounts
     description: One row per payment, with the account billed on its invoice. This is the input to daily cash revenue.

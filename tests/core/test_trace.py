@@ -2,8 +2,8 @@
 
 import json
 
-import triage.trace as trace_module
-from triage.trace import current_trace, reset_trace, trace
+import governor.core.trace as trace_module
+from governor.core.trace import current_trace, reset_trace, trace
 
 
 def test_user_text_is_summarised_on_disk_but_kept_in_memory(tmp_path, monkeypatch):

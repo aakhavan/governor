@@ -1,6 +1,6 @@
 """One-request trace for the UI, plus an append-only log on disk.
 
-The file (logs/trace.jsonl in the sprint folder) keeps events across requests.
+The file (logs/trace.jsonl under paths.ROOT) keeps events across requests.
 The in-memory list is only the request in progress, because a Streamlit
 process stays up and the UI needs this request's events without rereading
 the whole log. Call reset_trace() at the start of each request.
@@ -19,9 +19,9 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
-from triage.config import PROJECT_DIR
+from governor.core import paths
 
-LOG_PATH = PROJECT_DIR / "logs" / "trace.jsonl"
+LOG_PATH = paths.LOGS / "trace.jsonl"
 MAX_LOG_BYTES = 5 * 1024 * 1024
 
 # Fields that carry user text. Kept in memory, summarised on disk.

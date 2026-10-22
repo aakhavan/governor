@@ -1,7 +1,7 @@
 """Model list and the reasoning-parameter rule. No network calls."""
 
-from triage.config import ALLOWED_MODELS
-from triage.llm import _chat_extra_body
+from governor.core.config import ALLOWED_MODELS
+from governor.core.llm import _chat_extra_body
 
 
 def test_allowed_models_are_the_verified_dropdown_ids():

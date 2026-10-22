@@ -24,6 +24,8 @@ from pathlib import Path
 
 from faker import Faker
 
+from governor.core import paths
+
 SEED = 42
 LOCALE = "de_DE"
 
@@ -89,7 +91,7 @@ PAYMENT_COLUMNS = (
     "card_last4",
 )
 
-FIXTURE_DIR = Path(__file__).resolve().parent
+FIXTURE_DIR = paths.FIXTURE
 RAW_DIR = FIXTURE_DIR / "raw"
 
 FILES = {

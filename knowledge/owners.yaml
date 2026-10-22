@@ -18,6 +18,7 @@ model.billing_mart.int_invoices_with_payments: finance-data
 model.billing_mart.int_payments_with_accounts: payments-platform
 model.billing_mart.int_subscription_periods: finance-data
 model.billing_mart.dim_accounts: sales-ops
+model.billing_mart.fct_invoices: finance-data
 model.billing_mart.fct_revenue_daily: finance-data
 model.billing_mart.mrr_monthly: finance-data
 

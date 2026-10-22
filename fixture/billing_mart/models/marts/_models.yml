@@ -31,6 +31,38 @@ models:
       - name: open_balance_eur
         description: Lifetime billed minus lifetime paid. Zero when the account is settled or has no invoices.
 
+  - name: fct_invoices
+    description: One row per invoice, with the amount paid against it and how long it has been outstanding at the build's as_of.
+    config:
+      meta:
+        owner: finance-data
+    columns:
+      - name: invoice_id
+        description: Primary key. One row per invoice.
+        data_tests:
+          - unique
+          - not_null
+      - name: account_id
+        description: Account billed.
+      - name: subscription_id
+        description: Subscription this invoice bills.
+      - name: country
+        description: Country the billed account is billed from.
+      - name: issued_at
+        description: When the invoice was issued.
+      - name: amount_eur
+        description: Invoice amount in euros.
+      - name: status
+        description: open, paid, or void.
+      - name: paid_amount_eur
+        description: Sum of payments against the invoice, in euros. Zero when nothing has been paid.
+      - name: last_paid_at
+        description: When the latest payment against the invoice was taken. Null when nothing has been paid.
+      - name: is_fully_paid
+        description: True when the payments cover the invoice amount.
+      - name: days_outstanding
+        description: Calendar days from issued_at to the build's as_of. Zero when the invoice is fully paid.
+
   - name: fct_revenue_daily
     description: Cash revenue by account and day, summed from int_payments_with_accounts.
     config:

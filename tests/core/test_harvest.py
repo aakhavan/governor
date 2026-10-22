@@ -11,13 +11,13 @@ import duckdb
 import pytest
 import yaml
 
-from triage.config import PROJECT_DIR
-from triage.harvest import TABLE_NAMES, HarvestError, harvest, load_tables, main
+from governor.core import paths
+from governor.core.harvest import TABLE_NAMES, HarvestError, harvest, load_tables, main
 
-GREEN = PROJECT_DIR / "artifacts" / "green"
+GREEN = paths.GREEN
 ARTIFACTS = ("manifest.json", "catalog.json", "run_results.json", "sources.json")
 
-# 5 sources, 10 model-to-model hops, 3 model-to-exposure hops.
+# 5 sources, 12 model-to-model hops, 3 model-to-exposure hops.
 EXPECTED_EDGES = {
     ("source.billing_mart.billing.invoices", "model.billing_mart.stg_billing__invoices"),
     ("source.billing_mart.billing.plans", "model.billing_mart.stg_billing__plans"),
@@ -32,6 +32,8 @@ EXPECTED_EDGES = {
     ("model.billing_mart.stg_payments__payments", "model.billing_mart.int_invoices_with_payments"),
     ("model.billing_mart.stg_payments__payments", "model.billing_mart.int_payments_with_accounts"),
     ("model.billing_mart.int_invoices_with_payments", "model.billing_mart.dim_accounts"),
+    ("model.billing_mart.int_invoices_with_payments", "model.billing_mart.fct_invoices"),
+    ("model.billing_mart.stg_crm__accounts", "model.billing_mart.fct_invoices"),
     ("model.billing_mart.int_payments_with_accounts", "model.billing_mart.fct_revenue_daily"),
     ("model.billing_mart.int_subscription_periods", "model.billing_mart.mrr_monthly"),
     ("model.billing_mart.dim_accounts", "exposure.billing_mart.collections_report"),
@@ -48,15 +50,15 @@ def _copy_green(destination: Path) -> None:
 def test_green_graph_is_sources_models_and_exposures():
     tables = load_tables(GREEN)
     nodes = tables["nodes"]
-    assert len(nodes) == 18
+    assert len(nodes) == 19
     assert Counter(row["resource_type"] for row in nodes) == {
         "source": 5,
-        "model": 11,
+        "model": 12,
         "exposure": 2,
     }
 
     owners = yaml.safe_load(
-        (PROJECT_DIR / "knowledge" / "owners.yaml").read_text(encoding="utf-8")
+        (paths.KNOWLEDGE / "owners.yaml").read_text(encoding="utf-8")
     )
     manifest = json.loads((GREEN / "manifest.json").read_text(encoding="utf-8"))
     for row in nodes:
@@ -96,11 +98,11 @@ def test_green_graph_is_sources_models_and_exposures():
 def test_green_tests_store_every_model_they_depend_on():
     tables = load_tables(GREEN)
     tests = tables["tests"]
-    # 73 tests. Five relationships tests and two singular tests each depend
+    # 75 tests. Five relationships tests and two singular tests each depend
     # on two models, so those seven add an extra row. The other singular
     # tests, including assert_plan_prices_in_range, depend on one model.
-    assert len({row["unique_id"] for row in tests}) == 73
-    assert len(tests) == 80
+    assert len({row["unique_id"] for row in tests}) == 75
+    assert len(tests) == 82
     assert {row["severity"] for row in tests} == {"error", "warn"}
     assert {row["test_type"] for row in tests if row["severity"] == "warn"} == {
         "not_null",
@@ -150,7 +152,7 @@ def test_green_tests_store_every_model_they_depend_on():
 def test_green_columns_take_types_from_the_catalog_and_pii_from_policy():
     tables = load_tables(GREEN)
     columns = tables["columns"]
-    assert len(columns) == 97
+    assert len(columns) == 109
     assert all(row["data_type"] for row in columns)
 
     catalog = json.loads((GREEN / "catalog.json").read_text(encoding="utf-8"))
@@ -163,7 +165,7 @@ def test_green_columns_take_types_from_the_catalog_and_pii_from_policy():
         assert row["data_type"] == catalog_types[(row["unique_id"], row["column"])]
 
     policy = yaml.safe_load(
-        (PROJECT_DIR / "knowledge" / "policy.yaml").read_text(encoding="utf-8")
+        (paths.KNOWLEDGE / "policy.yaml").read_text(encoding="utf-8")
     )
     tagged = {
         (row["unique_id"], row["column"]): row["pii_tag"]
@@ -185,7 +187,7 @@ def test_green_results_and_freshness_copy_the_artifact_text():
     assert [row["unique_id"] for row in tables["results"]] == [
         result["unique_id"] for result in run_results["results"]
     ]
-    assert len(tables["results"]) == 86
+    assert len(tables["results"]) == 87
     for row, result in zip(tables["results"], run_results["results"], strict=True):
         assert row["status"] == result["status"]
         assert row["message"] == result["message"]
@@ -204,9 +206,8 @@ def test_green_results_and_freshness_copy_the_artifact_text():
     assert {row["status"] for row in tables["results"] if row["resource_type"] == "test"} == {
         "pass"
     }
-    assert {
-        row["status"] for row in tables["results"] if row["resource_type"] == "exposure"
-    } == {"no-op"}
+    # The green build excludes exposures, so none has a result row.
+    assert not [row for row in tables["results"] if row["resource_type"] == "exposure"]
 
     sources = json.loads((GREEN / "sources.json").read_text(encoding="utf-8"))
     by_id = {row["unique_id"]: row for row in tables["freshness"]}
@@ -227,12 +228,12 @@ def test_harvest_writes_meta_duckdb_and_replaces_it(tmp_path: Path):
     _copy_green(tmp_path)
     counts = harvest(tmp_path)
     assert counts == {
-        "nodes": 18,
-        "columns": 97,
-        "edges": 18,
-        "tests": 80,
+        "nodes": 19,
+        "columns": 109,
+        "edges": 20,
+        "tests": 82,
         "exposures": 2,
-        "results": 86,
+        "results": 87,
         "freshness": 2,
     }
     database = tmp_path / "meta.duckdb"

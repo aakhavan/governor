@@ -21,15 +21,16 @@ import duckdb
 
 import generate_raw
 import load_raw
+from governor.core import paths
 
-SPRINT_DIR = Path(__file__).resolve().parents[1]
-DBT_DIR = SPRINT_DIR / "fixture" / "billing_mart"
+DBT_DIR = paths.DBT_PROJECT
 TARGET_DIR = DBT_DIR / "target"
-GREEN_DIR = SPRINT_DIR / "artifacts" / "green"
+GREEN_DIR = paths.GREEN
 WAREHOUSE = DBT_DIR / "warehouse.duckdb"
+DBT_LOG = paths.LOGS / "build_green_dbt.log"
 
 RAW_TABLES = ("plans", "accounts", "subscriptions", "invoices", "payments")
-MARTS = ("dim_accounts", "fct_revenue_daily", "mrr_monthly")
+MARTS = ("dim_accounts", "fct_invoices", "fct_revenue_daily", "mrr_monthly")
 ARTIFACTS = ("manifest.json", "run_results.json", "sources.json", "catalog.json")
 
 EXPECTED_RAW = {
@@ -50,7 +51,7 @@ def _dbt_executable() -> Path:
     raise FileNotFoundError(f"dbt is not installed next to {sys.executable}")
 
 
-def _run_dbt(args: list[str], warehouse: Path) -> None:
+def _run_dbt(args: list[str], warehouse: Path, as_of_var: str) -> None:
     command = [
         str(_dbt_executable()),
         *args,
@@ -59,16 +60,28 @@ def _run_dbt(args: list[str], warehouse: Path) -> None:
         "--profiles-dir",
         str(DBT_DIR),
         "--no-use-colors",
+        # fct_invoices.days_outstanding is measured against this instant.
+        "--vars",
+        json.dumps({"as_of": as_of_var}),
     ]
-    print("\n$ dbt " + " ".join(args), flush=True)
+    print("$ dbt " + " ".join(args), flush=True)
     env = os.environ.copy()
     env["DBT_SEND_ANONYMOUS_USAGE_STATS"] = "false"
     env["DO_NOT_TRACK"] = "1"
     # Absolute path so the file load_raw just wrote is the one dbt opens,
     # whatever the process current directory is.
     env["BILLING_MART_DUCKDB"] = str(warehouse.resolve())
-    completed = subprocess.run(command, cwd=DBT_DIR, env=env)
+    # dbt output goes to a log file; only a failure prints its tail.
+    DBT_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with DBT_LOG.open("a", encoding="utf-8") as log:
+        log.write(f"\n$ dbt {' '.join(args)}\n")
+        log.flush()
+        completed = subprocess.run(
+            command, cwd=DBT_DIR, env=env, stdout=log, stderr=subprocess.STDOUT
+        )
     if completed.returncode != 0:
+        lines = DBT_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+        print("\n".join(lines[-20:]), file=sys.stderr)
         raise SystemExit(completed.returncode)
 
 
@@ -163,7 +176,10 @@ def main() -> None:
     # Same instant is written into _loaded_at (UTC, no offset) and as_of.txt.
     loaded_at = datetime.now(timezone.utc).replace(microsecond=0)
     as_of_text = loaded_at.isoformat(timespec="seconds")
+    # dbt gets the same instant as a naive UTC timestamp, like _loaded_at.
+    as_of_var = loaded_at.replace(tzinfo=None).isoformat(sep=" ", timespec="seconds")
     print(f"as_of {as_of_text}")
+    DBT_LOG.unlink(missing_ok=True)
 
     raw_dir = generate_raw.write_csvs()
     _print_csv_hashes(raw_dir)
@@ -175,20 +191,21 @@ def main() -> None:
             raise SystemExit(f"raw.{name} has {count} rows, expected {expected}")
         print(f"loaded raw.{name} {count}")
 
-    _run_dbt(["build"], WAREHOUSE)
+    # Exposures execute nothing and would land in run_results as no-op.
+    # They stay in the manifest, so harvest still sees them.
+    _run_dbt(["build", "--exclude-resource-type", "exposure"], WAREHOUSE, as_of_var)
     build_results = TARGET_DIR / "run_results.json"
     held_results = TARGET_DIR / "run_results_build.json"
     shutil.copy2(build_results, held_results)
-    _run_dbt(["source", "freshness"], WAREHOUSE)
-    _run_dbt(["docs", "generate"], WAREHOUSE)
+    _run_dbt(["source", "freshness"], WAREHOUSE, as_of_var)
+    _run_dbt(["docs", "generate"], WAREHOUSE, as_of_var)
     # Freshness writes sources.json. Keep the build's run_results, which has
     # the model and test rows, in case a later command replaced that file.
     shutil.copy2(held_results, build_results)
     held_results.unlink()
 
-    # Exposures are part of `dbt build` and finish as no-op. That is success:
-    # nothing is executed for them. Tests and models must still pass.
-    _require_statuses(build_results, {"success", "pass", "no-op"})
+    # Exposures are excluded from the build above. Tests and models must pass.
+    _require_statuses(build_results, {"success", "pass"})
     _print_named_result(build_results, "assert_plan_prices_in_range")
     _require_statuses(TARGET_DIR / "sources.json", {"pass"}, expected_count=2)
     _print_freshness(TARGET_DIR / "sources.json")
