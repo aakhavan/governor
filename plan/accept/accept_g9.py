@@ -1,86 +1,82 @@
-"""G9 acceptance: four reports (baseline/agent x tune/holdout), holdout run once, prompts frozen before the
-holdout, no agent PII leak, eval report and README consistent with the report JSON, full suite green."""
-import json
+"""G9 acceptance (stretch step): MCP stdio server with exactly 5 read-only tools, role fixed by env, via the official SDK client."""
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import ROOT, check, finish, frozen_ok, golden_leaks, guarded, pytest_check, sha256  # noqa: E402
+from _common import ROOT, check, finish, guarded, last_json, pytest_check, run, tail  # noqa: E402
 
-R = ROOT / "evaluation/reports"
-HEADINGS = ["## Problem", "## How to run", "## Architecture", "## Evaluation", "## Governance and policy",
-            "## Decision trace", "## MCP", "## Limitations", "## Provenance"]
-reports = {}
+TOOLS = ["describe_model", "get_lineage", "run_governed_query", "search_catalog", "validate_sql"]
+
+CLIENT = r'''
+import asyncio, json, sys
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+def payload(res):
+    sc = getattr(res, "structuredContent", None)
+    if isinstance(sc, dict):
+        return sc.get("result", sc) if set(sc) == {"result"} else sc
+    for c in getattr(res, "content", []) or []:
+        t = getattr(c, "text", None)
+        if t:
+            try:
+                return json.loads(t)
+            except json.JSONDecodeError:
+                return {"text": t}
+    return {}
+
+async def main():
+    params = StdioServerParameters(command=sys.executable, args=["-m", "governor.ask.mcp_server"])
+    async with stdio_client(params) as (r, w):
+        async with ClientSession(r, w) as s:
+            await s.initialize()
+            tools = sorted(t.name for t in (await s.list_tools()).tools)
+            out = {"tools": tools}
+            out["search"] = payload(await s.call_tool("search_catalog", {"query": "monthly recurring revenue", "k": 3}))
+            out["describe"] = payload(await s.call_tool("describe_model", {"name": "dim_accounts"}))
+            out["describe_bad"] = payload(await s.call_tool("describe_model", {"name": "no_such_model"}))
+            out["lineage"] = payload(await s.call_tool("get_lineage", {"name": "mrr_monthly", "direction": "upstream", "depth": 9}))
+            out["validate_bad"] = payload(await s.call_tool("validate_sql", {"sql": "DROP TABLE dim_accounts"}))
+            out["query_ok"] = payload(await s.call_tool("run_governed_query", {"sql": "SELECT country, count(*) AS n FROM dim_accounts GROUP BY country"}))
+            out["query_pii"] = payload(await s.call_tool("run_governed_query", {"sql": "SELECT contact_email FROM dim_accounts"}))
+            schemas = {t.name: sorted((t.inputSchema or {}).get("properties", {})) for t in (await s.list_tools()).tools}
+            out["role_args"] = [n for n, props in schemas.items() if "role" in props]
+            out["query_write"] = payload(await s.call_tool("run_governed_query", {"sql": "DELETE FROM fct_invoices"}))
+    print(json.dumps(out, default=str))
+
+asyncio.run(main())
+'''
 
 
-def load_reports():
-    split = json.loads((ROOT / "evaluation/golden/split.json").read_text(encoding="utf-8"))
-    sha = (ROOT / "evaluation/golden/FROZEN.sha256").read_text(encoding="utf-8")
-    for system in ("baseline", "agent"):
-        for sp in ("tune", "holdout"):
-            f = R / f"{system}-{sp}.json"
-            if not check(f"report {f.name} exists", f.is_file(), ""):
-                continue
-            rep = json.loads(f.read_text(encoding="utf-8"))
-            reports[(system, sp)] = rep
-            ids = sorted(i["id"] for i in rep["items"])
-            check(f"{f.name} covers exactly the {sp} split", ids == sorted(split[sp]), f"{len(ids)} items")
-            gs = str(rep.get("golden_sha") or "")
-            check(f"{f.name} used the frozen golden set", len(gs) == 64 and gs in sha, gs[:20])
-
-
-def holdout_once():
-    log = ROOT / "evaluation/holdout_runs.log"
-    lines = [l.split("\t") for l in log.read_text(encoding="utf-8").splitlines() if l.strip()] if log.is_file() else []
-    systems = [l[1] for l in lines if len(l) >= 2]
-    check("holdout run exactly once per system", sorted(systems) == ["agent", "baseline"], f"log: {systems}")
-    pf = R / "PROMPTS_FROZEN.sha256"
-    if check("PROMPTS_FROZEN.sha256 exists", pf.is_file(), ""):
-        want = {}
-        for line in pf.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                h, n = line.split(maxsplit=1)
-                want[Path(n.strip().lstrip("*")).name] = h
-        d = ROOT / "src/governor/ask/prompts"
-        now = {p.name: sha256(p) for p in d.glob("*.md")}
-        check("prompts unchanged since the freeze", want == now, f"frozen {sorted(want)} vs now {sorted(now)}")
-        if lines:
-            check("prompts frozen before the holdout runs", pf.stat().st_mtime <= max(
-                (R / f"{s}-holdout.json").stat().st_mtime for s in ("agent", "baseline") if (R / f"{s}-holdout.json").is_file()), "")
-
-
-def quality_and_cost():
-    a = reports.get(("agent", "holdout"))
-    if a:
-        check("no PII leak in agent runs", a["summary"]["pii_leak"] is False
-              and reports.get(("agent", "tune"), {}).get("summary", {}).get("pii_leak") is False, "")
-    total = sum((rep["summary"].get("cost_usd") or 0) for rep in reports.values())
-    check("total eval cost within the $3 budget", total <= 3.0, f"${total:.3f}")
+def mcp_client():
+    r = run([sys.executable, "-c", CLIENT], timeout=180)
+    d = last_json(r.stdout)
+    if not check("MCP server answers the SDK stdio client", d is not None, tail(r)):
+        return
+    check("exactly the 5 specified tools", d["tools"] == TOOLS, d["tools"])
+    tabs = {t for h in d["search"].get("hits", []) for t in h.get("tables", [])}
+    check("search_catalog finds mrr_monthly", "mrr_monthly" in tabs, str(d["search"])[:200])
+    cols = {c.get("name"): c.get("pii_tag") for c in d["describe"].get("columns", [])}
+    check("describe_model shows PII tags", bool(cols.get("contact_email")) and bool(cols.get("contact_name")), str(cols)[:200])
+    check("describe_model on an unknown name returns an error, not a crash", "error" in d["describe_bad"], str(d["describe_bad"])[:120])
+    check("get_lineage returns upstream nodes (depth capped)", bool(d["lineage"].get("nodes")), str(d["lineage"])[:160])
+    check("validate_sql rejects DROP", d["validate_bad"].get("ok") is False, str(d["validate_bad"])[:160])
+    q = d["query_ok"]
+    check("run_governed_query returns rows for a valid query", q.get("ok") is True and q.get("row_count", 0) > 0, str(q)[:160])
+    check("run_governed_query refuses analyst PII by default", d["query_pii"].get("ok") is False
+          and "PII_FORBIDDEN" in d["query_pii"].get("codes", []), str(d["query_pii"])[:160])
+    check("run_governed_query cannot write", d["query_write"].get("ok") is False, str(d["query_write"])[:160])
+    check("no tool takes a role argument (role is fixed by GOVERNOR_MCP_ROLE)", not d["role_args"], str(d["role_args"]))
 
 
 def docs():
-    rep = ROOT / "evaluation/eval_report.md"
-    readme = ROOT / "README.md"
-    check("evaluation/eval_report.md exists", rep.is_file(), "")
-    text = readme.read_text(encoding="utf-8") if readme.is_file() else ""
-    miss = [h for h in HEADINGS if h not in text]
-    check("README has the required sections", not miss, f"missing: {miss}")
-    check("README has a Mermaid diagram and points to PROVENANCE.md", "```mermaid" in text and "PROVENANCE.md" in text, "")
-    a, b = reports.get(("agent", "holdout")), reports.get(("baseline", "holdout"))
-    if a and b:
-        nums = [f"{x['summary']['execution_accuracy']:.3f}" for x in (a, b) if x["summary"]["execution_accuracy"] is not None]
-        miss = [n for n in nums if n not in text]
-        check("README shows the holdout execution accuracy exactly as in the reports", nums and not miss, f"missing {miss}")
-    check("demo script exists", (ROOT / "docs/demo-script.md").is_file(), "")
-    bad = golden_leaks([f for f in (ROOT / "src/governor/ask/prompts").glob("*.md")])
-    check("no golden text in prompts", not bad, ", ".join(bad))
+    p = ROOT / "docs/mcp.md"
+    text = p.read_text(encoding="utf-8") if p.is_file() else ""
+    check("docs/mcp.md has the run command and all tool names", "governor.ask.mcp_server" in text
+          and all(t in text for t in TOOLS), "")
 
 
-guarded("reports", load_reports)
-guarded("holdout", holdout_once)
-guarded("quality", quality_and_cost)
+guarded("mcp", mcp_client)
 guarded("docs", docs)
-ok, why = frozen_ok()
-check("golden set still frozen", ok, why)
-pytest_check("tests")
+pytest_check("tests/mcp")
 finish("G9")

@@ -1,79 +1,45 @@
-"""G8 acceptance: MCP stdio server with exactly 5 read-only tools, called through the official SDK client."""
+"""G8 acceptance: Streamlit thin client over the API: pages exist, no DB/SQL/policy/ask imports, AppTest suite."""
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import ROOT, check, finish, guarded, last_json, pytest_check, run, tail  # noqa: E402
+from _common import ROOT, check, finish, golden_leaks, grep, guarded, py_json, pytest_check  # noqa: E402
 
-TOOLS = ["describe_model", "get_lineage", "run_governed_query", "search_catalog", "validate_sql"]
-
-CLIENT = r'''
-import asyncio, json, sys
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-
-def payload(res):
-    sc = getattr(res, "structuredContent", None)
-    if isinstance(sc, dict):
-        return sc.get("result", sc) if set(sc) == {"result"} else sc
-    for c in getattr(res, "content", []) or []:
-        t = getattr(c, "text", None)
-        if t:
-            try:
-                return json.loads(t)
-            except json.JSONDecodeError:
-                return {"text": t}
-    return {}
-
-async def main():
-    params = StdioServerParameters(command=sys.executable, args=["-m", "governor.ask.mcp_server"])
-    async with stdio_client(params) as (r, w):
-        async with ClientSession(r, w) as s:
-            await s.initialize()
-            tools = sorted(t.name for t in (await s.list_tools()).tools)
-            out = {"tools": tools}
-            out["search"] = payload(await s.call_tool("search_catalog", {"query": "monthly recurring revenue", "k": 3}))
-            out["describe"] = payload(await s.call_tool("describe_model", {"name": "dim_accounts"}))
-            out["describe_bad"] = payload(await s.call_tool("describe_model", {"name": "no_such_model"}))
-            out["lineage"] = payload(await s.call_tool("get_lineage", {"name": "mrr_monthly", "direction": "upstream", "depth": 9}))
-            out["validate_bad"] = payload(await s.call_tool("validate_sql", {"sql": "DROP TABLE dim_accounts"}))
-            out["query_ok"] = payload(await s.call_tool("run_governed_query", {"sql": "SELECT country, count(*) AS n FROM dim_accounts GROUP BY country"}))
-            out["query_pii"] = payload(await s.call_tool("run_governed_query", {"sql": "SELECT contact_email FROM dim_accounts"}))
-            out["query_write"] = payload(await s.call_tool("run_governed_query", {"sql": "DELETE FROM fct_invoices"}))
-    print(json.dumps(out, default=str))
-
-asyncio.run(main())
-'''
+PAGES = ["apps/streamlit/client.py", "apps/streamlit/app.py", "apps/streamlit/pages/1_Ask.py", "apps/streamlit/pages/2_Trace_explorer.py",
+         "apps/streamlit/pages/3_Developer.py"]
+TESTS = ["test_ask_page_answers_with_fake_llm", "test_ask_page_clarify_flow", "test_trace_explorer_lists_rows",
+         "test_developer_page_renders", "test_no_token_shows_login_hint"]
 
 
-def mcp_client():
-    r = run([sys.executable, "-c", CLIENT], timeout=180)
-    d = last_json(r.stdout)
-    if not check("MCP server answers the SDK stdio client", d is not None, tail(r)):
-        return
-    check("exactly the 5 specified tools", d["tools"] == TOOLS, d["tools"])
-    tabs = {t for h in d["search"].get("hits", []) for t in h.get("tables", [])}
-    check("search_catalog finds mrr_monthly", "mrr_monthly" in tabs, str(d["search"])[:200])
-    cols = {c.get("name"): c.get("pii_tag") for c in d["describe"].get("columns", [])}
-    check("describe_model shows PII tags", bool(cols.get("contact_email")) and bool(cols.get("contact_name")), str(cols)[:200])
-    check("describe_model on an unknown name returns an error, not a crash", "error" in d["describe_bad"], str(d["describe_bad"])[:120])
-    check("get_lineage returns upstream nodes (depth capped)", bool(d["lineage"].get("nodes")), str(d["lineage"])[:160])
-    check("validate_sql rejects DROP", d["validate_bad"].get("ok") is False, str(d["validate_bad"])[:160])
-    q = d["query_ok"]
-    check("run_governed_query returns rows for a valid query", q.get("ok") is True and q.get("row_count", 0) > 0, str(q)[:160])
-    check("run_governed_query refuses analyst PII by default", d["query_pii"].get("ok") is False
-          and "PII_FORBIDDEN" in d["query_pii"].get("codes", []), str(d["query_pii"])[:160])
-    check("run_governed_query cannot write", d["query_write"].get("ok") is False, str(d["query_write"])[:160])
+def files():
+    miss = [p for p in PAGES if not (ROOT / p).is_file()]
+    check("app and the three pages exist", not miss, f"missing: {miss}")
+    hits = grep(["apps/streamlit"], r"import duckdb|duckdb\.connect|sqlglot|governor\.ask|governor\.core|governor\.eval")
+    check("UI has no DB, SQL, policy or governor.ask imports", not hits, ", ".join(hits[:5]))
+    api = [h for h in grep(["apps/streamlit"], r"governor\.api") if not h.startswith("apps/streamlit/client.py") and not h.startswith("apps\\streamlit\\client.py")]
+    check("only client.py touches governor.api (asgi mode)", not api, ", ".join(api[:5]))
+    picker = grep(["apps/streamlit"], r"selectbox\(.*role|radio\(.*role")
+    check("no role picker in the UI (role comes from the token)", not picker, ", ".join(picker[:3]))
+    bad = golden_leaks([f for f in (ROOT / "apps").rglob("*.py")] + [f for f in (ROOT / "tests/ui").rglob("*.py")])
+    check("no golden questions in the UI or its tests", not bad, ", ".join(bad[:5]))
 
 
-def docs():
-    p = ROOT / "docs/mcp.md"
-    text = p.read_text(encoding="utf-8") if p.is_file() else ""
-    check("docs/mcp.md has the run command and all tool names", "governor.ask.mcp_server" in text
-          and all(t in text for t in TOOLS), "")
+def client_api():
+    data, err = py_json("import json, sys; sys.path.insert(0, 'apps/streamlit'); import client\n"
+                        "c = client.ApiClient\n"
+                        "print(json.dumps({n: callable(getattr(c, n, None)) for n in ['ask','resume','list_traces','get_trace','health']}))")
+    if check("apps/streamlit/client.py importable", data is not None, err):
+        miss = [k for k, v in data.items() if not v]
+        check("ApiClient exposes ask/resume/list_traces/get_trace/health", not miss, f"missing: {miss}")
 
 
-guarded("mcp", mcp_client)
-guarded("docs", docs)
-pytest_check("tests/mcp")
+def compose_ui():
+    t = (ROOT / "docker-compose.yml").read_text(encoding="utf-8") if (ROOT / "docker-compose.yml").is_file() else ""
+    check("compose ui service points at the api service", "GOVERNOR_API_URL" in t and "api:8000" in t, "")
+
+guarded("files", files)
+guarded("client", client_api)
+guarded("compose", compose_ui)
+pytest_check("tests/ui", required=TESTS)
+pytest_check("tests/api")
 finish("G8")

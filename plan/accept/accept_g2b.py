@@ -1,4 +1,4 @@
-"""G2 acceptance: metrics, golden set (40), gold SQL executes on green, checker, frozen split."""
+"""G2b acceptance: golden set (40), gold SQL executes on green, split, frozen hashes, review table."""
 import json
 import re
 import sys
@@ -130,8 +130,7 @@ def checker():
         return
     wrong = [i for i, (c, g) in enumerate(zip(cases, got)) if c[4] != g]
     check("checker.compare decides the 10 locked cases", not wrong and len(got) == len(cases), f"wrong cases: {wrong}")
-    data, err = py_json("import json; from governor.eval.golden import verify_frozen; print(json.dumps({'ok': bool(verify_frozen())}))")
-    check("governor.eval.golden.verify_frozen() is true", bool(data and data["ok"]), err)
+
 
 
 def no_prompts_yet():
@@ -140,12 +139,28 @@ def no_prompts_yet():
     check("no agent prompts exist yet (golden set frozen first)", not found, f"found: {found}")
 
 
+
+def frozen_api():
+    data, err = py_json("import json; from governor.eval.golden import verify_frozen, load_golden, load_split\n"
+                        "g = load_golden(); s = load_split(); print(json.dumps({'ok': bool(verify_frozen())}))")
+    check("governor.eval.golden loads the files and verify_frozen() is true", bool(data and data["ok"]), err)
+
+
+def review_table():
+    p = G / "REVIEW.md"
+    text = p.read_text(encoding="utf-8") if p.is_file() else ""
+    missing = [q["id"] for q in state.get("qs", []) if q["id"] not in text]
+    check("evaluation/golden/REVIEW.md lists every question for the gate review", p.is_file() and not missing,
+          f"missing: {missing[:5]}" if missing else "")
+
+
 guarded("metrics", metrics)
 guarded("questions", questions)
 if "sqls" in state:
     guarded("gold sql", gold_sql_runs)
     guarded("split", split)
-guarded("checker", checker)
+    guarded("review table", review_table)
+guarded("frozen api", frozen_api)
 guarded("no prompts", no_prompts_yet)
 pytest_check("tests/eval")
-finish("G2")
+finish("G2b")

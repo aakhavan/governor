@@ -11,7 +11,7 @@ This repo is **governor** (core + ask modules), built step by step by the code f
 - Python 3.12 + uv. LangChain v1 / LangGraph v1 only: no `AgentExecutor`, no `langchain_classic`, no `create_react_agent`.
 - Prompts live in `src/governor/ask/prompts/*.md`, never in code strings. Pydantic for every model output and tool argument.
 - Time: resolve relative dates against `artifacts/green/as_of.txt`. Never `now()`, `current_date` or `datetime.now()` in data logic.
-- Tests run offline: fake or scripted LLMs, no network. Only the G9 evaluation calls real models.
+- Tests run offline: fake or scripted LLMs, no network. Only the G10a/G10b evaluation calls real models.
 - DuckDB: open the warehouse `read_only=True`; close every connection (Windows file locks).
 
 ## Golden set (from G3 on)
