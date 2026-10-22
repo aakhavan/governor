@@ -1,0 +1,22 @@
+# Access policy for governor-ask. Human-owned (Amir). Code reads it; prompts never restate it.
+# PII tags come from knowledge/policy.yaml via the metadata store (meta.duckdb columns.pii_tag).
+version: 1
+
+allowlist:              # analysts and admins query marts only
+  models: [dim_accounts, fct_invoices, fct_revenue_daily, mrr_monthly]
+
+limits:
+  default_limit: 100    # injected when a query has no LIMIT
+  row_cap: 1000         # LIMIT above this is lowered to it
+  timeout_s: 10         # per query, enforced by the executor
+
+mask_value: "***"
+
+roles:
+  analyst:
+    pii: aggregate_only   # PII columns only inside COUNT(...) / COUNT(DISTINCT ...); never selected, filtered, grouped or joined on
+    grants: []
+  finance_admin:
+    pii: mask             # PII values in the output are replaced by mask_value unless granted below
+    grants:
+      - dim_accounts.contact_email

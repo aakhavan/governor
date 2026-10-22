@@ -1,0 +1,16 @@
+.venv/
+.factory/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.*
+artifacts/
+*.duckdb
+*.duckdb.wal
+*.sqlite
+fixture/billing_mart/target/
+fixture/billing_mart/logs/
+fixture/billing_mart/dbt_packages/
+fixture/billing_mart/.user.yml
+logs/

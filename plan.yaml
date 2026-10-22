@@ -1,0 +1,84 @@
+# governor-ask on the shared foundation. Spec: PLAN.md (§7 steps). Locked with `factory lock`.
+project: governor
+notes: NOTES.md
+agents: AGENTS.md
+defaults:
+  max_fix_loops: 2
+  timeout_min: 60
+  run_budget_usd: 40          # notional on subscriptions; a safety cap per `factory run`
+  step_budget_usd: 12
+  review_budget_usd: {design: 2.0, mechanical: 0.75}
+# no `roles`: the design / mechanical lists come from %USERPROFILE%\.factory\agents.yaml
+steps:
+  - id: G1
+    title: Foundation from the Sprint 4 import (core package, green build, fct_invoices, metadata store)
+    tier: mechanical
+    prompt: plan/prompts/G1.md
+    accept: plan/accept/accept_g1.py
+    allowed_paths: [src/governor/__init__.py, src/governor/core/, fixture/, knowledge/owners.yaml, knowledge/policy.yaml, knowledge/access.yaml, tests/core/, tests/conftest.py, pyproject.toml, uv.lock, PROVENANCE.md, .gitignore]
+    human_gate: false
+    review_focus: "imported code keeps provenance and changes are listed; no Sprint 4 or absolute paths; fct_invoices pins time to as_of, never now(); access.yaml only renamed to real columns, policy unchanged; mart PII tags really propagate"
+  - id: G2
+    title: Metric definitions, golden set with gold SQL, result checker, frozen split
+    tier: design
+    prompt: plan/prompts/G2.md
+    accept: plan/accept/accept_g2.py
+    allowed_paths: [knowledge/metrics.yaml, evaluation/golden/, src/governor/eval/, tests/eval/, pyproject.toml, uv.lock]
+    human_gate: true
+    review_focus: "gold SQL answers the question as worded (grain, filters, as_of-relative dates); categories are unambiguous; ambiguous questions really lack a slot; policy expectations follow access.yaml; checker cannot pass a wrong result (rubric Q1, Q6, Q7)"
+  - id: G3
+    title: Evaluation harness, metrics, self-test systems, baseline
+    tier: design
+    prompt: plan/prompts/G3.md
+    accept: plan/accept/accept_g3.py
+    allowed_paths: [src/governor/eval/, src/governor/ask/__init__.py, src/governor/ask/baseline.py, src/governor/ask/prompts/baseline.md, src/governor/ask/llm_testing.py, tests/eval/, tests/ask/, pyproject.toml, uv.lock]
+    human_gate: false
+    review_focus: "a naive system cannot score well (oracle/null/leaky behave as specified); PII leak detection uses column lineage plus value scan; holdout guard works; the baseline really has no retrieval or validator (rubric Q1, Q2)"
+  - id: G4
+    title: Catalog and metric cards, hybrid schema retrieval, recall@k on gold tables
+    tier: mechanical
+    prompt: plan/prompts/G4.md
+    accept: plan/accept/accept_g4.py
+    allowed_paths: [src/governor/ask/catalog.py, src/governor/ask/retrieval.py, src/governor/core/retrieval.py, tests/ask/, pyproject.toml, uv.lock]
+    human_gate: false
+    review_focus: "cards are built from meta.duckdb and metrics.yaml, not hand-written; cards contain no golden questions or gold SQL; recall is computed from gold SQL tables, not from the question text (rubric Q2, Q5)"
+  - id: G5
+    title: SQL validator, role policy, dry-run, read-only executor
+    tier: design
+    prompt: plan/prompts/G5.md
+    accept: plan/accept/accept_g5.py
+    allowed_paths: [src/governor/ask/validator.py, src/governor/ask/policy.py, src/governor/ask/executor.py, tests/ask/, pyproject.toml, uv.lock]
+    human_gate: true
+    review_focus: "every locked case decided for the right reason; PII checks follow column lineage through aliases, CTEs, subqueries and functions; masking cannot be bypassed; the connection is read-only even if the validator is wrong; no policy text duplicated from access.yaml into code"
+  - id: G6
+    title: The graph (clarify interrupt, repair, answer from results, decision traces, CLI)
+    tier: design
+    prompt: plan/prompts/G6.md
+    accept: plan/accept/accept_g6.py
+    allowed_paths: [src/governor/ask/, src/governor/core/trace.py, tests/ask/, pyproject.toml, uv.lock]
+    human_gate: false
+    review_focus: "code owns the edges; numbers in the answer come from result rows; refusals never echo input; trace rows complete; prompts contain no golden questions; the clarify interrupt resumes in a new process (rubric Q2, Q4, Q8)"
+  - id: G7
+    title: "Streamlit pages: Ask, Trace explorer, Developer"
+    tier: mechanical
+    prompt: plan/prompts/G7.md
+    accept: plan/accept/accept_g7.py
+    allowed_paths: [apps/streamlit/, src/governor/ask/service.py, tests/ui/, pyproject.toml, uv.lock]
+    human_gate: false
+    review_focus: "the UI calls governor.ask.service only (no SQL or policy logic in pages); role picker really changes the policy; graph compiled once per session"
+  - id: G8
+    title: MCP server with 5 read-only tools
+    tier: mechanical
+    prompt: plan/prompts/G8.md
+    accept: plan/accept/accept_g8.py
+    allowed_paths: [src/governor/ask/mcp_server.py, src/governor/ask/service.py, tests/mcp/, docs/mcp.md, pyproject.toml, uv.lock]
+    human_gate: false
+    review_focus: "tools reuse the validator and executor (no second policy path); run_governed_query cannot write; role defaults to analyst; tool descriptions do not leak policy internals"
+  - id: G9
+    title: Evaluation (tune, freeze, holdout once), eval report, README
+    tier: design
+    prompt: plan/prompts/G9.md
+    accept: plan/accept/accept_g9.py
+    allowed_paths: [src/governor/ask/, src/governor/eval/, evaluation/reports/, evaluation/eval_report.md, evaluation/holdout_runs.log, README.md, docs/, tests/]
+    human_gate: true
+    review_focus: "holdout run once after prompts froze; numbers in README equal the report; limits stated honestly (small catalog, single warehouse); agent vs baseline per category; no PII leak in agent runs (rubric Q6, Q8)"
