@@ -25,9 +25,13 @@ GREEN = ARTIFACTS / "green"
 WAREHOUSE = GREEN / "warehouse.duckdb"
 META = ARTIFACTS / "meta.duckdb"
 KNOWLEDGE = ROOT / "knowledge"
-TRACES = ARTIFACTS / "traces.duckdb"
+# Writable run state (decision traces, graph checkpoints) under one folder, so a
+# deployment mounts one volume. GOVERNOR_STATE_DIR moves it; relative paths are
+# taken from ROOT.
+STATE = ROOT / os.environ.get("GOVERNOR_STATE_DIR", "artifacts")
+TRACES = STATE / "traces.duckdb"
+CHECKPOINTS = STATE / "checkpoints.sqlite"
 LOGS = ROOT / "logs"
-STATE = ROOT / ".state"
 FIXTURE = ROOT / "fixture"
 DBT_PROJECT = FIXTURE / "billing_mart"
 

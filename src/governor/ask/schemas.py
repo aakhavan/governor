@@ -14,7 +14,7 @@ import pydantic
 
 Intent = Literal["answer", "clarify", "unanswerable"]
 
-# Columns of one decision-trace row (built by ``record_trace``; G6b stores it).
+# Columns of one decision-trace row (built by ``record_trace``, stored by ``governor.ask.traces``).
 TRACE_COLUMNS = (
     "trace_id",
     "ts",
@@ -125,3 +125,4 @@ class AskState(TypedDict, total=False):
     # metering
     usage: Annotated[list[dict], operator.add]
     trace: dict | None
+    trace_error: str | None  # set when the trace store write failed (the answer is kept)

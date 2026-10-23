@@ -50,7 +50,7 @@ class System(Protocol):
 SystemFactory = Callable[..., System]
 _REGISTRY: dict[str, SystemFactory] = {}
 # Systems that live outside governor.eval register themselves on import.
-_LAZY_MODULES: dict[str, str] = {"baseline": "governor.ask.baseline"}
+_LAZY_MODULES: dict[str, str] = {"baseline": "governor.ask.baseline", "agent": "governor.ask.agent"}
 
 
 def register(name: str) -> Callable[[SystemFactory], SystemFactory]:

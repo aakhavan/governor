@@ -15,6 +15,7 @@ dependencies = [           # G1 adds the foundation deps; later steps add theirs
     "rank-bm25",
     "numpy",
     "sqlglot",
+    "langgraph-checkpoint-sqlite",
 ]
 
 [dependency-groups]

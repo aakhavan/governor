@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -32,13 +33,14 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
-from governor.ask import MODEL, executor, retrieval
+from governor.ask import MODEL, executor, retrieval, traces
 from governor.ask.policy import Policy
 from governor.ask.schemas import AnswerDraft, AskState, QueryPlan, SqlDraft
 from governor.ask.validator import validate as validate_sql
 from governor.core import lineage, paths, security
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
+log = logging.getLogger(__name__)
 MAX_REPAIRS = 2
 RETRIEVE_K = 5
 PREVIEW_ROWS = 5
@@ -293,6 +295,8 @@ def build_graph(
     retrieval_mode: retrieval.Mode = "bm25",
     embedder: Any = "fake",
     as_of: datetime | None = None,
+    trace_path: Path | None = None,
+    store_traces: bool = True,
 ):
     """Compile the ask graph.
 
@@ -302,7 +306,9 @@ def build_graph(
     compiling needs no network or key. ``checkpointer`` defaults to an
     ``InMemorySaver``. ``database``, ``access_path``, ``meta_path``, ``cards``
     and ``as_of`` point the graph at fixtures. Retrieval defaults to BM25
-    (best tune recall in G4, no embedding call).
+    (best tune recall in G4, no embedding call). ``record_trace`` writes each
+    trace to ``trace_path`` (default ``paths.TRACES``) unless ``store_traces``
+    is false; a failed write is logged and the answer is still returned.
     """
     models: dict[str, Any] = {}
 
@@ -530,7 +536,23 @@ def build_graph(
             "latency_s": latency,
             "human_feedback": None,
         }
-        return {"answer": card, "trace": trace}
+        return {"answer": card, "trace": trace, "trace_error": store(trace, question, state.get("columns") or [], rows)}
+
+    def store(trace: dict, question: str, columns: list[str], rows: list[list[Any]]) -> str | None:
+        """Write the trace; on any failure log it and return the error type (the answer stays)."""
+        if not store_traces:
+            return None
+        try:
+            secrets = traces.pii_values(
+                trace["executed_sql"], columns, rows, access_path=access_path, meta_path=meta_path
+            )
+            traces.write_trace(
+                trace, question=question, secrets=secrets, mask=traces.default_mask(access_path), path=trace_path
+            )
+        except Exception as exc:  # noqa: BLE001  (a trace store problem must not lose the answer)
+            log.warning("trace %s was not written: %s", trace["trace_id"], type(exc).__name__)
+            return type(exc).__name__
+        return None
 
     # -- edges ---------------------------------------------------------------
 
