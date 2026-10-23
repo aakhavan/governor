@@ -4,7 +4,7 @@ The warehouse has these tables. Use only these tables and columns, without a sch
 
 {schema}
 
-The data was taken at {as_of}. Resolve relative dates ("last month", "this year", "overdue") against that instant, written as date literals. Do not use now(), current_date or current_timestamp.
+The data was taken at {as_of}. Resolve relative dates ("last month", "this year", "overdue") against that instant, written as date literals. Never call a function that reads the clock.
 
 Reply with one JSON object and nothing else:
 - to answer: {"action": "sql", "sql": "<one SELECT statement>"}

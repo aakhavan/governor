@@ -220,3 +220,32 @@ For Amir: The _g5_cases.py change is the supervised relock: the executor is impo
 ## Additions for G5b
 Run validate() and execute result.sql, not the user SQL. Failures have sql None: return those codes and no rows. Success SQL has comments stripped, a LIMIT (default_limit, or the existing limit lowered to row_cap), and for a mask role an outer projection so DISTINCT stays inside. Tables are bare names; warehouse.connect() sets search_path to marts and is read-only. Take timeout_s, row_cap, and mask_value from Policy. Do not hardcode models, PII columns, or the mask (accept_g5b greps executor.py). CODE imports the executor only when execute cases are present, stringifies values, and keeps 5 rows. Execution checks: LIMIT present and row_count <= 100; LIMIT 5 kept; LIMIT 5000 returns exactly 1000 rows; mask columns equal the configured mask and account_id is not masked; granted email still contains @; DISTINCT contact_name is 5 masked rows; COUNT(DISTINCT pii) stays a number. analyst selecting contact_email is PII_FORBIDDEN with no rows. run_readonly raises QueryTimeout (1s cartesian probe) and QueryError (CREATE). dry_run is EXPLAIN. Disable external access and extension autoload where DuckDB allows; note gaps in NOTES. Edit validator.py only to fix a locked execution failure, and record it. Do not edit plan/accept/_g5_cases.py.
 
+## G5b result (implementer notes)
+`governor.ask.executor`: `dry_run(sql) -> DryRun{ok, error}` (EXPLAIN), `run_readonly(sql, *, timeout_s, row_cap) -> (columns, rows)` and `execute(sql, role) -> ExecResult{ok, codes, reasons, sql, columns, rows, row_count}`; all take optional `database` (and execute `access_path`/`meta_path`) for fixtures. execute runs `validate()`'s rewritten SQL, never the user SQL; a reject returns the validator codes, `sql=None`, no rows. Extra executor codes: `DRY_RUN_FAILED`, `TIMEOUT`, `EXEC_ERROR`. Timeout is a `threading.Timer` calling `connection.interrupt()`; an interrupted query raises `QueryTimeout` (subclass of `QueryError`). Rows are fetched with `fetchmany(row_cap)`; the connection is always closed.
+Hardening (DuckDB 2.0.0, all supported at runtime on a read-only connection via `SET` after `warehouse.connect()`): `enable_external_access=false`, `autoinstall_known_extensions=false`, `autoload_known_extensions=false`, `allow_community_extensions=false`, then `lock_configuration=true` so a query cannot switch them back (tested). Gaps: settings are applied after open rather than in the `connect(config=...)` call (warehouse.py is outside G5b's paths); `allowed_directories`/`allowed_paths` stay empty; already-loaded built-in extensions (e.g. parquet/json, statically linked) remain callable but cannot reach files with external access off.
+validator.py: no change needed; all 14 locked accepts execute correctly and the 39 rejects keep their codes.
+Tests: `tests/ask/test_executor.py` (24, own fixture warehouse with `marts` schema): both roles, masking (mask value, DISTINCT count, COUNT(DISTINCT pii) numeric, grant honoured), default limit / kept limit / row cap, timeout, writes refused with the validator bypassed, external file read refused, config locked, dry_run bad column. accept_g5b: 11/11; pytest tests/ask: 91 passed.
+
+## G5b result
+*Dry-run and read-only executor, 23 Oct 2026 17:33.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/G5b`.
+
+| check | ok | detail |
+|---|---|---|
+| validator and executor run | yes | {"validate": [{"ok": false, "codes": ["NOT_SELECT"], "sql": null}, {"ok": false, "codes": ["NOT_SELECT"], "sql": null},  |
+| 39 locked rejects decided with the right code | yes |  |
+| 14 locked valid queries accepted | yes |  |
+| executed results: LIMIT rewrite, row cap, masking by lineage, grant honoured | yes |  |
+| execute refuses analyst PII with PII_FORBIDDEN and returns no rows | yes | {'ok': False, 'codes': ['PII_FORBIDDEN'], 'columns': [], 'rows': [], 'row_count': 0, 'sql': None} |
+| executor guards run | yes | {"timeout": "QueryTimeout", "write": "QueryError", "dry_run_bad": false, "dry_run_good": true} |
+| run_readonly times out with QueryTimeout | yes | QueryTimeout |
+| run_readonly refuses writes (read-only connection) with QueryError | yes | QueryError |
+| dry_run fails on a bad column and passes a good query | yes | {'timeout': 'QueryTimeout', 'write': 'QueryError', 'dry_run_bad': False, 'dry_run_good': True} |
+| no policy values (columns, mask, models) hard-coded in validator/policy/executor | yes |  |
+| pytest tests/ask | yes | 91 passed in 23.98s |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: STATUS still records an earlier G5b stop for secret_in_diff (a 52-character high-entropy string in tests/ask/test_executor.py). The file reviewed here has no such token, and this run's acceptance passed, including pytest 91. Hardening is SET after warehouse.connect because that module was out of scope, then lock_configuration. dry_run's EXPLAIN is not on the interrupt timer. Built-in readers stay loaded and are stopped by enable_external_access=false; read_csv is tested.
+

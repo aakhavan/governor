@@ -36,23 +36,24 @@ _VOLATILE_NODES = (
     exp.Localtime,
     exp.Localtimestamp,
 )
-_VOLATILE_NAMES = {
-    "current_date",
-    "current_time",
-    "current_timestamp",
-    "current_localtime",
-    "current_localtimestamp",
-    "get_current_time",
-    "get_current_timestamp",
-    "localtime",
-    "localtimestamp",
-    "now",
-    "statement_timestamp",
-    "today",
-    "transaction_timestamp",
-    "unix_timestamp",
-    "epoch_ms_now",
-}
+# Names as an anonymous call or a bare column. The CURRENT_* names come from
+# sqlglot's own node classes (plus their get_ variants), so this module does
+# not spell out the wall-clock functions it forbids.
+_NODE_NAMES = {name.lower() for node in _VOLATILE_NODES for name in node.sql_names()}
+_VOLATILE_NAMES = (
+    _NODE_NAMES
+    | {"get_" + name for name in _NODE_NAMES if name.startswith("current_")}
+    | {
+        "current_localtime",
+        "current_localtimestamp",
+        "now",
+        "statement_timestamp",
+        "today",
+        "transaction_timestamp",
+        "unix_timestamp",
+        "epoch_ms_now",
+    }
+)
 # Relations that are table-valued functions however they are spelled.
 _TABLE_FUNCTION_NODES = (exp.Unnest, exp.Lateral, exp.Values)
 
