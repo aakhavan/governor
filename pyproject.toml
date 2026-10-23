@@ -19,6 +19,7 @@ dependencies = [           # G1 adds the foundation deps; later steps add theirs
     "fastapi",
     "uvicorn",
     "httpx",
+    "streamlit",
 ]
 
 [dependency-groups]

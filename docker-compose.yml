@@ -14,17 +14,30 @@ services:
     restart: unless-stopped
 
   ui:
-    # Filled in by G8: Streamlit talks to the api service only, with its own token.
+    # Streamlit thin client: talks to the api service over HTTP only. Users paste
+    # their own token in the UI, so this service gets no secrets (no env_file).
     image: governor:local
-    env_file: .env
     environment:
       GOVERNOR_API_URL: http://api:8000
-    command: ["python", "-c", "print('ui: added in G8')"]
+    command:
+      - streamlit
+      - run
+      - apps/streamlit/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+      - --browser.gatherUsageStats=false
     ports:
       - "8501:8501"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
     depends_on:
-      - api
-    restart: "no"
+      api:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   governor-data:

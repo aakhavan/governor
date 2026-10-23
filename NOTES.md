@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-G7 serves governor-ask over HTTP. governor.api.app:app exposes GET /health with no auth, POST /v1/ask, POST /v1/threads/{thread_id}/resume, and GET /v1/traces plus GET /v1/traces/{trace_id}. GOVERNOR_API_TOKENS is role:token pairs. The role comes only from the bearer token, checked with hmac.compare_digest, and a role missing from access.yaml refuses startup. Bodies use extra=forbid. A thread belongs to the role stored in its checkpoint; a trace belongs to the role on its row; any other role gets 404, including ask with a taken thread id. Errors are {error, code} with no traceback and no question text. GOVERNOR_LLM selects openrouter, fake, or fake:SCRIPT.json. The graph is compiled once per process onto SqliteSaver under GOVERNOR_STATE_DIR (/data in the image, artifacts by default). The image builds the green warehouse and catalog, opens the warehouse read-only, and runs uvicorn as non-root. Compose has api on 8000 and a placeholder ui on 8501, with volume governor-data. This is a single-tenant portfolio deployment. as_of remains 2026-10-22.
+G8 is the Streamlit thin client on the G7 API. apps/streamlit/client.py (httpx) is the only UI import of governor.api, used when GOVERNOR_API_URL=asgi. Pages contain no SQL, DuckDB, policy checks, or governor.ask imports and no role picker: the sidebar stores a bearer token in session state. Ask shows answer text, the result table, SQL, models, lineage, freshness, and cost. A pending clarification keeps thread_id, so a rerun does not ask again, and the reply calls resume. Refusals display as refusals; unanswerable and error do not resume. Trace explorer filters the caller's traces and shows plan, SQL attempts with validator codes, and policy decisions. Developer shows /health, model ids from those traces, and knowledge/access.yaml as read-only text. Compose runs ui on port 8501 with GOVERNOR_API_URL=http://api:8000, no secrets, after api is healthy. as_of remains 2026-10-22.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -21,46 +21,38 @@ G7 serves governor-ask over HTTP. governor.api.app:app exposes GET /health with 
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
 
-## G7 result (implementer notes)
-- `governor.ask.service`: `ask/resume/list_traces/get_trace/settings`, `AskResult`. One compiled graph per process on a SqliteSaver (`paths.CHECKPOINTS`, read when first compiled); `configure(llm, **graph_options)` / `reset()` drop it. Owner = `role` in the checkpointed state (threads) or the trace row; another role gets NotFound (404), same as a missing id. `ask` on an existing thread_id is 409 `thread_exists`; resuming a finished thread is 409 `not_waiting`.
-- Status map: answer -> answered; interrupt -> clarify; refused_guard/policy -> refused; unanswerable and **clarify_failed -> unanswerable** (final, so the client must not offer a resume; differs from the agent map); refused_repair/error -> error. `sql` and rows only when answered.
-- `governor.api.app`: `create_app(tokens=None, llm="env", **graph_options)`; module `app = create_app()` reads `GOVERNOR_API_TOKENS` and `GOVERNOR_LLM` (openrouter | fake | fake:SCRIPT.json) at import, so a bad role fails at uvicorn startup. Empty tokens = warning + every /v1 call 401. 422 bodies list field names only (pydantic's default echoes the input). `/docs` and `/redoc` disabled; `openapi.json` stays (acceptance reads it).
-- New deps: `fastapi` (the API), `uvicorn` (ASGI server in the image), `httpx` (FastAPI TestClient). Plain uvicorn, not `[standard]`, to keep the image small.
-- Dockerfile (python:3.12-slim + uv 0.8, `uv sync --frozen --no-dev`), `.dockerignore` (keeps .env, .venv, artifacts out of the context), compose with `api` and a placeholder `ui`, volume `governor-data` on `/data`. Not built here (no Docker run in this step). build_green's 60 s limit applies inside `docker build` too.
-- `.gitignore`: `!.env.example` added (`.env.*` would have hidden it).
-- **`.env.example` not written**: a permission deny rule covers `.env.*`, so the implementer could not create it. Amir: create it by hand (content in the G7 summary); the acceptance check fails until then.
-Tests: `tests/api/test_api.py` (11 incl. parametrised 401 cases and a startup-error test). accept_g7 15/16 (only .env.example); full pytest 266 passed.
+## G8 result (implementer notes)
+- `apps/streamlit/`: `client.py` (`ApiClient` over httpx; `GOVERNOR_API_URL=asgi` runs the API in-process via `httpx.ASGITransport` + `asyncio.run`, looking up `governor.api.app.app` per request), `ui_common.py` (sidebar token box: password field copied into `session_state["api_token"]` so it survives page switches; login hint), `app.py` (landing: what it is, `/health` status/as_of/version), pages Ask, Trace explorer, Developer.
+- Ask: API called only on form submit, so reruns never re-ask. `thread_id` + `clarify_question` in session state while a clarify is pending; reply box calls `resume`; 404/409 on resume clears the pending thread and shows the error. Answer card: text, `result_columns`/`result_rows` table, SQL expander, models, upstream sources, freshness expander, cost badge; refusals as an error box; unanswerable/error as warnings (no resume offered).
+- Trace explorer: outcome filter (fixed list of graph outcomes), list table, detail (plan JSON, SQL attempts with validator codes, executed SQL, policy decisions).
+- Developer: API URL, `/health` JSON. No settings route exists (and `src/governor/api` is outside G8 paths), so "models" = LLM model ids from the caller's recent traces. access.yaml read from the repo copy and shown as text.
+- Compose `ui`: `streamlit run apps/streamlit/app.py` on 8501, own healthcheck (`/_stcore/health`; the image's HEALTHCHECK targets 8000), waits for api healthy, **no `env_file`** (the UI needs no secrets; GOVERNOR_API_TOKENS stays out of the UI container). Not built or run here.
+- New dep: `streamlit` (UI; 1.66.1). Added by editing pyproject; `uv run` re-locked.
+- Open: `docs/deploy.md` still calls the ui a placeholder (outside G8 paths). Streamlit runs as uid 10001 with HOME=/nonexistent in the image; untested in Docker.
+Tests: `tests/ui/test_pages.py` (5, AppTest, asgi, scripted FakeLLM); accept_g8 11/11; full pytest 271 passed.
 
-## Additions for G7
-Resume with Command(resume=text) on the same thread_id. SqliteSaver is sqlite3.connect(paths.CHECKPOINTS, check_same_thread=False); run.sqlite_checkpointer wraps it. Interrupt value is {missing_slot: text}. A second clarify sets outcome clarify_failed and does not interrupt. The llm is not checkpointed. A pause returns outcome clarify and trace_id null; the row is written only in record_trace. Audits: traces.get_trace and list_traces (newest first) are redacted. The in-memory trace, the card, and checkpoints.sqlite still hold the question, clarification answer, and rows, including a granted email. human_feedback is always null. GOVERNOR_STATE_DIR (default artifacts, relative to ROOT) moves STATE, TRACES, and CHECKPOINTS. tests/ask conftest redirects them. CLI --llm openrouter uses llm=None (plan gpt-5-nano; SQL and answer gpt-5-mini). eval.run --llm openrouter passes one model to every node. Agent map: interrupt and clarify_failed -> clarify; refused_guard and refused_policy -> refuse; unanswerable -> unanswerable; refused_repair and refused_error -> answer with error set to that outcome. as_of remains 2026-10-22. CHROMA_DIR now lives under STATE (artifacts/), not .state/.
+## G8 result
+*Streamlit as a thin client over the API, 23 Oct 2026 19:47.*
 
-## G7 result
-*API, authentication and deployment skeleton, 23 Oct 2026 19:30.*
-
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 1 fix loop(s); branch `factory/G7`.
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/G8`.
 
 | check | ok | detail |
 |---|---|---|
-| API app imports and answers with the fake LLM | yes |  |
-| exactly the specified routes | yes | got [('GET', '/health'), ('GET', '/v1/traces'), ('GET', '/v1/traces/{trace_id}'), ('POST', '/v1/ask'), ('POST', '/v1/thr |
-| /health needs no token | yes | 200 |
-| missing and unknown tokens are 401 | yes | 401/401 |
-| a role field in the body is rejected (422) | yes | 422 |
-| /v1/ask works with a valid token and returns an AskResult | yes | 200 ['answer', 'clarify_question', 'cost_usd', 'freshness', 'lineage', 'models', 'result_columns', 'result_rows', 'sql', |
-| errors are JSON without a traceback | yes | {"error":"trace not found","code":"not_found"} |
-| Dockerfile builds the green warehouse and catalog at build time and runs uvicorn as non-root | yes |  |
-| docker-compose.yml has api and ui services and a /data volume | yes |  |
-| .env.example exists with placeholders only | yes |  |
-| docs/deploy.md exists | yes |  |
-| no real tokens in code, compose or docs | yes |  |
-| tokens are never logged | yes |  |
-| pytest tests/api | yes | 11 passed in 4.59s |
-| required tests present | yes | 7 found |
-| pytest tests/ask | yes | 107 passed in 44.07s |
+| app and the three pages exist | yes | missing: [] |
+| UI has no DB, SQL, policy or governor.ask imports | yes |  |
+| only client.py touches governor.api (asgi mode) | yes |  |
+| no role picker in the UI (role comes from the token) | yes |  |
+| no golden questions in the UI or its tests | yes |  |
+| apps/streamlit/client.py importable | yes |  |
+| ApiClient exposes ask/resume/list_traces/get_trace/health | yes | missing: [] |
+| compose ui service points at the api service | yes |  |
+| pytest tests/ui | yes | 5 passed in 8.90s |
+| required tests present | yes | 5 found |
+| pytest tests/api | yes | 11 passed in 4.05s |
 
-Review: cursor-grok: pass | claude-tc-fable: pass
+Review: Pages talk only to ApiClient. governor.api is imported only for GOVERNOR_API_URL=asgi. No role picker: the token is sent as a bearer header. Ask stores thread_id while a clarification is pending, so a rerun does not ask again, and the reply box calls resume. Answered results render result_rows as a dataframe plus SQL, models, lineage, freshness, and cost. Refusals are shown as refusals. Trace outcomes match the graph literal. AppTests run these paths on the real API. Compose points ui at http://api:8000 and does not pass tokens.
 
-For Amir: Acceptance does not run docker build. The Dockerfile does build the warehouse before switching to uid 10001, and only /data is writable by that user. Deploy checks are substrings, so the letters USER anywhere in the file would pass. GET /openapi.json is still mounted; docs and redoc are off. It is outside the schema, so the exact-routes check does not see it. app.openapi() does not need that route. If the same token string is listed for two roles, the later pair wins. checkpoints.sqlite on the volume still holds the raw question and result rows.
+For Amir: Acceptance does not start the ui container. Streamlit 1.66 with --server.headless and --browser.gatherUsageStats=false does not create ~/.streamlit on boot, so HOME=/nonexistent should not stop startup; a later streamlit_write would still need a writable home. docs/deploy.md still calls ui a placeholder and is outside G8 paths. The role-picker grep is case-sensitive and would miss a widget labeled Role; this UI has no role widget. Refusal rendering is implemented and untested.
 
-## Additions for G8
-G8 Streamlit talks only to this API. Compose sets GOVERNOR_API_URL=http://api:8000 on ui, which is still a placeholder command on image governor:local. No role picker and no role field: send one bearer token; the API derives the role and returns 422 if the body contains role. Do not put GOVERNOR_API_TOKENS in the browser or in logs. No CORS is configured, so call the API from the Streamlit server. GET /health returns status, as_of, and version. POST /v1/ask takes {question, thread_id?} and returns AskResult. status clarify has a null trace_id; keep that thread and POST /v1/threads/{thread_id}/resume with {answer}. A rerun must not start a new ask. clarify_failed is returned as unanswerable and must not be resumed. Show result_columns and result_rows, not only answer. Another role's thread or trace is 404. 409 is thread_exists or not_waiting, and only for the owning role. Writable state is the api volume governor-data on /data, not the UI container. settings() is in-process only and is not a route.
+## Additions for G9
+G9 is MCP on stdio, separate from the Streamlit client. Do not import apps/streamlit. Shared read-only logic stays in governor.ask.service; the UI already uses that service only through HTTP. Role is never a tool or body field: HTTP derives it from the bearer token and returns 422 if the body contains role. MCP must take the role from GOVERNOR_MCP_ROLE (default analyst, must exist in access.yaml) and must not let the client raise it. settings() is in-process only and is not a route. AskResult clarify carries thread_id and a null trace_id; resume is POST /v1/threads/{id}/resume with {answer}. clarify_failed is returned as unanswerable and must not be resumed. sql and rows are present only when status is answered. Traces are scoped to the role. No write path. Tool text must not restate access.yaml. as_of remains 2026-10-22. Do not read evaluation/golden.
