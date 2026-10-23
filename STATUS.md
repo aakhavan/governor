@@ -1,6 +1,6 @@
 # STATUS: governor
 
-Updated 23 Oct 2026 20:50. Run `20261023-193056`.
+Updated 23 Oct 2026 21:17. Run `20261023-211723`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
@@ -16,9 +16,9 @@ Updated 23 Oct 2026 20:50. Run `20261023-193056`.
 | G7 | API, authentication and deployment skeleton | design | yes | done | 1/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-10-23T19:30:56 |
 | G8 | Streamlit as a thin client over the API | mechanical | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T19:47:55 |
 | G9 | MCP server with 5 read-only tools (stretch: cut first if late) | mechanical | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T19:58:50 |
-| G10a | Tune on the tune split, then freeze the prompts | design | - | passed | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T20:50:38 |
-| G10b | Holdout once, eval report, README, demo script | design | yes | pending | 0/2 |  | - | - | - |
+| G10a | Tune on the tune split, then freeze the prompts | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T20:50:38 |
+| G10b | Holdout once, eval report, README, demo script | design | yes | approved | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-10-23T21:17:23 |
 
-Cost so far (reported + notional): $27.08 of $80.00 run budget; 38 agent call(s).
+Cost so far (reported + notional): $30.57 of $80.00 run budget; 41 agent call(s).
 
-Next: G10a is passed: `factory resume`.
+Next: G10b is approved: `factory resume`.

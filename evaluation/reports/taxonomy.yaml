@@ -1,0 +1,11 @@
+# Human notes on the agent's holdout failures, read by `python -m governor.eval.report`.
+# Written after reading the agent SQL and re-running it against the gold result (23 Oct 2026). Prompts were not changed.
+j02:
+  class: wrong grain
+  note: "Right value (164686.00) but an extra month_start column; the tuned 'month grain returns month_start + value' rule was applied to a single named-month total."
+j05:
+  class: wrong grain
+  note: "Right value (12322.00) but an extra month_start column, same cause as j02; it also filtered on fct_invoices.country instead of joining dim_accounts (same answer here)."
+t06:
+  class: other
+  note: "Built a zero-filled 12-month spine; the 8 months with invoices match the gold, the 4 extra 0.00 rows (Jan-Apr 2025) fail the row count."

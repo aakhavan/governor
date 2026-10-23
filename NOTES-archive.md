@@ -437,3 +437,43 @@ Review: G9 matches the prompt. FastMCP stdio server exposes the five read-only t
 
 For Amir: accept_g9's write check only requires ok false. Writes still cannot land: run_governed_query calls executor.execute, which validates and opens the warehouse read-only. The lineage check only requires a non-empty node list; the recorded payload has depth 3 after a request for 9, and tests/mcp asserts the cap when depth is 50. Models outside the allowlist use the same error shape as a missing name. mcp stays below 2 because accept_g9 reads Tool.inputSchema.
 
+## G10a result (implementer notes)
+Tune runs (`ts system execution_accuracy valid_sql_final clarify_p/r policy_compliance pii_leak cost`):
+- 2026-10-23T18:02Z baseline 0.556 0.955 -/0.00 0.333 true $0.036
+- 2026-10-23T18:11Z agent 0.389 1.000 0.50/0.67 0.333 false $0.108
+- 2026-10-23T18:23Z agent 0.556 1.000 0.67/0.67 0.667 false $0.118
+- 2026-10-23T18:31Z agent 0.778 1.000 0.67/0.67 0.667 false $0.109
+- 2026-10-23T18:39Z agent 0.778 1.000 0.67/0.67 1.000 false $0.097 (frozen)
+- Changed prompts only (draft_sql, plan, repair): exact output columns, metric shape by grain, bare COUNT on a counted column, no queries on upstream sources, a stricter clarify bar. Details are in `evaluation/reports/TUNING.md`; hashes are in `PROMPTS_FROZEN.sha256`.
+- Open: the plan's intent on join items (gpt-5-nano) moves between answer, clarify and unanswerable from run to run. A stronger plan model is a candidate, but it is not in G10a scope.
+
+## Additions for G10a
+G10a tunes ask prompts. The MCP server is not on the graph path: do not import mcp_server into the graph and do not add an NL-to-SQL tool. Role stays out of tool arguments and request bodies. mcp is pinned to >=1.10,<2 (installed 1.30.0); 2.x renames FastMCP and Tool.inputSchema, which the locked accept_g9 client reads. service now has search_catalog (BM25, k capped at 20), describe_model, get_lineage (depth capped at 3), validate_sql, and run_query. Query rows are JSON-safe (dates and decimals as strings). Tool text must not restate access.yaml. as_of remains 2026-10-22. Do not read evaluation/golden. No holdout run in G10a.
+
+## G10a result
+*Tune on the tune split, then freeze the prompts, 23 Oct 2026 20:50.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/G10a`.
+
+| check | ok | detail |
+|---|---|---|
+| baseline-tune.json exists | yes |  |
+| baseline-tune.json covers exactly the tune split | yes |  |
+| baseline-tune.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
+| agent-tune.json exists | yes |  |
+| agent-tune.json covers exactly the tune split | yes |  |
+| agent-tune.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
+| agent made real model calls (cost > 0) | yes |  |
+| tune cost within the $2 step budget | yes | $0.133 |
+| PROMPTS_FROZEN.sha256 exists | yes |  |
+| frozen hashes match the current prompts | yes | ['answer.md', 'baseline.md', 'draft_sql.md', 'plan.md', 'repair.md'] vs ['answer.md', 'baseline.md', 'draft_sql.md', 'pl |
+| no golden text in prompts | yes |  |
+| no holdout run yet (that is G10b) | yes | 0 log lines |
+| TUNING.md records the changes and before/after numbers | yes | 33 lines |
+| golden set still frozen | yes | golden set unchanged |
+| pytest tests | yes | 275 passed in 71.50s (0:01:11) |
+
+Review: G10a froze draft_sql, plan, and repair after tune-split runs. Saved baseline and final agent summaries match TUNING.md and NOTES: execution accuracy 0.556 to 0.778, policy 0.333 to 1.0, clarify 0.67/0.67, no agent PII leak. Prompt edits follow checker failures and catalog grain labels. No holdout file or log. Five tune misses remain; four are plan intent on gpt-5-nano.
+
+For Amir: Acceptance checks that TUNING.md has at least 8 lines, not that its numbers match the JSON. Run 0 and run 4 match the two saved reports. Runs 1-3 are recorded only in NOTES and TUNING.md. The COUNT paragraph says policy moved from 0.33 to 1.0; the table shows 0.333, 0.667, 0.667, then 1.0. Baseline still answers j03 and j06, which the frozen agent marks unanswerable.
+

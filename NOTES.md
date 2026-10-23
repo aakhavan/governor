@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-Ask prompts are frozen in evaluation/reports/PROMPTS_FROZEN.sha256 (answer, baseline, draft_sql, plan, repair). Tune split only: baseline execution accuracy 0.556, frozen agent 0.778, agent valid SQL final 1.0, clarify precision and recall 0.67, policy compliance 1.0, no PII leak. as_of remains 2026-10-22T14:11:26+00:00. Holdout has not been run. Retrieval settings and repair code are unchanged. Still open on tune: gpt-5-nano plan intent on j01 (clarify), j03 and j06 (unanswerable), a value miss on j04 with the right column count, and a03 answered instead of clarified.
+G10b is done. Holdout ran once after the prompt freeze (baseline 2026-10-23T18:53:28Z, agent 18:59:20Z, golden fcce84b6b2f86f3b). Agent holdout execution accuracy is 0.700 against the baseline 0.600; policy compliance is 1.000 vs 0.333; the agent leaked no PII and the baseline did. The agent loses on join (0/2 vs 1/2) and time_grain (1/2 vs 2/2). The four runs cost $0.239. evaluation/eval_report.md, README.md, and docs/demo-script.md quote those JSON figures. Prompts and the golden set are unchanged.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -21,45 +21,51 @@ Ask prompts are frozen in evaluation/reports/PROMPTS_FROZEN.sha256 (answer, base
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
 
-## G10a result (implementer notes)
-Tune runs (`ts system execution_accuracy valid_sql_final clarify_p/r policy_compliance pii_leak cost`):
-- 2026-10-23T18:02Z baseline 0.556 0.955 -/0.00 0.333 true $0.036
-- 2026-10-23T18:11Z agent 0.389 1.000 0.50/0.67 0.333 false $0.108
-- 2026-10-23T18:23Z agent 0.556 1.000 0.67/0.67 0.667 false $0.118
-- 2026-10-23T18:31Z agent 0.778 1.000 0.67/0.67 0.667 false $0.109
-- 2026-10-23T18:39Z agent 0.778 1.000 0.67/0.67 1.000 false $0.097 (frozen)
-- Changed prompts only (draft_sql, plan, repair): exact output columns, metric shape by grain, bare COUNT on a counted column, no queries on upstream sources, a stricter clarify bar. Details are in `evaluation/reports/TUNING.md`; hashes are in `PROMPTS_FROZEN.sha256`.
-- Open: the plan's intent on join items (gpt-5-nano) moves between answer, clarify and unanswerable from run to run. A stronger plan model is a candidate, but it is not in G10a scope.
-
-## Additions for G10a
-G10a tunes ask prompts. The MCP server is not on the graph path: do not import mcp_server into the graph and do not add an NL-to-SQL tool. Role stays out of tool arguments and request bodies. mcp is pinned to >=1.10,<2 (installed 1.30.0); 2.x renames FastMCP and Tool.inputSchema, which the locked accept_g9 client reads. service now has search_catalog (BM25, k capped at 20), describe_model, get_lineage (depth capped at 3), validate_sql, and run_query. Query rows are JSON-safe (dates and decimals as strings). Tool text must not restate access.yaml. as_of remains 2026-10-22. Do not read evaluation/golden. No holdout run in G10a.
-
-## G10a result
-*Tune on the tune split, then freeze the prompts, 23 Oct 2026 20:50.*
-
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/G10a`.
-
-| check | ok | detail |
-|---|---|---|
-| baseline-tune.json exists | yes |  |
-| baseline-tune.json covers exactly the tune split | yes |  |
-| baseline-tune.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
-| agent-tune.json exists | yes |  |
-| agent-tune.json covers exactly the tune split | yes |  |
-| agent-tune.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
-| agent made real model calls (cost > 0) | yes |  |
-| tune cost within the $2 step budget | yes | $0.133 |
-| PROMPTS_FROZEN.sha256 exists | yes |  |
-| frozen hashes match the current prompts | yes | ['answer.md', 'baseline.md', 'draft_sql.md', 'plan.md', 'repair.md'] vs ['answer.md', 'baseline.md', 'draft_sql.md', 'pl |
-| no golden text in prompts | yes |  |
-| no holdout run yet (that is G10b) | yes | 0 log lines |
-| TUNING.md records the changes and before/after numbers | yes | 33 lines |
-| golden set still frozen | yes | golden set unchanged |
-| pytest tests | yes | 275 passed in 71.50s (0:01:11) |
-
-Review: G10a froze draft_sql, plan, and repair after tune-split runs. Saved baseline and final agent summaries match TUNING.md and NOTES: execution accuracy 0.556 to 0.778, policy 0.333 to 1.0, clarify 0.67/0.67, no agent PII leak. Prompt edits follow checker failures and catalog grain labels. No holdout file or log. Five tune misses remain; four are plan intent on gpt-5-nano.
-
-For Amir: Acceptance checks that TUNING.md has at least 8 lines, not that its numbers match the JSON. Run 0 and run 4 match the two saved reports. Runs 1-3 are recorded only in NOTES and TUNING.md. The COUNT paragraph says policy moved from 0.33 to 1.0; the table shows 0.333, 0.667, 0.667, then 1.0. Baseline still answers j03 and j06, which the frozen agent marks unanswerable.
+## G10b result (implementer notes)
+- Holdout run once per system, 23 Oct 2026 (log in `evaluation/holdout_runs.log`); prompts untouched. Holdout: baseline 0.600 / agent 0.700 execution accuracy, valid SQL first 1.000 / 0.700, final 1.000 / 1.000, clarify p/r -/0.000 vs 1.000/1.000, policy 0.333 / 1.000, PII leak true / false, cost $0.028 / $0.078, p50 6.656 s / 19.305 s. Four-report total $0.239.
+- Loss: agent 0/2 join and 1/2 time_grain vs baseline 1/2 and 2/2. All three agent misses (j02, j05, t06) have the right values in the wrong shape: an extra month_start on a single named-month total (the tuned metric-shape rule over-applied) and a zero-filled month spine. Human notes in `evaluation/reports/taxonomy.yaml`, read by `python -m governor.eval.report`.
+- Added `governor.eval.report` (+ tests/eval/test_report.py), `evaluation/eval_report.md`, `README.md`, `docs/demo-script.md`.
 
 ## Additions for G10b
 Do not edit src/governor/ask/prompts/ or rewrite evaluation/reports/PROMPTS_FROZEN.sha256. accept_g10b requires that hash file to be older than both holdout reports. Run --split holdout once for baseline and once for agent. Never pass --force-holdout. Load baseline-tune.json (execution_accuracy 0.556, valid_sql_final 0.955, clarify precision null, recall 0, policy_compliance 0.333, pii_leak true, cost_usd 0.036) and agent-tune.json (0.778, valid_sql_final 1.0, valid_sql_first 0.9375, clarify 0.667/0.667, policy 1.0, pii_leak false, cost_usd 0.097). as_of is 2026-10-22T14:11:26+00:00. Agent tune misses: j01 clarify, j03 unanswerable, j06 unanswerable, j04 answered (company_name and one unpaid amount; column count matches, values do not), a03 answer where expect is clarify. Baseline scored j03 and j06 equal, so a join loss on holdout can be plan noise on gpt-5-nano. Report a loss as a loss. The $3 check sums the four report JSONs; these two already add about $0.133. G10b's step budget is $1. Runs 1-3 are only in TUNING.md. Frozen prompt rules: catalog grain shapes, bare COUNT, query model names only, clarify only when no default reading exists.
+
+## G10b result
+*Holdout once, eval report, README, demo script, 23 Oct 2026 21:17.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/G10b`.
+
+| check | ok | detail |
+|---|---|---|
+| report baseline-tune.json exists | yes |  |
+| baseline-tune.json covers exactly the tune split | yes | 25 items |
+| baseline-tune.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
+| report baseline-holdout.json exists | yes |  |
+| baseline-holdout.json covers exactly the holdout split | yes | 15 items |
+| baseline-holdout.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
+| report agent-tune.json exists | yes |  |
+| agent-tune.json covers exactly the tune split | yes | 25 items |
+| agent-tune.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
+| report agent-holdout.json exists | yes |  |
+| agent-holdout.json covers exactly the holdout split | yes | 15 items |
+| agent-holdout.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
+| holdout run exactly once per system | yes | log: ['baseline', 'agent'] |
+| PROMPTS_FROZEN.sha256 exists | yes |  |
+| prompts unchanged since the freeze | yes | frozen ['answer.md', 'baseline.md', 'draft_sql.md', 'plan.md', 'repair.md'] vs now ['answer.md', 'baseline.md', 'draft_s |
+| prompts frozen before both holdout runs | yes |  |
+| no PII leak in agent runs | yes |  |
+| total eval cost within the $3 budget | yes | $0.239 |
+| evaluation/eval_report.md exists | yes |  |
+| README has the required sections | yes | missing: [] |
+| README has a Mermaid diagram and points to PROVENANCE.md | yes |  |
+| README shows the holdout execution accuracy exactly as in the reports | yes | missing [] |
+| demo script exists | yes |  |
+| no golden text in prompts | yes |  |
+| golden set still frozen | yes | golden set unchanged |
+| pytest tests | yes | 281 passed in 73.75s (0:01:13) |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: Acceptance checks that eval_report.md and the demo script exist, not that the prose matches the JSON. Summary and per-category counts match all four reports, and the three agent failure notes match the stored SQL. The rule classifier never labels wrong join; j05's country subquery is only in the note, and the scored miss is an extra month_start column.
+
+## Additions for the next plan
+Do not rerun holdout or edit src/governor/ask/prompts/. PROMPTS_FROZEN.sha256 is the freeze, and evaluation/holdout_runs.log already has one baseline line and one agent line. Headline holdout: execution accuracy 0.600 baseline vs 0.700 agent; policy 0.333 vs 1.000; PII leak true vs false; agent loses join 0/2 vs 1/2 and time_grain 1/2 vs 2/2. Four-run cost $0.239. evaluation/eval_report.md is generated by python -m governor.eval.report. taxonomy.yaml overrides j02, j05, and t06. The rule classifier has no wrong-join branch.
