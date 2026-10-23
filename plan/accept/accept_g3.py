@@ -99,6 +99,27 @@ def baseline():
     check("no golden questions or gold SQL copied into src/ or tests/", not bad, ", ".join(bad[:5]))
 
 
+def pinned_as_of():
+    from _common import load_yaml, py_json
+    pin = ROOT / "fixture/AS_OF"
+    want = pin.read_text(encoding="utf-8").strip() if pin.is_file() else ""
+    golden = str(load_yaml(ROOT / "evaluation/golden/questions.yaml").get("as_of"))
+    check("fixture/AS_OF pins the golden set's as_of", bool(want) and want == golden, f"{want!r} vs {golden!r}")
+    hits = grep(["fixture/build_green.py", "fixture/load_raw.py", "fixture/generate_raw.py"],
+                r"datetime\.now|utcnow|date\.today|time\.time\(")
+    check("build scripts never read the wall clock", not hits, ", ".join(hits[:4]))
+    probe = ("import json; from governor.core.warehouse import connect; c = connect()\n"
+             "r = c.execute('select count(*), sum(days_outstanding), sum(amount_eur) from fct_invoices').fetchone()\n"
+             "c.close(); print(json.dumps([str(x) for x in r]))")
+    before, err = py_json(probe)
+    r = run([sys.executable, "fixture/build_green.py"], timeout=900)
+    after, err2 = py_json(probe)
+    asof = (ROOT / "artifacts/green/as_of.txt").read_text(encoding="utf-8").strip() if (ROOT / "artifacts/green/as_of.txt").is_file() else ""
+    check("a rebuild reproduces as_of and the marts", r.returncode == 0 and asof == want and before == after and before is not None,
+          err or err2 or f"as_of {asof!r}; fct_invoices {before} -> {after}")
+
+
+guarded("pinned as_of", pinned_as_of)
 guarded("self-test systems", self_tests)
 guarded("leak detector", leak_detector)
 guarded("holdout guard", holdout_guard)

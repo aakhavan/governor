@@ -40,9 +40,9 @@ steps:
     tier: design
     prompt: plan/prompts/G3.md
     accept: plan/accept/accept_g3.py
-    allowed_paths: [src/governor/eval/, src/governor/ask/__init__.py, src/governor/ask/baseline.py, src/governor/ask/prompts/baseline.md, src/governor/ask/llm_testing.py, tests/eval/, tests/ask/, pyproject.toml, uv.lock]
+    allowed_paths: [src/governor/eval/, src/governor/ask/__init__.py, src/governor/ask/baseline.py, src/governor/ask/prompts/baseline.md, src/governor/ask/llm_testing.py, tests/eval/, tests/ask/, tests/core/, fixture/AS_OF, fixture/build_green.py, fixture/load_raw.py, pyproject.toml, uv.lock]
     human_gate: false
-    review_focus: "a naive system cannot score well (oracle/null/leaky behave as specified); PII leak detection uses column lineage plus value scan; holdout guard works; the baseline really has no retrieval or validator (rubric Q1, Q2)"
+    review_focus: "as_of is pinned in fixture/AS_OF and a rebuild reproduces it and the marts; a naive system cannot score well (oracle/null/leaky behave as specified); PII leak detection uses column lineage plus value scan; holdout guard works; the baseline really has no retrieval or validator (rubric Q1, Q2)"
   - id: G4
     title: Catalog and metric cards, hybrid schema retrieval, recall@k on gold tables
     tier: mechanical
