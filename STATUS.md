@@ -1,6 +1,6 @@
 # STATUS: governor
 
-Updated 23 Oct 2026 17:06. Run `20261023-165916`.
+Updated 23 Oct 2026 17:33. Run `20261023-173326`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
@@ -9,8 +9,8 @@ Updated 23 Oct 2026 17:06. Run `20261023-165916`.
 | G2b | Golden set with gold SQL, frozen split, review table | design | yes | done | 1/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T15:02:45 |
 | G3 | Evaluation harness, metrics, self-test systems, baseline | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T15:41:27 |
 | G4 | Catalog and metric cards, hybrid schema retrieval, recall@k on gold tables | mechanical | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T15:56:57 |
-| G5a | SQL validator and role policy | design | - | passed | 1/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T17:06:29 |
-| G5b | Dry-run and read-only executor | design | yes | pending | 0/2 |  | - | - | - |
+| G5a | SQL validator and role policy | design | - | done | 1/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T17:06:30 |
+| G5b | Dry-run and read-only executor | design | yes | approved | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-10-23T17:33:26 |
 | G6a | The governor-ask graph (core, in-memory) | design | - | pending | 0/2 |  | - | - | - |
 | G6b | Persistence, decision traces, CLI and the agent system | design | - | pending | 0/2 |  | - | - | - |
 | G7 | API, authentication and deployment skeleton | design | yes | pending | 0/2 |  | - | - | - |
@@ -19,6 +19,6 @@ Updated 23 Oct 2026 17:06. Run `20261023-165916`.
 | G10a | Tune on the tune split, then freeze the prompts | design | - | pending | 0/2 |  | - | - | - |
 | G10b | Holdout once, eval report, README, demo script | design | yes | pending | 0/2 |  | - | - | - |
 
-Cost so far (reported + notional): $10.70 of $80.00 run budget; 19 agent call(s).
+Cost so far (reported + notional): $13.41 of $80.00 run budget; 22 agent call(s).
 
-Next: G5a is passed: `factory resume`.
+Next: G5b is approved: `factory resume`.
