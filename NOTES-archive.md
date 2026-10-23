@@ -157,3 +157,40 @@ Do not read evaluation/golden/questions.yaml, REVIEW.md, or gold SQL when writin
 ## Additions for G4
 G4 builds catalog cards and hybrid retrieval. Do not read evaluation/golden/questions.yaml or put question text in cards. Gold tables for the retrieval eval come from gold_sql through governor.eval.golden. as_of is pinned: fixture/AS_OF and artifacts/green/as_of.txt are '2026-10-22 14:11:26+00:00' (same instant as 2026-10-22T14:11:26+00:00). paths.as_of() reads the green file. The report's as_of uses datetime.isoformat() with a T; compare datetimes, not strings. Allowlist: dim_accounts, fct_invoices, fct_revenue_daily, mrr_monthly. Mart PII tags are dim_accounts.contact_name (name) and dim_accounts.contact_email (email). The only grant is dim_accounts.contact_email for finance_admin; mask value is ***. card_last4 is staging-only and is outside detect_leak. detect_leak flags PII that reaches an output column (COUNT and aggregate FILTER do not); WHERE, JOIN, and GROUP BY alone are not leaks. That runtime policy is G5a. Leave governor.ask.baseline as schema-plus-question with no retrieval. The registry lazy-imports it from governor.ask.baseline. System.answer receives the full Question, including gold_sql and expect; only oracle may read those. chromadb is not installed and EMBED_MODEL is still a guess; tests need a fake embedder. dbt source freshness still uses the wall clock, so green sources.json can be warn or error while the marts stay pinned.
 
+## Relocks
+- 23 Oct 2026 16:27: G5a: _g5_cases.py imports the executor only when execute cases exist (it lands in G5b); placeholder executor.py removed (via supervise, by claude.ai) (changed: plan/accept/_g5_cases.py)
+
+## G4 result (implementer notes)
+`governor.ask.catalog` builds 14 cards (4 allowlisted models + 10 metrics) from meta.duckdb, access.yaml and metrics.yaml into artifacts/catalog_cards.jsonl. Model cards list the metrics that read them (from metrics.yaml SQL). Grain is the description's "One row per ..." phrase, else the unique-tested column. `governor.ask.retrieval.search` does bm25/dense/hybrid. Hybrid fuses with `governor.core.retrieval.rrf` (k=60, each list depth max(10, k)). No chromadb: dense uses numpy over artifacts/card_embeddings.npz, keyed by embedder name plus card texts. The default embedder is core.llm.get_embeddings (EMBED_MODEL still a guess, not run); `fake` is HashEmbedder. Tune recall@3: bm25 0.8333, hybrid(fake) 0.8056, dense(fake) 0.7778 (n=18). The fake hybrid score says nothing about real embeddings. Acceptance: 16/16. Full pytest: 163 passed. The test file is tests/ask/test_cards_retrieval.py, because tests/ask/test_retrieval.py clashed with tests/core/test_retrieval.py (no __init__.py).
+
+## G4 result
+*Catalog and metric cards, hybrid schema retrieval, recall@k on gold tables, 23 Oct 2026 15:56.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/G4`.
+
+| check | ok | detail |
+|---|---|---|
+| catalog build exits 0 | yes | {"out": "C:\\Users\\amir0\\portfolio\\governor\\artifacts\\catalog_cards.jsonl", "cards": 14, "model": 4, "metric": 10} |
+| every card has the required fields | yes | 14 cards |
+| one model card per allowlisted model, nothing else | yes | ['dim_accounts', 'fct_invoices', 'fct_revenue_daily', 'mrr_monthly'] |
+| one metric card per metrics.yaml entry | yes | missing: [] |
+| dim_accounts card lists its PII columns | yes |  |
+| metric cards list the tables their SQL uses | yes |  |
+| no golden questions or gold SQL in cards or code | yes |  |
+| retrieval.search runs | yes |  |
+| 'monthly recurring revenue' finds mrr_monthly in top 3 | yes | ['mrr_monthly'] |
+| snake_case split: 'days outstanding' finds fct_invoices in top 3 | yes | ['fct_invoices'] |
+| retrieval eval (bm25) runs | yes | {"mode": "bm25", "k": 3, "n": 18, "recall": 0.8333} |
+| eval counts only tune questions with gold SQL | yes | n=18, expected 18 |
+| bm25 recall@3 on gold tables >= 0.80 | yes | recall=0.8333 |
+| hybrid eval runs with the fake embedder | yes | {"mode": "hybrid", "k": 3, "n": 18, "recall": 0.8056} |
+| golden set still frozen | yes | golden set unchanged |
+| pytest tests/ask | yes | 15 passed in 3.88s |
+
+Review: Catalog and metric cards are built from meta.duckdb and metrics.yaml (4 models, 10 metrics). Card text is schema and metric definitions; golden questions and gold SQL are absent. Recall@3 is the mean share of tables parsed from gold_sql that appear on the top-k hits: BM25 0.8333 (n=18) and hybrid with HashEmbedder 0.8056. A fake meta store supplies the unit tests, so a hardcoded catalog cannot pass.
+
+For Amir: Hybrid recall is reported and not gated; only BM25 must be at least 0.80. The probe days outstanding also matches prose on the overdue definition and the invoice column description, so test_tokens_split_snake_case is what locks the splitter. search() with embedder None calls the configured embedding model and will use the network.
+
+## Additions for G5a
+Cards in artifacts/catalog_cards.jsonl (4 models, then 10 metrics). Fields: id, kind, name, text, tables, pii_columns. Ids model:{name} and metric:{id}. Models: dim_accounts, fct_invoices, fct_revenue_daily, mrr_monthly. dim_accounts PII: contact_email, contact_name. Model text: description, grain, owner, columns (type, description, pii tag), tests, upstream sources, metrics that read the model. Metric text: label, definition, synonyms, grain, physical tables, time column. sqlglot drops CTEs and schemas. SQL is not on the card. search(query, k=5, mode=hybrid|bm25|dense, embedder=None) returns Hit(card_id, score, tables); join text on id. Hybrid: depth max(10, k), RRF k=60, then top k. embedder None uses get_embeddings (network unless EMBED_BACKEND=local). Offline: embedder fake or HashEmbedder. Cache: artifacts/card_embeddings.npz. Eval: python -m governor.ask.retrieval eval --split tune --mode bm25|hybrid --k 3 --embedder fake. Mean share of gold-SQL tables in top-k hits. Tune n=18. BM25 0.8333. Hybrid+fake 0.8056, ungated. Snake_case tokens keep the word and its parts. Do not copy questions or gold SQL into prompts or cards. as_of is 2026-10-22.
+

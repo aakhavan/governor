@@ -65,8 +65,9 @@ ACCEPT = [  # role, sql, check on the executed result
 CODE = r'''
 import json, sys
 from governor.ask.validator import validate
-from governor.ask.executor import execute
 cases = json.loads(sys.stdin.read()); out = []
+if cases["execute"]:  # the executor arrives in G5b; G5a passes an empty list
+    from governor.ask.executor import execute
 for role, sql in cases["validate"]:
     try:
         v = validate(sql, role); out.append({"ok": bool(v.ok), "codes": list(v.codes), "sql": v.sql})
