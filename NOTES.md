@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-G6b is in place on the G6a ask graph. record_trace writes one TRACE_COLUMNS row to paths.TRACES (DuckDB, read-write only in governor.ask.traces, connection closed). The question is sha256 and length unless GOVERNOR_TRACE_TEXT=1. Cells from PII-tagged columns and email-like strings are stored as the access.yaml mask in the answer, executed SQL, SQL attempts, plan JSON, and question text. The in-memory trace dict stays unredacted. A write failure is logged with the trace id and exception type, and the card is still returned. paths.STATE defaults to artifacts and follows GOVERNOR_STATE_DIR; traces.duckdb and checkpoints.sqlite sit under it. The CLI python -m governor.ask.run asks or resumes in a new process via SqliteSaver. The last stdout line is JSON with outcome, trace_id, and thread_id. System agent runs that graph in the harness: an interrupt is behaviour clarify and is not resumed. Relative dates still use as_of (2026-10-22). The golden set stays frozen.
+G7 serves governor-ask over HTTP. governor.api.app:app exposes GET /health with no auth, POST /v1/ask, POST /v1/threads/{thread_id}/resume, and GET /v1/traces plus GET /v1/traces/{trace_id}. GOVERNOR_API_TOKENS is role:token pairs. The role comes only from the bearer token, checked with hmac.compare_digest, and a role missing from access.yaml refuses startup. Bodies use extra=forbid. A thread belongs to the role stored in its checkpoint; a trace belongs to the role on its row; any other role gets 404, including ask with a taken thread id. Errors are {error, code} with no traceback and no question text. GOVERNOR_LLM selects openrouter, fake, or fake:SCRIPT.json. The graph is compiled once per process onto SqliteSaver under GOVERNOR_STATE_DIR (/data in the image, artifacts by default). The image builds the green warehouse and catalog, opens the warehouse read-only, and runs uvicorn as non-root. Compose has api on 8000 and a placeholder ui on 8501, with volume governor-data. This is a single-tenant portfolio deployment. as_of remains 2026-10-22.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -21,39 +21,46 @@ G6b is in place on the G6a ask graph. record_trace writes one TRACE_COLUMNS row 
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
 
-## G6b result (implementer notes)
-- `governor.ask.traces`: `TRACE_COLUMNS` (re-exported from schemas), `write_trace(row, *, question, secrets, mask, path)`, `list_traces(role, outcome, limit)` (newest first), `get_trace(id)` on table `traces` in `paths.TRACES`; the only read-write opener, every connection closed. List fields are JSON text, decoded on read. Extra column `question_text`, filled only with `GOVERNOR_TRACE_TEXT=1`.
-- No raw PII in the store: before writing, result cells of output columns that trace to a PII-tagged column (`governor.eval.pii.output_lineage`, granted or not) and any email-like string are replaced by the access.yaml mask in answer, executed_sql, sql_attempts, plan_json and question_text. So a finance_admin card shows the granted email, the stored trace shows the mask. `state['trace']` itself is unredacted (as in G6a).
-- `record_trace` writes the row (`build_graph(..., trace_path=None, store_traces=True)`); any write error is logged (trace id + error type only) and lands in `state['trace_error']`; the card is returned.
-- `paths.STATE` = ROOT / `GOVERNOR_STATE_DIR` (default `artifacts`); `TRACES` and new `CHECKPOINTS` (checkpoints.sqlite) live under it. Side effect: `config.CHROMA_DIR` / `CHUNKS_PATH` moved from `.state/` to `artifacts/` (unused so far).
-- CLI `python -m governor.ask.run` with SqliteSaver (`langgraph-checkpoint-sqlite`, new dependency; pyproject + uv.lock). `--llm` defaults to `openrouter` (llm=None, per-node models); `fake:SCRIPT.json` takes a list or `{plan, sql, answer}` queues (`llm_testing.load_script`). The llm is not saved with the thread: pass it again on `--resume`. Hidden `--database/--access/--meta/--cards/--as-of` for fixtures. A finished thread exits 1 on `--resume`.
-- System `agent` (`governor.ask.agent`, lazy in systems): one thread per item, interrupt = `clarify`; refused_guard/policy = refuse; refused_repair/error = failed answer with the last SQL attempt. With `eval.run --llm openrouter` it gets gpt-5-mini for every node (eval.run's make_llm), not nano for plan; G10 may want llm=None for agent.
-- `tests/ask/conftest.py` points STATE/TRACES/CHECKPOINTS at a temp dir for every ask test.
-Tests: `tests/ask/test_traces.py` (5). accept_g6b 12/12; full pytest 255 passed.
-
-## G6b result
-*Persistence, decision traces, CLI and the agent system, 23 Oct 2026 18:22.*
-
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/G6b`.
-
-| check | ok | detail |
-|---|---|---|
-| governor.ask.traces exposes TRACE_COLUMNS, write_trace, list_traces, get_trace | yes |  |
-| trace row has every specified column | yes | missing: [] |
-| GOVERNOR_STATE_DIR moves state (traces, checkpoints) to one folder | yes | {'state': 'C:\\Users\\amir0\\portfolio\\governor\\zz_state', 'traces': 'C:\\Users\\amir0\\portfolio\\governor\\zz_state\ |
-| agent system runs through the harness on the FakeLLM | yes | wrote C:\Users\amir0\AppData\Local\Temp\g6-accept-ith7kh5_\agent-tune.json | {"n": 25, "execution_accuracy": 0.0, "valid |
-| agent report covers the 25 tune items | yes | 25 |
-| graph prompts exist as files | yes | missing: [] |
-| no golden questions or gold SQL in prompts, code or tests | yes |  |
-| no wall-clock dates in ask logic (as_of only) | yes |  |
-| golden set still frozen | yes | golden set unchanged |
-| pytest tests/ask | yes | 107 passed in 44.08s |
-| required tests present | yes | 4 found |
-| pytest tests/eval | yes | 103 passed in 2.37s |
-
-Review: Decision traces are complete rows in traces.duckdb. Every TRACE_COLUMNS field is written. Question text is stored only when GOVERNOR_TRACE_TEXT=1. Result PII, including a granted email, is stored as the policy mask. A failed write is logged and the answer is kept. Checkpoints and traces share GOVERNOR_STATE_DIR. The CLI resumes a clarify pause from a second process. The agent system returns behaviour clarify on an interrupt and does not resume it. Acceptance passed 12/12.
-
-For Amir: DuckDB trace rows are masked, but SqliteSaver checkpoints and the in-memory trace still contain the question, clarification text, result rows, and the card, so a granted email is in checkpoints.sqlite. G7 should show the role-scoped card and get_trace, not the checkpoint. eval.run --llm openrouter uses one chat model for every node; the CLI openrouter path uses llm=None so plan stays gpt-5-nano. STATE's default moved from .state to artifacts, so CHROMA_DIR and CHUNKS_PATH moved with it. The tune FakeLLM run answers SELECT 1 (execution_accuracy 0) and does not emit clarify.
+## G7 result (implementer notes)
+- `governor.ask.service`: `ask/resume/list_traces/get_trace/settings`, `AskResult`. One compiled graph per process on a SqliteSaver (`paths.CHECKPOINTS`, read when first compiled); `configure(llm, **graph_options)` / `reset()` drop it. Owner = `role` in the checkpointed state (threads) or the trace row; another role gets NotFound (404), same as a missing id. `ask` on an existing thread_id is 409 `thread_exists`; resuming a finished thread is 409 `not_waiting`.
+- Status map: answer -> answered; interrupt -> clarify; refused_guard/policy -> refused; unanswerable and **clarify_failed -> unanswerable** (final, so the client must not offer a resume; differs from the agent map); refused_repair/error -> error. `sql` and rows only when answered.
+- `governor.api.app`: `create_app(tokens=None, llm="env", **graph_options)`; module `app = create_app()` reads `GOVERNOR_API_TOKENS` and `GOVERNOR_LLM` (openrouter | fake | fake:SCRIPT.json) at import, so a bad role fails at uvicorn startup. Empty tokens = warning + every /v1 call 401. 422 bodies list field names only (pydantic's default echoes the input). `/docs` and `/redoc` disabled; `openapi.json` stays (acceptance reads it).
+- New deps: `fastapi` (the API), `uvicorn` (ASGI server in the image), `httpx` (FastAPI TestClient). Plain uvicorn, not `[standard]`, to keep the image small.
+- Dockerfile (python:3.12-slim + uv 0.8, `uv sync --frozen --no-dev`), `.dockerignore` (keeps .env, .venv, artifacts out of the context), compose with `api` and a placeholder `ui`, volume `governor-data` on `/data`. Not built here (no Docker run in this step). build_green's 60 s limit applies inside `docker build` too.
+- `.gitignore`: `!.env.example` added (`.env.*` would have hidden it).
+- **`.env.example` not written**: a permission deny rule covers `.env.*`, so the implementer could not create it. Amir: create it by hand (content in the G7 summary); the acceptance check fails until then.
+Tests: `tests/api/test_api.py` (11 incl. parametrised 401 cases and a startup-error test). accept_g7 15/16 (only .env.example); full pytest 266 passed.
 
 ## Additions for G7
 Resume with Command(resume=text) on the same thread_id. SqliteSaver is sqlite3.connect(paths.CHECKPOINTS, check_same_thread=False); run.sqlite_checkpointer wraps it. Interrupt value is {missing_slot: text}. A second clarify sets outcome clarify_failed and does not interrupt. The llm is not checkpointed. A pause returns outcome clarify and trace_id null; the row is written only in record_trace. Audits: traces.get_trace and list_traces (newest first) are redacted. The in-memory trace, the card, and checkpoints.sqlite still hold the question, clarification answer, and rows, including a granted email. human_feedback is always null. GOVERNOR_STATE_DIR (default artifacts, relative to ROOT) moves STATE, TRACES, and CHECKPOINTS. tests/ask conftest redirects them. CLI --llm openrouter uses llm=None (plan gpt-5-nano; SQL and answer gpt-5-mini). eval.run --llm openrouter passes one model to every node. Agent map: interrupt and clarify_failed -> clarify; refused_guard and refused_policy -> refuse; unanswerable -> unanswerable; refused_repair and refused_error -> answer with error set to that outcome. as_of remains 2026-10-22. CHROMA_DIR now lives under STATE (artifacts/), not .state/.
+
+## G7 result
+*API, authentication and deployment skeleton, 23 Oct 2026 19:30.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 1 fix loop(s); branch `factory/G7`.
+
+| check | ok | detail |
+|---|---|---|
+| API app imports and answers with the fake LLM | yes |  |
+| exactly the specified routes | yes | got [('GET', '/health'), ('GET', '/v1/traces'), ('GET', '/v1/traces/{trace_id}'), ('POST', '/v1/ask'), ('POST', '/v1/thr |
+| /health needs no token | yes | 200 |
+| missing and unknown tokens are 401 | yes | 401/401 |
+| a role field in the body is rejected (422) | yes | 422 |
+| /v1/ask works with a valid token and returns an AskResult | yes | 200 ['answer', 'clarify_question', 'cost_usd', 'freshness', 'lineage', 'models', 'result_columns', 'result_rows', 'sql', |
+| errors are JSON without a traceback | yes | {"error":"trace not found","code":"not_found"} |
+| Dockerfile builds the green warehouse and catalog at build time and runs uvicorn as non-root | yes |  |
+| docker-compose.yml has api and ui services and a /data volume | yes |  |
+| .env.example exists with placeholders only | yes |  |
+| docs/deploy.md exists | yes |  |
+| no real tokens in code, compose or docs | yes |  |
+| tokens are never logged | yes |  |
+| pytest tests/api | yes | 11 passed in 4.59s |
+| required tests present | yes | 7 found |
+| pytest tests/ask | yes | 107 passed in 44.07s |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: Acceptance does not run docker build. The Dockerfile does build the warehouse before switching to uid 10001, and only /data is writable by that user. Deploy checks are substrings, so the letters USER anywhere in the file would pass. GET /openapi.json is still mounted; docs and redoc are off. It is outside the schema, so the exact-routes check does not see it. app.openapi() does not need that route. If the same token string is listed for two roles, the later pair wins. checkpoints.sqlite on the volume still holds the raw question and result rows.
+
+## Additions for G8
+G8 Streamlit talks only to this API. Compose sets GOVERNOR_API_URL=http://api:8000 on ui, which is still a placeholder command on image governor:local. No role picker and no role field: send one bearer token; the API derives the role and returns 422 if the body contains role. Do not put GOVERNOR_API_TOKENS in the browser or in logs. No CORS is configured, so call the API from the Streamlit server. GET /health returns status, as_of, and version. POST /v1/ask takes {question, thread_id?} and returns AskResult. status clarify has a null trace_id; keep that thread and POST /v1/threads/{thread_id}/resume with {answer}. A rerun must not start a new ask. clarify_failed is returned as unanswerable and must not be resumed. Show result_columns and result_rows, not only answer. Another role's thread or trace is 404. 409 is thread_exists or not_waiting, and only for the owning role. Writable state is the api volume governor-data on /data, not the UI container. settings() is in-process only and is not a route.

@@ -286,3 +286,40 @@ For Amir: Validator clock-function names are no longer spelled in source: CURREN
 ## Additions for G6b
 build_graph(*, llm=None, checkpointer=None, database, access_path, meta_path, cards, retrieval_mode='bm25', embedder='fake', as_of). The default saver is InMemorySaver; pass SqliteSaver to resume in a new process. Clarify interrupts with {'missing_slot': text} and resumes with Command(resume=user_text) on the same thread_id. A second clarify sets outcome clarify_failed and does not interrupt again. record_trace already stores state['trace'] with schemas.TRACE_COLUMNS; re-export that tuple from governor.ask.traces. The trace answer field is the text string. state['answer'] is the card (text, rows, columns, sql, models=warehouse tables, sources, freshness, as_of). Trace models are LLM ids. The question is hash plus length only. sql_attempts, usage, and policy_decisions use operator.add, so one thread is one question or later turns append. A failed trace write must still return the card. Executor masking runs before the answer node, so rows and filled text already hold the mask. SQL attempts may name columns; that is not a raw value. Refusal text is fixed. paths.STATE is currently ROOT/'.state' and TRACES is artifacts/traces.duckdb; accept_g6b requires GOVERNOR_STATE_DIR to move both. governor.core.trace already exists; add governor.ask.traces. as_of remains 2026-10-22. The wall-clock grep flags date.today(), current_date, current_timestamp, and now() with empty parentheses. Trace timestamps use datetime.now(timezone.utc). Retrieval defaults to BM25.
 
+## Relocks
+- 23 Oct 2026 18:43: G7: .gitignore added to allowed_paths (needs !.env.example); .env.example written by hand with placeholders (agents may not write .env* files) (via supervise, by claude.ai) (changed: plan.yaml)
+
+## G6b result (implementer notes)
+- `governor.ask.traces`: `TRACE_COLUMNS` (re-exported from schemas), `write_trace(row, *, question, secrets, mask, path)`, `list_traces(role, outcome, limit)` (newest first), `get_trace(id)` on table `traces` in `paths.TRACES`; the only read-write opener, every connection closed. List fields are JSON text, decoded on read. Extra column `question_text`, filled only with `GOVERNOR_TRACE_TEXT=1`.
+- No raw PII in the store: before writing, result cells of output columns that trace to a PII-tagged column (`governor.eval.pii.output_lineage`, granted or not) and any email-like string are replaced by the access.yaml mask in answer, executed_sql, sql_attempts, plan_json and question_text. So a finance_admin card shows the granted email, the stored trace shows the mask. `state['trace']` itself is unredacted (as in G6a).
+- `record_trace` writes the row (`build_graph(..., trace_path=None, store_traces=True)`); any write error is logged (trace id + error type only) and lands in `state['trace_error']`; the card is returned.
+- `paths.STATE` = ROOT / `GOVERNOR_STATE_DIR` (default `artifacts`); `TRACES` and new `CHECKPOINTS` (checkpoints.sqlite) live under it. Side effect: `config.CHROMA_DIR` / `CHUNKS_PATH` moved from `.state/` to `artifacts/` (unused so far).
+- CLI `python -m governor.ask.run` with SqliteSaver (`langgraph-checkpoint-sqlite`, new dependency; pyproject + uv.lock). `--llm` defaults to `openrouter` (llm=None, per-node models); `fake:SCRIPT.json` takes a list or `{plan, sql, answer}` queues (`llm_testing.load_script`). The llm is not saved with the thread: pass it again on `--resume`. Hidden `--database/--access/--meta/--cards/--as-of` for fixtures. A finished thread exits 1 on `--resume`.
+- System `agent` (`governor.ask.agent`, lazy in systems): one thread per item, interrupt = `clarify`; refused_guard/policy = refuse; refused_repair/error = failed answer with the last SQL attempt. With `eval.run --llm openrouter` it gets gpt-5-mini for every node (eval.run's make_llm), not nano for plan; G10 may want llm=None for agent.
+- `tests/ask/conftest.py` points STATE/TRACES/CHECKPOINTS at a temp dir for every ask test.
+Tests: `tests/ask/test_traces.py` (5). accept_g6b 12/12; full pytest 255 passed.
+
+## G6b result
+*Persistence, decision traces, CLI and the agent system, 23 Oct 2026 18:22.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/G6b`.
+
+| check | ok | detail |
+|---|---|---|
+| governor.ask.traces exposes TRACE_COLUMNS, write_trace, list_traces, get_trace | yes |  |
+| trace row has every specified column | yes | missing: [] |
+| GOVERNOR_STATE_DIR moves state (traces, checkpoints) to one folder | yes | {'state': 'C:\\Users\\amir0\\portfolio\\governor\\zz_state', 'traces': 'C:\\Users\\amir0\\portfolio\\governor\\zz_state\ |
+| agent system runs through the harness on the FakeLLM | yes | wrote C:\Users\amir0\AppData\Local\Temp\g6-accept-ith7kh5_\agent-tune.json | {"n": 25, "execution_accuracy": 0.0, "valid |
+| agent report covers the 25 tune items | yes | 25 |
+| graph prompts exist as files | yes | missing: [] |
+| no golden questions or gold SQL in prompts, code or tests | yes |  |
+| no wall-clock dates in ask logic (as_of only) | yes |  |
+| golden set still frozen | yes | golden set unchanged |
+| pytest tests/ask | yes | 107 passed in 44.08s |
+| required tests present | yes | 4 found |
+| pytest tests/eval | yes | 103 passed in 2.37s |
+
+Review: Decision traces are complete rows in traces.duckdb. Every TRACE_COLUMNS field is written. Question text is stored only when GOVERNOR_TRACE_TEXT=1. Result PII, including a granted email, is stored as the policy mask. A failed write is logged and the answer is kept. Checkpoints and traces share GOVERNOR_STATE_DIR. The CLI resumes a clarify pause from a second process. The agent system returns behaviour clarify on an interrupt and does not resume it. Acceptance passed 12/12.
+
+For Amir: DuckDB trace rows are masked, but SqliteSaver checkpoints and the in-memory trace still contain the question, clarification text, result rows, and the card, so a granted email is in checkpoints.sqlite. G7 should show the role-scoped card and get_trace, not the checkpoint. eval.run --llm openrouter uses one chat model for every node; the CLI openrouter path uses llm=None so plan stays gpt-5-nano. STATE's default moved from .state to artifacts, so CHROMA_DIR and CHUNKS_PATH moved with it. The tune FakeLLM run answers SELECT 1 (execution_accuracy 0) and does not emit clarify.
+

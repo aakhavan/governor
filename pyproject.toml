@@ -16,6 +16,9 @@ dependencies = [           # G1 adds the foundation deps; later steps add theirs
     "numpy",
     "sqlglot",
     "langgraph-checkpoint-sqlite",
+    "fastapi",
+    "uvicorn",
+    "httpx",
 ]
 
 [dependency-groups]

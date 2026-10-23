@@ -88,7 +88,7 @@ steps:
     tier: design
     prompt: plan/prompts/G7.md
     accept: plan/accept/accept_g7.py
-    allowed_paths: [src/governor/api/, src/governor/ask/service.py, tests/api/, Dockerfile, docker-compose.yml, .dockerignore, .env.example, docs/deploy.md, pyproject.toml, uv.lock]
+    allowed_paths: [src/governor/api/, src/governor/ask/service.py, tests/api/, Dockerfile, docker-compose.yml, .dockerignore, .env.example, .gitignore, docs/deploy.md, pyproject.toml, uv.lock]
     human_gate: true
     review_focus: "role derived only from the token; no role in request bodies; threads and traces scoped to the role; tokens never logged or committed; errors carry no tracebacks; image builds the warehouse read-only and runs as non-root"
   - id: G8

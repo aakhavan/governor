@@ -1,0 +1,30 @@
+# Local stack: the API and (from G8) the Streamlit UI. Secrets come from .env
+# (never committed; copy .env.example). See docs/deploy.md.
+services:
+  api:
+    build: .
+    image: governor:local
+    env_file: .env
+    environment:
+      GOVERNOR_STATE_DIR: /data
+    ports:
+      - "8000:8000"
+    volumes:
+      - governor-data:/data
+    restart: unless-stopped
+
+  ui:
+    # Filled in by G8: Streamlit talks to the api service only, with its own token.
+    image: governor:local
+    env_file: .env
+    environment:
+      GOVERNOR_API_URL: http://api:8000
+    command: ["python", "-c", "print('ui: added in G8')"]
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    restart: "no"
+
+volumes:
+  governor-data:
