@@ -22,15 +22,17 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any, Literal
 
+import duckdb
 import pydantic
 import yaml
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
+from pydantic_core import to_jsonable_python
 
-from governor.ask import traces
+from governor.ask import catalog, executor, retrieval, traces, validator
 from governor.ask.graph import build_graph
-from governor.ask.policy import roles
-from governor.core import paths
+from governor.ask.policy import Policy, roles
+from governor.core import lineage, paths
 
 Status = Literal["answered", "clarify", "refused", "unanswerable", "error"]
 
@@ -214,6 +216,129 @@ def get_trace(trace_id: str, role: str) -> dict:
     return row
 
 
+# ---------------------------------------------------------------------------
+# read-only catalog and query tools (MCP calls these; no LLM, no writes)
+
+MAX_LINEAGE_DEPTH = 3
+MAX_SEARCH_K = 20
+
+
+def search_catalog(query: str, k: int = 5) -> dict:
+    """BM25 over the catalog and metric cards (offline: no embedding calls)."""
+    k = max(1, min(int(k), MAX_SEARCH_K))
+    by_id = {c["id"]: c for c in retrieval.load_cards()}
+    hits = retrieval.search(query, k=k, mode="bm25", cards=list(by_id.values()))
+    return {
+        "hits": [
+            {
+                "card_id": h.card_id,
+                "kind": by_id[h.card_id]["kind"],
+                "name": by_id[h.card_id]["name"],
+                "tables": h.tables,
+                "score": h.score,
+            }
+            for h in hits
+        ]
+    }
+
+
+def _meta_path() -> Path:
+    return Path(_options.get("meta_path") or paths.META)
+
+
+def _visible_model(name: str, role: str) -> str | None:
+    """The lower-case model name when ``role`` may query it, else None."""
+    _check_role(role)
+    policy = Policy.for_role(role, access_path=_options.get("access_path"), meta_path=_options.get("meta_path"))
+    name = (name or "").strip().lower()
+    return name if name in policy.models else None
+
+
+def describe_model(name: str, role: str) -> dict:
+    """Description, owner, grain, columns (with PII tags) and tests of a model ``role`` may query."""
+    model = _visible_model(name, role)
+    if model is None:
+        return {"error": f"unknown model {name!r}"}
+    connection = duckdb.connect(str(_meta_path()), read_only=True)
+    try:
+        unique_id, owner, description = connection.execute(
+            "SELECT unique_id, owner, description FROM nodes WHERE resource_type = 'model' AND lower(name) = ?",
+            [model],
+        ).fetchone()
+        columns = connection.execute(
+            'SELECT "column", data_type, description, pii_tag FROM columns WHERE unique_id = ? ORDER BY "column"',
+            [unique_id],
+        ).fetchall()
+        tests = connection.execute(
+            'SELECT attached_node, "column", test_type, severity FROM tests WHERE attached_node = ? '
+            'ORDER BY test_type, "column"',
+            [unique_id],
+        ).fetchall()
+    finally:
+        connection.close()
+    description = (description or "").strip()
+    return {
+        "name": model,
+        "description": description,
+        "owner": owner,
+        "grain": catalog._grain(description, tests),
+        "columns": [
+            {"name": c, "type": t, "description": (d or "").strip(), "pii_tag": tag} for c, t, d, tag in columns
+        ],
+        "tests": [{"type": t, "column": c, "severity": s} for _node, c, t, s in tests],
+    }
+
+
+def get_lineage(name: str, role: str, direction: str = "upstream", depth: int = 2) -> dict:
+    """Upstream or downstream nodes of a model ``role`` may query, at most MAX_LINEAGE_DEPTH hops."""
+    if direction not in ("upstream", "downstream"):
+        return {"error": "direction must be 'upstream' or 'downstream'"}
+    model = _visible_model(name, role)
+    if model is None:
+        return {"error": f"unknown model {name!r}"}
+    depth = max(1, min(int(depth), MAX_LINEAGE_DEPTH))
+    connection = duckdb.connect(str(_meta_path()), read_only=True)
+    try:
+        nodes = connection.execute("SELECT unique_id, resource_type, name FROM nodes").fetchall()
+        edges = connection.execute("SELECT parent, child FROM edges").fetchall()
+    finally:
+        connection.close()
+    info = {uid: (kind, node_name) for uid, kind, node_name in nodes}
+    start = next(uid for uid, (kind, n) in info.items() if kind == "model" and n.lower() == model)
+    graph = {"nodes": list(info), "edges": [{"parent": p, "child": c} for p, c in edges]}
+    walk = lineage.upstream if direction == "upstream" else lineage.downstream
+    return {
+        "name": model,
+        "direction": direction,
+        "depth": depth,
+        "nodes": [
+            {"unique_id": uid, "kind": info.get(uid, ("unknown", uid))[0], "name": info.get(uid, ("", uid))[1]}
+            for uid in walk(start, graph, depth)
+        ],
+    }
+
+
+def validate_sql(sql: str, role: str) -> dict:
+    """The validator's verdict for ``role``; ``sql`` is the rewritten query when ok."""
+    _check_role(role)
+    checked = validator.validate(sql, role, access_path=_options.get("access_path"), meta_path=_options.get("meta_path"))
+    return {"ok": checked.ok, "codes": list(checked.codes), "reasons": list(checked.reasons), "sql": checked.sql}
+
+
+def run_query(sql: str, role: str) -> dict:
+    """Validate, dry-run and run ``sql`` read-only as ``role`` (executor.execute; never skips the validator)."""
+    _check_role(role)
+    result = executor.execute(sql, role, access_path=_options.get("access_path"), meta_path=_options.get("meta_path"))
+    return {
+        "ok": result.ok,
+        "codes": list(result.codes),
+        "reasons": list(result.reasons),
+        "columns": list(result.columns),
+        "rows": to_jsonable_python([list(r) for r in result.rows]),
+        "row_count": result.row_count,
+    }
+
+
 def version() -> str:
     try:
         return metadata.version("governor")
@@ -252,10 +377,15 @@ __all__ = [
     "ServiceError",
     "ask",
     "configure",
+    "describe_model",
+    "get_lineage",
     "get_trace",
     "graph",
     "list_traces",
     "reset",
     "resume",
+    "run_query",
+    "search_catalog",
     "settings",
+    "validate_sql",
 ]

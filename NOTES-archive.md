@@ -367,3 +367,39 @@ For Amir: Acceptance does not run docker build. The Dockerfile does build the wa
 ## Additions for G8
 G8 Streamlit talks only to this API. Compose sets GOVERNOR_API_URL=http://api:8000 on ui, which is still a placeholder command on image governor:local. No role picker and no role field: send one bearer token; the API derives the role and returns 422 if the body contains role. Do not put GOVERNOR_API_TOKENS in the browser or in logs. No CORS is configured, so call the API from the Streamlit server. GET /health returns status, as_of, and version. POST /v1/ask takes {question, thread_id?} and returns AskResult. status clarify has a null trace_id; keep that thread and POST /v1/threads/{thread_id}/resume with {answer}. A rerun must not start a new ask. clarify_failed is returned as unanswerable and must not be resumed. Show result_columns and result_rows, not only answer. Another role's thread or trace is 404. 409 is thread_exists or not_waiting, and only for the owning role. Writable state is the api volume governor-data on /data, not the UI container. settings() is in-process only and is not a route.
 
+## G8 result (implementer notes)
+- `apps/streamlit/`: `client.py` (`ApiClient` over httpx; `GOVERNOR_API_URL=asgi` runs the API in-process via `httpx.ASGITransport` + `asyncio.run`, looking up `governor.api.app.app` per request), `ui_common.py` (sidebar token box: password field copied into `session_state["api_token"]` so it survives page switches; login hint), `app.py` (landing: what it is, `/health` status/as_of/version), pages Ask, Trace explorer, Developer.
+- Ask: API called only on form submit, so reruns never re-ask. `thread_id` + `clarify_question` in session state while a clarify is pending; reply box calls `resume`; 404/409 on resume clears the pending thread and shows the error. Answer card: text, `result_columns`/`result_rows` table, SQL expander, models, upstream sources, freshness expander, cost badge; refusals as an error box; unanswerable/error as warnings (no resume offered).
+- Trace explorer: outcome filter (fixed list of graph outcomes), list table, detail (plan JSON, SQL attempts with validator codes, executed SQL, policy decisions).
+- Developer: API URL, `/health` JSON. No settings route exists (and `src/governor/api` is outside G8 paths), so "models" = LLM model ids from the caller's recent traces. access.yaml read from the repo copy and shown as text.
+- Compose `ui`: `streamlit run apps/streamlit/app.py` on 8501, own healthcheck (`/_stcore/health`; the image's HEALTHCHECK targets 8000), waits for api healthy, **no `env_file`** (the UI needs no secrets; GOVERNOR_API_TOKENS stays out of the UI container). Not built or run here.
+- New dep: `streamlit` (UI; 1.66.1). Added by editing pyproject; `uv run` re-locked.
+- Open: `docs/deploy.md` still calls the ui a placeholder (outside G8 paths). Streamlit runs as uid 10001 with HOME=/nonexistent in the image; untested in Docker.
+Tests: `tests/ui/test_pages.py` (5, AppTest, asgi, scripted FakeLLM); accept_g8 11/11; full pytest 271 passed.
+
+## G8 result
+*Streamlit as a thin client over the API, 23 Oct 2026 19:47.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/G8`.
+
+| check | ok | detail |
+|---|---|---|
+| app and the three pages exist | yes | missing: [] |
+| UI has no DB, SQL, policy or governor.ask imports | yes |  |
+| only client.py touches governor.api (asgi mode) | yes |  |
+| no role picker in the UI (role comes from the token) | yes |  |
+| no golden questions in the UI or its tests | yes |  |
+| apps/streamlit/client.py importable | yes |  |
+| ApiClient exposes ask/resume/list_traces/get_trace/health | yes | missing: [] |
+| compose ui service points at the api service | yes |  |
+| pytest tests/ui | yes | 5 passed in 8.90s |
+| required tests present | yes | 5 found |
+| pytest tests/api | yes | 11 passed in 4.05s |
+
+Review: Pages talk only to ApiClient. governor.api is imported only for GOVERNOR_API_URL=asgi. No role picker: the token is sent as a bearer header. Ask stores thread_id while a clarification is pending, so a rerun does not ask again, and the reply box calls resume. Answered results render result_rows as a dataframe plus SQL, models, lineage, freshness, and cost. Refusals are shown as refusals. Trace outcomes match the graph literal. AppTests run these paths on the real API. Compose points ui at http://api:8000 and does not pass tokens.
+
+For Amir: Acceptance does not start the ui container. Streamlit 1.66 with --server.headless and --browser.gatherUsageStats=false does not create ~/.streamlit on boot, so HOME=/nonexistent should not stop startup; a later streamlit_write would still need a writable home. docs/deploy.md still calls ui a placeholder and is outside G8 paths. The role-picker grep is case-sensitive and would miss a widget labeled Role; this UI has no role widget. Refusal rendering is implemented and untested.
+
+## Additions for G9
+G9 is MCP on stdio, separate from the Streamlit client. Do not import apps/streamlit. Shared read-only logic stays in governor.ask.service; the UI already uses that service only through HTTP. Role is never a tool or body field: HTTP derives it from the bearer token and returns 422 if the body contains role. MCP must take the role from GOVERNOR_MCP_ROLE (default analyst, must exist in access.yaml) and must not let the client raise it. settings() is in-process only and is not a route. AskResult clarify carries thread_id and a null trace_id; resume is POST /v1/threads/{id}/resume with {answer}. clarify_failed is returned as unanswerable and must not be resumed. sql and rows are present only when status is answered. Traces are scoped to the role. No write path. Tool text must not restate access.yaml. as_of remains 2026-10-22. Do not read evaluation/golden.
+

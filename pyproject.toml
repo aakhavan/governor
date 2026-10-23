@@ -20,6 +20,7 @@ dependencies = [           # G1 adds the foundation deps; later steps add theirs
     "uvicorn",
     "httpx",
     "streamlit",
+    "mcp>=1.10,<2",
 ]
 
 [dependency-groups]
