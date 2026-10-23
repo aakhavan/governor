@@ -403,3 +403,37 @@ For Amir: Acceptance does not start the ui container. Streamlit 1.66 with --serv
 ## Additions for G9
 G9 is MCP on stdio, separate from the Streamlit client. Do not import apps/streamlit. Shared read-only logic stays in governor.ask.service; the UI already uses that service only through HTTP. Role is never a tool or body field: HTTP derives it from the bearer token and returns 422 if the body contains role. MCP must take the role from GOVERNOR_MCP_ROLE (default analyst, must exist in access.yaml) and must not let the client raise it. settings() is in-process only and is not a route. AskResult clarify carries thread_id and a null trace_id; resume is POST /v1/threads/{id}/resume with {answer}. clarify_failed is returned as unanswerable and must not be resumed. sql and rows are present only when status is answered. Traces are scoped to the role. No write path. Tool text must not restate access.yaml. as_of remains 2026-10-22. Do not read evaluation/golden.
 
+## G9 result (implementer notes)
+- `src/governor/ask/mcp_server.py` (`python -m governor.ask.mcp_server`, stdio): 5 read-only tools (`search_catalog`, `describe_model`, `get_lineage`, `validate_sql`, `run_governed_query`), all annotated readOnlyHint. Role from `GOVERNOR_MCP_ROLE` (default analyst), checked against access.yaml at start-up (exit 2 otherwise); no tool has a role argument.
+- Logic in `governor.ask.service`: `search_catalog` (BM25, offline; k capped at 20), `describe_model`/`get_lineage` (from meta.duckdb, only models the role's policy can query; staging models give `{error}`), `validate_sql` (validator), `run_query` (executor.execute; rows made JSON-safe with pydantic_core). Lineage depth capped at 3; result includes the applied `depth`.
+- SDK: **mcp 1.30.0**, pinned `mcp>=1.10,<2`. 2.3.0 was installed first: it renames `FastMCP` to `MCPServer` and `Tool.inputSchema` to `input_schema`, and the locked accept_g9 client reads `inputSchema`, so 2.x fails acceptance. Revisit the pin when the plan moves to 2.x.
+- `describe_model` reuses `catalog._grain` (private helper) so the grain matches the cards.
+- `StdioServerParameters` without `env` passes only a minimal environment, so `GOVERNOR_MCP_ROLE` must go in the client's `env` (docs/mcp.md shows it).
+- Open: dates in rows arrive as ISO strings, Decimals as strings (pydantic default).
+Tests: `tests/mcp/test_mcp_server.py` (4, real stdio server + SDK client).
+
+## G9 result
+*MCP server with 5 read-only tools (stretch: cut first if late), 23 Oct 2026 19:58.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/G9`.
+
+| check | ok | detail |
+|---|---|---|
+| MCP server answers the SDK stdio client | yes | Processing request of type CallToolRequest | Processing request of type ListToolsRequest | Processing request of type Ca |
+| exactly the 5 specified tools | yes | ['describe_model', 'get_lineage', 'run_governed_query', 'search_catalog', 'validate_sql'] |
+| search_catalog finds mrr_monthly | yes | {'hits': [{'card_id': 'metric:arr', 'kind': 'metric', 'name': 'arr', 'tables': ['mrr_monthly'], 'score': 3.449297}, {'ca |
+| describe_model shows PII tags | yes | {'account_id': None, 'company_name': None, 'contact_email': 'email', 'contact_name': 'name', 'country': None, 'created_a |
+| describe_model on an unknown name returns an error, not a crash | yes | {'error': "unknown model 'no_such_model'"} |
+| get_lineage returns upstream nodes (depth capped) | yes | {'name': 'mrr_monthly', 'direction': 'upstream', 'depth': 3, 'nodes': [{'unique_id': 'source.billing_mart.billing.plans' |
+| validate_sql rejects DROP | yes | {'ok': False, 'codes': ['NOT_SELECT'], 'reasons': ['Drop statement; only SELECT or WITH ... SELECT is allowed'], 'sql':  |
+| run_governed_query returns rows for a valid query | yes | {'ok': True, 'codes': [], 'reasons': [], 'columns': ['country', 'n'], 'rows': [['Aserbaidschan', 5], ['Südgeorgien und d |
+| run_governed_query refuses analyst PII by default | yes | {'ok': False, 'codes': ['PII_FORBIDDEN'], 'reasons': ["PII column dim_accounts.contact_email used outside COUNT(...) for |
+| run_governed_query cannot write | yes | {'ok': False, 'codes': ['NOT_SELECT'], 'reasons': ['Delete statement; only SELECT or WITH ... SELECT is allowed'], 'colu |
+| no tool takes a role argument (role is fixed by GOVERNOR_MCP_ROLE) | yes | [] |
+| docs/mcp.md has the run command and all tool names | yes |  |
+| pytest tests/mcp | yes | 4 passed in 16.87s |
+
+Review: G9 matches the prompt. FastMCP stdio server exposes the five read-only tools as a wrapper over governor.ask.service. Role comes only from GOVERNOR_MCP_ROLE. validate_sql and run_governed_query call validator.validate and executor.execute (read-only warehouse). describe_model and get_lineage use Policy.for_role and a read-only meta store; lineage depth caps at 3. Descriptions do not restate access.yaml. Live SDK output matches the warehouse and validator codes.
+
+For Amir: accept_g9's write check only requires ok false. Writes still cannot land: run_governed_query calls executor.execute, which validates and opens the warehouse read-only. The lineage check only requires a non-empty node list; the recorded payload has depth 3 after a request for 9, and tests/mcp asserts the cap when depth is 50. Models outside the allowlist use the same error shape as a missing name. mcp stays below 2 because accept_g9 reads Tool.inputSchema.
+

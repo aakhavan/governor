@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-G9 is an MCP stdio server on mcp 1.30.0 (FastMCP, pin mcp>=1.10,<2). python -m governor.ask.mcp_server exposes search_catalog, describe_model, get_lineage, validate_sql, and run_governed_query as a thin wrapper over governor.ask.service. The process role comes only from GOVERNOR_MCP_ROLE (default analyst; an unknown role exits 2). SQL goes through validator.validate and executor.execute on a read-only warehouse connection. describe_model and get_lineage open meta.duckdb read-only and only for models that role's Policy allows; lineage depth is capped at 3. Search is offline BM25. The Streamlit client is unchanged. as_of remains 2026-10-22.
+Ask prompts are frozen in evaluation/reports/PROMPTS_FROZEN.sha256 (answer, baseline, draft_sql, plan, repair). Tune split only: baseline execution accuracy 0.556, frozen agent 0.778, agent valid SQL final 1.0, clarify precision and recall 0.67, policy compliance 1.0, no PII leak. as_of remains 2026-10-22T14:11:26+00:00. Holdout has not been run. Retrieval settings and repair code are unchanged. Still open on tune: gpt-5-nano plan intent on j01 (clarify), j03 and j06 (unanswerable), a value miss on j04 with the right column count, and a03 answered instead of clarified.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -21,39 +21,45 @@ G9 is an MCP stdio server on mcp 1.30.0 (FastMCP, pin mcp>=1.10,<2). python -m g
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
 
-## G9 result (implementer notes)
-- `src/governor/ask/mcp_server.py` (`python -m governor.ask.mcp_server`, stdio): 5 read-only tools (`search_catalog`, `describe_model`, `get_lineage`, `validate_sql`, `run_governed_query`), all annotated readOnlyHint. Role from `GOVERNOR_MCP_ROLE` (default analyst), checked against access.yaml at start-up (exit 2 otherwise); no tool has a role argument.
-- Logic in `governor.ask.service`: `search_catalog` (BM25, offline; k capped at 20), `describe_model`/`get_lineage` (from meta.duckdb, only models the role's policy can query; staging models give `{error}`), `validate_sql` (validator), `run_query` (executor.execute; rows made JSON-safe with pydantic_core). Lineage depth capped at 3; result includes the applied `depth`.
-- SDK: **mcp 1.30.0**, pinned `mcp>=1.10,<2`. 2.3.0 was installed first: it renames `FastMCP` to `MCPServer` and `Tool.inputSchema` to `input_schema`, and the locked accept_g9 client reads `inputSchema`, so 2.x fails acceptance. Revisit the pin when the plan moves to 2.x.
-- `describe_model` reuses `catalog._grain` (private helper) so the grain matches the cards.
-- `StdioServerParameters` without `env` passes only a minimal environment, so `GOVERNOR_MCP_ROLE` must go in the client's `env` (docs/mcp.md shows it).
-- Open: dates in rows arrive as ISO strings, Decimals as strings (pydantic default).
-Tests: `tests/mcp/test_mcp_server.py` (4, real stdio server + SDK client).
-
-## G9 result
-*MCP server with 5 read-only tools (stretch: cut first if late), 23 Oct 2026 19:58.*
-
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/G9`.
-
-| check | ok | detail |
-|---|---|---|
-| MCP server answers the SDK stdio client | yes | Processing request of type CallToolRequest | Processing request of type ListToolsRequest | Processing request of type Ca |
-| exactly the 5 specified tools | yes | ['describe_model', 'get_lineage', 'run_governed_query', 'search_catalog', 'validate_sql'] |
-| search_catalog finds mrr_monthly | yes | {'hits': [{'card_id': 'metric:arr', 'kind': 'metric', 'name': 'arr', 'tables': ['mrr_monthly'], 'score': 3.449297}, {'ca |
-| describe_model shows PII tags | yes | {'account_id': None, 'company_name': None, 'contact_email': 'email', 'contact_name': 'name', 'country': None, 'created_a |
-| describe_model on an unknown name returns an error, not a crash | yes | {'error': "unknown model 'no_such_model'"} |
-| get_lineage returns upstream nodes (depth capped) | yes | {'name': 'mrr_monthly', 'direction': 'upstream', 'depth': 3, 'nodes': [{'unique_id': 'source.billing_mart.billing.plans' |
-| validate_sql rejects DROP | yes | {'ok': False, 'codes': ['NOT_SELECT'], 'reasons': ['Drop statement; only SELECT or WITH ... SELECT is allowed'], 'sql':  |
-| run_governed_query returns rows for a valid query | yes | {'ok': True, 'codes': [], 'reasons': [], 'columns': ['country', 'n'], 'rows': [['Aserbaidschan', 5], ['Südgeorgien und d |
-| run_governed_query refuses analyst PII by default | yes | {'ok': False, 'codes': ['PII_FORBIDDEN'], 'reasons': ["PII column dim_accounts.contact_email used outside COUNT(...) for |
-| run_governed_query cannot write | yes | {'ok': False, 'codes': ['NOT_SELECT'], 'reasons': ['Delete statement; only SELECT or WITH ... SELECT is allowed'], 'colu |
-| no tool takes a role argument (role is fixed by GOVERNOR_MCP_ROLE) | yes | [] |
-| docs/mcp.md has the run command and all tool names | yes |  |
-| pytest tests/mcp | yes | 4 passed in 16.87s |
-
-Review: G9 matches the prompt. FastMCP stdio server exposes the five read-only tools as a wrapper over governor.ask.service. Role comes only from GOVERNOR_MCP_ROLE. validate_sql and run_governed_query call validator.validate and executor.execute (read-only warehouse). describe_model and get_lineage use Policy.for_role and a read-only meta store; lineage depth caps at 3. Descriptions do not restate access.yaml. Live SDK output matches the warehouse and validator codes.
-
-For Amir: accept_g9's write check only requires ok false. Writes still cannot land: run_governed_query calls executor.execute, which validates and opens the warehouse read-only. The lineage check only requires a non-empty node list; the recorded payload has depth 3 after a request for 9, and tests/mcp asserts the cap when depth is 50. Models outside the allowlist use the same error shape as a missing name. mcp stays below 2 because accept_g9 reads Tool.inputSchema.
+## G10a result (implementer notes)
+Tune runs (`ts system execution_accuracy valid_sql_final clarify_p/r policy_compliance pii_leak cost`):
+- 2026-10-23T18:02Z baseline 0.556 0.955 -/0.00 0.333 true $0.036
+- 2026-10-23T18:11Z agent 0.389 1.000 0.50/0.67 0.333 false $0.108
+- 2026-10-23T18:23Z agent 0.556 1.000 0.67/0.67 0.667 false $0.118
+- 2026-10-23T18:31Z agent 0.778 1.000 0.67/0.67 0.667 false $0.109
+- 2026-10-23T18:39Z agent 0.778 1.000 0.67/0.67 1.000 false $0.097 (frozen)
+- Changed prompts only (draft_sql, plan, repair): exact output columns, metric shape by grain, bare COUNT on a counted column, no queries on upstream sources, a stricter clarify bar. Details are in `evaluation/reports/TUNING.md`; hashes are in `PROMPTS_FROZEN.sha256`.
+- Open: the plan's intent on join items (gpt-5-nano) moves between answer, clarify and unanswerable from run to run. A stronger plan model is a candidate, but it is not in G10a scope.
 
 ## Additions for G10a
 G10a tunes ask prompts. The MCP server is not on the graph path: do not import mcp_server into the graph and do not add an NL-to-SQL tool. Role stays out of tool arguments and request bodies. mcp is pinned to >=1.10,<2 (installed 1.30.0); 2.x renames FastMCP and Tool.inputSchema, which the locked accept_g9 client reads. service now has search_catalog (BM25, k capped at 20), describe_model, get_lineage (depth capped at 3), validate_sql, and run_query. Query rows are JSON-safe (dates and decimals as strings). Tool text must not restate access.yaml. as_of remains 2026-10-22. Do not read evaluation/golden. No holdout run in G10a.
+
+## G10a result
+*Tune on the tune split, then freeze the prompts, 23 Oct 2026 20:50.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/G10a`.
+
+| check | ok | detail |
+|---|---|---|
+| baseline-tune.json exists | yes |  |
+| baseline-tune.json covers exactly the tune split | yes |  |
+| baseline-tune.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
+| agent-tune.json exists | yes |  |
+| agent-tune.json covers exactly the tune split | yes |  |
+| agent-tune.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
+| agent made real model calls (cost > 0) | yes |  |
+| tune cost within the $2 step budget | yes | $0.133 |
+| PROMPTS_FROZEN.sha256 exists | yes |  |
+| frozen hashes match the current prompts | yes | ['answer.md', 'baseline.md', 'draft_sql.md', 'plan.md', 'repair.md'] vs ['answer.md', 'baseline.md', 'draft_sql.md', 'pl |
+| no golden text in prompts | yes |  |
+| no holdout run yet (that is G10b) | yes | 0 log lines |
+| TUNING.md records the changes and before/after numbers | yes | 33 lines |
+| golden set still frozen | yes | golden set unchanged |
+| pytest tests | yes | 275 passed in 71.50s (0:01:11) |
+
+Review: G10a froze draft_sql, plan, and repair after tune-split runs. Saved baseline and final agent summaries match TUNING.md and NOTES: execution accuracy 0.556 to 0.778, policy 0.333 to 1.0, clarify 0.67/0.67, no agent PII leak. Prompt edits follow checker failures and catalog grain labels. No holdout file or log. Five tune misses remain; four are plan intent on gpt-5-nano.
+
+For Amir: Acceptance checks that TUNING.md has at least 8 lines, not that its numbers match the JSON. Run 0 and run 4 match the two saved reports. Runs 1-3 are recorded only in NOTES and TUNING.md. The COUNT paragraph says policy moved from 0.33 to 1.0; the table shows 0.333, 0.667, 0.667, then 1.0. Baseline still answers j03 and j06, which the frozen agent marks unanswerable.
+
+## Additions for G10b
+Do not edit src/governor/ask/prompts/ or rewrite evaluation/reports/PROMPTS_FROZEN.sha256. accept_g10b requires that hash file to be older than both holdout reports. Run --split holdout once for baseline and once for agent. Never pass --force-holdout. Load baseline-tune.json (execution_accuracy 0.556, valid_sql_final 0.955, clarify precision null, recall 0, policy_compliance 0.333, pii_leak true, cost_usd 0.036) and agent-tune.json (0.778, valid_sql_final 1.0, valid_sql_first 0.9375, clarify 0.667/0.667, policy 1.0, pii_leak false, cost_usd 0.097). as_of is 2026-10-22T14:11:26+00:00. Agent tune misses: j01 clarify, j03 unanswerable, j06 unanswerable, j04 answered (company_name and one unpaid amount; column count matches, values do not), a03 answer where expect is clarify. Baseline scored j03 and j06 equal, so a join loss on holdout can be plan noise on gpt-5-nano. Report a loss as a loss. The $3 check sums the four report JSONs; these two already add about $0.133. G10b's step budget is $1. Runs 1-3 are only in TUNING.md. Frozen prompt rules: catalog grain shapes, bare COUNT, query model names only, clarify only when no default reading exists.

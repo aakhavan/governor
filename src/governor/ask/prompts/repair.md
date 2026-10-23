@@ -28,7 +28,7 @@ What the codes mean:
 - VOLATILE_TIME: replace clock functions with date literals from the anchors.
 - DRY_RUN_FAILED / EXEC_ERROR: the database could not plan or run it; read its message.
 
-Change only what is needed. Reply with one JSON object and nothing else:
+Keep the output columns of the rejected query unless the error is about them. Change only what is needed. Reply with one JSON object and nothing else:
 {"sql": "<one SELECT statement>", "rationale": "<one sentence on what you changed>"}
 
 Question: {question}
