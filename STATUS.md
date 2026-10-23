@@ -1,13 +1,13 @@
 # STATUS: governor
 
-Updated 23 Oct 2026 15:02. Run `20261023-150244`.
+Updated 23 Oct 2026 15:41. Run `20261023-150244`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
 | G1 | Foundation from the Sprint 4 import (core package, green build, fct_invoices, metadata store) | mechanical | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-22T16:18:54 |
 | G2a | Metric definitions, golden-set loader, result checker | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-22T16:36:50 |
-| G2b | Golden set with gold SQL, frozen split, review table | design | yes | approved | 1/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T15:02:44 |
-| G3 | Evaluation harness, metrics, self-test systems, baseline | design | - | pending | 0/2 |  | - | - | - |
+| G2b | Golden set with gold SQL, frozen split, review table | design | yes | done | 1/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T15:02:45 |
+| G3 | Evaluation harness, metrics, self-test systems, baseline | design | - | passed | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T15:41:26 |
 | G4 | Catalog and metric cards, hybrid schema retrieval, recall@k on gold tables | mechanical | - | pending | 0/2 |  | - | - | - |
 | G5a | SQL validator and role policy | design | - | pending | 0/2 |  | - | - | - |
 | G5b | Dry-run and read-only executor | design | yes | pending | 0/2 |  | - | - | - |
@@ -19,6 +19,6 @@ Updated 23 Oct 2026 15:02. Run `20261023-150244`.
 | G10a | Tune on the tune split, then freeze the prompts | design | - | pending | 0/2 |  | - | - | - |
 | G10b | Holdout once, eval report, README, demo script | design | yes | pending | 0/2 |  | - | - | - |
 
-Cost so far (reported + notional): $5.07 of $80.00 run budget; 8 agent call(s).
+Cost so far (reported + notional): $7.74 of $80.00 run budget; 11 agent call(s).
 
-Next: G2b is approved: `factory resume`.
+Next: G3 is passed: `factory resume`.

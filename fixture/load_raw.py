@@ -6,6 +6,7 @@ locks the file, and dbt has to open the same path afterwards.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,8 +18,28 @@ from governor.core import paths
 FIXTURE_DIR = paths.FIXTURE
 WAREHOUSE = FIXTURE_DIR / "billing_mart" / "warehouse.duckdb"
 RAW_DIR = FIXTURE_DIR / "raw"
+AS_OF_FILE = FIXTURE_DIR / "AS_OF"
+AS_OF_ENV = "GOVERNOR_AS_OF"
 
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def pinned_as_of() -> datetime:
+    """The build instant: env GOVERNOR_AS_OF, else fixture/AS_OF. Never the wall clock.
+
+    The frozen golden set was answered against this instant, so every rebuild
+    must reproduce it (fct_invoices.days_outstanding is measured from it).
+    A value without an offset is read as UTC. Returned in UTC, whole seconds.
+    """
+    text = os.environ.get(AS_OF_ENV, "").strip()
+    if not text:
+        if not AS_OF_FILE.is_file():
+            raise SystemExit(f"{AS_OF_FILE} is missing and {AS_OF_ENV} is not set")
+        text = AS_OF_FILE.read_text(encoding="utf-8").strip()
+    value = datetime.fromisoformat(text)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).replace(microsecond=0)
 
 
 def _csv(path: Path, columns: tuple[str, ...]) -> str:
@@ -159,7 +180,7 @@ def _load_payments(
 
 
 def main() -> None:
-    loaded_at = datetime.now().replace(microsecond=0)
+    loaded_at = pinned_as_of()
     counts = load(WAREHOUSE, RAW_DIR, loaded_at)
     for name, count in counts.items():
         print(f"raw.{name} {count}")
