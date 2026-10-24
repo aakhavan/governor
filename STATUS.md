@@ -17,8 +17,8 @@ Updated 23 Oct 2026 21:17. Run `20261023-211723`.
 | G8 | Streamlit as a thin client over the API | mechanical | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T19:47:55 |
 | G9 | MCP server with 5 read-only tools (stretch: cut first if late) | mechanical | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T19:58:50 |
 | G10a | Tune on the tune split, then freeze the prompts | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T20:50:38 |
-| G10b | Holdout once, eval report, README, demo script | design | yes | approved | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-10-23T21:17:23 |
+| G10b | Holdout once, eval report, README, demo script | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-10-23T21:17:23 |
 
 Cost so far (reported + notional): $30.57 of $80.00 run budget; 41 agent call(s).
 
-Next: G10b is approved: `factory resume`.
+Next: all steps done.
