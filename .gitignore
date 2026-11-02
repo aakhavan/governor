@@ -14,6 +14,7 @@ fixture/billing_mart/target/
 fixture/billing_mart/logs/
 fixture/billing_mart/dbt_packages/
 fixture/billing_mart/.user.yml
+testbed/data/
 logs/
 
 # local copies for cross-model reviews (not part of this repo)

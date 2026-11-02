@@ -1,6 +1,6 @@
 # STATUS: governor
 
-Updated 02 Nov 2026 22:25. Run `20261102-215235`.
+Updated 02 Nov 2026 22:36. Run `20261102-215235`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
@@ -19,12 +19,12 @@ Updated 02 Nov 2026 22:25. Run `20261102-215235`.
 | G10a | Tune on the tune split, then freeze the prompts | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T20:50:38 |
 | G10b | Holdout once, eval report, README, demo script | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-10-23T21:17:23 |
 | C1 | Close the four G-phase follow-ups (checkpoint privacy, OpenAPI, dry-run timeout, Docker check) | design | - | done | 2/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-02T22:06:52 |
-| C2 | Warehouse adapter seam, DuckDB first, no behaviour change | design | - | passed | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-02T22:25:47 |
-| C3 | Postgres test bed with the Olist loader and a synthetic sample | mechanical | - | pending | 0/2 |  | - | - | - |
+| C2 | Warehouse adapter seam, DuckDB first, no behaviour change | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-02T22:25:47 |
+| C3 | Postgres test bed with the Olist loader and a synthetic sample | mechanical | - | passed | 0/2 |  | claude-tc-sonnet | cursor-grok: pass | 2026-11-02T22:36:33 |
 | C4 | Postgres adapter and database roles | design | yes | pending | 0/2 |  | - | - | - |
 | C5 | Serving schemas and the validator in the Postgres dialect | design | yes | pending | 0/2 |  | - | - | - |
 | C6 | KPI catalogue, layer blueprint and approved-decisions formats | design | yes | pending | 0/2 |  | - | - | - |
 
-Cost so far (reported + notional): $33.81 of $80.00 run budget; 48 agent call(s).
+Cost so far (reported + notional): $34.18 of $80.00 run budget; 50 agent call(s).
 
-Next: C2 is passed: `factory resume`.
+Next: C3 is passed: `factory resume`.

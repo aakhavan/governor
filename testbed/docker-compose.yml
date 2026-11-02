@@ -1,0 +1,19 @@
+# Local Postgres test bed for the capstone. Laptop only; deployment sets its own password.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: governor_admin
+      POSTGRES_PASSWORD: ${GOVERNOR_PG_PASSWORD:-governor_local}
+    ports:
+      - "55432:5432"
+    volumes:
+      - governor_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U governor_admin -d shop"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  governor_pgdata:

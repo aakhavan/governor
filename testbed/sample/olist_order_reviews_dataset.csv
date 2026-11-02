@@ -1,0 +1,5 @@
+review_id,order_id,review_score,review_comment_title,review_comment_message,review_creation_date,review_answer_timestamp
+rev-0001,ord-0001,2,,sample comment one,2026-01-12 00:00:00,2026-01-13 09:00:00
+rev-0002,ord-0001,5,,sample comment two,2026-01-20 00:00:00,2026-01-21 09:00:00
+rev-0003,ord-0003,1,sample title,late sample delivery,2026-01-25 00:00:00,2026-01-26 09:00:00
+rev-0004,ord-0004,4,,,2026-01-22 00:00:00,2026-01-23 09:00:00

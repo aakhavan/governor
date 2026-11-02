@@ -1,0 +1,6 @@
+geolocation_zip_code_prefix,geolocation_lat,geolocation_lng,geolocation_city,geolocation_state
+01000,-23.50,-46.60,sample city a,SP
+02000,-22.90,-43.20,sample city b,RJ
+03000,-19.90,-43.90,sample city c,MG
+04000,-30.00,-51.20,sample city d,RS
+05000,-12.90,-38.50,sample city e,BA

@@ -1,0 +1,7 @@
+customer_id,customer_unique_id,customer_zip_code_prefix,customer_city,customer_state
+cust-0001,uniq-0001,01000,sample city a,SP
+cust-0002,uniq-0001,01000,sample city a,SP
+cust-0003,uniq-0002,02000,sample city b,RJ
+cust-0004,uniq-0003,03000,sample city c,MG
+cust-0005,uniq-0004,04000,sample city d,RS
+cust-0006,uniq-0005,05000,sample city e,BA

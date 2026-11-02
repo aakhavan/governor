@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-C2 is done. Warehouse access for ask goes through governor.core.adapters (get_adapter, GOVERNOR_WAREHOUSE, default duckdb). DuckDBAdapter opens a hardened read-only connection per call, interrupts on timeout as QueryTimeout, caps rows, and returns JSON-safe values unless native=True. The executor calls dry_run and run(native=True) and re-exports QueryTimeout and QueryError; the validator parses and renders in adapters.dialect() with no hard-coded duckdb dialect. meta.duckdb, traces.duckdb, and checkpoints stay outside the adapter. Locked G5b passed 11/11 and pytest passed 300 (9 skipped). C1 still holds: finished checkpoints are deleted, OpenAPI is off unless GOVERNOR_API_DOCS=1, and prompts are unchanged. as_of remains 2026-10-22T14:11:26+00:00. Next is C3, the Postgres test bed on host port 55432; the Postgres adapter is C4.
+C3 is done. The Postgres test bed is testbed/docker-compose.yml: Postgres 16, host port 55432, database shop, admin governor_admin, default password governor_local, named volume, and a healthcheck. load_olist.py checks the nine published Olist headers, then COPY-loads each CSV into schema raw as text plus _loaded_at, in one truncate-and-load transaction per table. testbed/sample is synthetic and has one customer_unique_id with two customer_ids, a canceled order, a late delivery, two reviews on one order, and two payments on one order. Real files stay in gitignored testbed/data/. The README licence note is still a TODO. psycopg[binary] is a dependency. The Postgres adapter and roles are C4. Ask still uses the DuckDB adapter until then; meta, traces, and checkpoints stay outside the adapter. as_of remains 2026-10-22T14:11:26+00:00.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,14 +20,6 @@ C2 is done. Warehouse access for ask goes through governor.core.adapters (get_ad
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## G10b result (implementer notes)
-- Holdout run once per system, 23 Oct 2026 (log in `evaluation/holdout_runs.log`); prompts untouched. Holdout: baseline 0.600 / agent 0.700 execution accuracy, valid SQL first 1.000 / 0.700, final 1.000 / 1.000, clarify p/r -/0.000 vs 1.000/1.000, policy 0.333 / 1.000, PII leak true / false, cost $0.028 / $0.078, p50 6.656 s / 19.305 s. Four-report total $0.239.
-- Loss: agent 0/2 join and 1/2 time_grain vs baseline 1/2 and 2/2. All three agent misses (j02, j05, t06) have the right values in the wrong shape: an extra month_start on a single named-month total (the tuned metric-shape rule over-applied) and a zero-filled month spine. Human notes in `evaluation/reports/taxonomy.yaml`, read by `python -m governor.eval.report`.
-- Added `governor.eval.report` (+ tests/eval/test_report.py), `evaluation/eval_report.md`, `README.md`, `docs/demo-script.md`.
-
-## Additions for G10b
-Do not edit src/governor/ask/prompts/ or rewrite evaluation/reports/PROMPTS_FROZEN.sha256. accept_g10b requires that hash file to be older than both holdout reports. Run --split holdout once for baseline and once for agent. Never pass --force-holdout. Load baseline-tune.json (execution_accuracy 0.556, valid_sql_final 0.955, clarify precision null, recall 0, policy_compliance 0.333, pii_leak true, cost_usd 0.036) and agent-tune.json (0.778, valid_sql_final 1.0, valid_sql_first 0.9375, clarify 0.667/0.667, policy 1.0, pii_leak false, cost_usd 0.097). as_of is 2026-10-22T14:11:26+00:00. Agent tune misses: j01 clarify, j03 unanswerable, j06 unanswerable, j04 answered (company_name and one unpaid amount; column count matches, values do not), a03 answer where expect is clarify. Baseline scored j03 and j06 equal, so a join loss on holdout can be plan noise on gpt-5-nano. Report a loss as a loss. The $3 check sums the four report JSONs; these two already add about $0.133. G10b's step budget is $1. Runs 1-3 are only in TUNING.md. Frozen prompt rules: catalog grain shapes, bare COUNT, query model names only, clarify only when no default reading exists.
 
 ## G10b result
 *Holdout once, eval report, README, demo script, 23 Oct 2026 21:17.*
@@ -75,3 +67,65 @@ C2 is a pure refactor of the warehouse path. Keep executor results: dry_run(sql,
 
 ## Additions for C3
 Next step is C3 (Postgres test bed), not the adapter. get_adapter("postgres") raises UnknownWarehouseError until C4; GOVERNOR_WAREHOUSE defaults to duckdb. Do not send meta.duckdb, traces.duckdb, or checkpoints through the adapter. Keep dry_run's timeout_s optional: if omitted it uses access.yaml limits.timeout_s, because locked G5b calls dry_run(sql) with no timeout. Keep executor._open; tests stub it, and the duckdb branch passes connect=lambda: _open(database) into DuckDBAdapter. Adapter run defaults to JSON-safe lists (native=False). The executor passes native=True and converts rows to tuples so Decimal and date still reach graph.format_value and the eval checker; C4 must implement native. The conformance Postgres case skips when GOVERNOR_PG_DSN is unset. Its known_column is information_schema.tables.table_name, but list_columns() drops information_schema and pg_catalog, so point that case at a real test-bed table before C4 stops skipping. as_of remains 2026-10-22T14:11:26+00:00. Connection settings come from env only. Test-bed host port is 55432, database shop.
+
+## C3 result
+*Postgres test bed with the Olist loader and a synthetic sample, 02 Nov 2026 22:36.*
+
+Implementer `claude-tc-sonnet`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/C3`.
+
+| check | ok | detail |
+|---|---|---|
+| testbed/docker-compose.yml exists | yes | missing |
+| testbed/load_olist.py exists | yes | missing |
+| testbed/README.md exists | yes | missing |
+| .gitignore keeps testbed/data/ out of git | yes |  |
+| psycopg is a dependency | yes |  |
+| README marks the licence check as TODO or states the licence | yes |  |
+| sample olist_customers_dataset.csv exists | yes | missing |
+| sample olist_customers_dataset.csv header is exact | yes | ['customer_id', 'customer_unique_id', 'customer_zip_code_prefix', 'customer_city', 'customer_state'] |
+| sample olist_customers_dataset.csv has 1-30 rows | yes | 6 rows |
+| sample olist_geolocation_dataset.csv exists | yes | missing |
+| sample olist_geolocation_dataset.csv header is exact | yes | ['geolocation_zip_code_prefix', 'geolocation_lat', 'geolocation_lng', 'geolocation_city', 'geolocation_state'] |
+| sample olist_geolocation_dataset.csv has 1-30 rows | yes | 5 rows |
+| sample olist_order_items_dataset.csv exists | yes | missing |
+| sample olist_order_items_dataset.csv header is exact | yes | ['order_id', 'order_item_id', 'product_id', 'seller_id', 'shipping_limit_date', 'price', 'freight_value'] |
+| sample olist_order_items_dataset.csv has 1-30 rows | yes | 6 rows |
+| sample olist_order_payments_dataset.csv exists | yes | missing |
+| sample olist_order_payments_dataset.csv header is exact | yes | ['order_id', 'payment_sequential', 'payment_type', 'payment_installments', 'payment_value'] |
+| sample olist_order_payments_dataset.csv has 1-30 rows | yes | 6 rows |
+| sample olist_order_reviews_dataset.csv exists | yes | missing |
+| sample olist_order_reviews_dataset.csv header is exact | yes | ['review_id', 'order_id', 'review_score', 'review_comment_title', 'review_comment_message', 'review_creation_date', 'rev |
+| sample olist_order_reviews_dataset.csv has 1-30 rows | yes | 4 rows |
+| sample olist_orders_dataset.csv exists | yes | missing |
+| sample olist_orders_dataset.csv header is exact | yes | ['order_id', 'customer_id', 'order_status', 'order_purchase_timestamp', 'order_approved_at', 'order_delivered_carrier_da |
+| sample olist_orders_dataset.csv has 1-30 rows | yes | 5 rows |
+| sample olist_products_dataset.csv exists | yes | missing |
+| sample olist_products_dataset.csv header is exact | yes | ['product_id', 'product_category_name', 'product_name_lenght', 'product_description_lenght', 'product_photos_qty', 'prod |
+| sample olist_products_dataset.csv has 1-30 rows | yes | 3 rows |
+| sample olist_sellers_dataset.csv exists | yes | missing |
+| sample olist_sellers_dataset.csv header is exact | yes | ['seller_id', 'seller_zip_code_prefix', 'seller_city', 'seller_state'] |
+| sample olist_sellers_dataset.csv has 1-30 rows | yes | 2 rows |
+| sample product_category_name_translation.csv exists | yes | missing |
+| sample product_category_name_translation.csv header is exact | yes | ['product_category_name', 'product_category_name_english'] |
+| sample product_category_name_translation.csv has 1-30 rows | yes | 2 rows |
+| edge: one customer_unique_id with two customer_ids | yes |  |
+| edge: a canceled order | yes |  |
+| edge: an order delivered after its estimated date | yes |  |
+| edge: an order with two reviews | yes |  |
+| edge: an order with two payments | yes |  |
+| every order's customer exists in the customers sample | yes | [] |
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw with the right row counts | yes | 9 tables |
+| a second load gives the same counts (idempotent) | yes | 9 tables |
+| a wrong header is refused and the file is named | yes | Olist source check failed: |   olist_orders_dataset.csv: header differs (missing columns ['order_status'], unexpected co |
+| pytest tests/testbed | yes | 2 passed, 1 skipped in 0.46s |
+| required tests present | yes | 2 found |
+
+Review: C3 matches its prompt. Postgres 16 listens on host port 55432 (database shop, user governor_admin, default password governor_local, named volume, healthcheck). The loader checks the nine published headers, including product_name_lenght, and COPY-loads each CSV into raw as text plus _loaded_at, with truncate and load in one transaction per table. The sample is synthetic and includes every design edge case. testbed/data/ is gitignored. The README licence note is a marked TODO. Acceptance loaded the sample twice with the same counts.
+
+For Amir: The live load checks compare the loader JSON to CSV counts and do not query raw themselves. In this loader that JSON is SELECT count(*) after COPY, both loads matched, and a failed COPY would not print the line, so the rows were loaded. The licence acceptance check is the substring licen; the README marks a TODO and the dataset licence is still unknown. Schemas other than raw, and the roles, belong to C4.
+
+## Additions for C4
+C4 adds the Postgres adapter and roles. Leave the loader as it is. Compose: Postgres 16, host 55432, database shop, admin governor_admin, password default governor_local. A fresh database is empty until python testbed/load_olist.py --source testbed/sample (GOVERNOR_PG_DSN or --dsn). Only schema raw is created. Tables are raw.<csv stem>, source columns text, plus _loaded_at timestamptz NOT NULL DEFAULT now(). COPY CSV stores blanks as NULL. Zip prefixes stay text (01000). Keep spellings product_name_lenght and product_description_lenght. Truncate plus COPY is one transaction per table; headers are checked before any connection. psycopg[binary] is locked at 3.3.6. roles.sql, apply_roles.py, dev_governor, and private do not exist yet. Adapter DSN is GOVERNOR_PG_DSN; the acceptance admin DSN is GOVERNOR_PG_ADMIN_DSN. Conformance skips if unset; point its known column at a table the test creates, because list_columns drops information_schema and pg_catalog. Sample: uniq-0001 is cust-0001 and cust-0002; ord-0002 is canceled; ord-0003 is late; ord-0001 has two reviews and two payments. Do not commit testbed/data/. The README licence line is still a TODO. as_of remains 2026-10-22T14:11:26+00:00.
