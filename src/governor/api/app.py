@@ -14,6 +14,8 @@ in the body is a 422. Every error is ``{error, code}`` JSON with no stack
 trace and no echo of the request. ``GOVERNOR_LLM`` picks the chat model:
 unset or ``openrouter`` = the real per-node models, ``fake`` = the offline
 FakeLLM, ``fake:SCRIPT.json`` = a scripted one (demos without a key).
+``/openapi.json`` is served only when ``GOVERNOR_API_DOCS=1`` (read when the
+app is created); there are no /docs or /redoc pages.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ log = logging.getLogger(__name__)
 
 TOKENS_ENV = "GOVERNOR_API_TOKENS"
 LLM_ENV = "GOVERNOR_LLM"
+DOCS_ENV = "GOVERNOR_API_DOCS"
 THREAD_ID = r"^[A-Za-z0-9_.:-]{1,128}$"
 MAX_TEXT = 4000
 
@@ -136,7 +139,10 @@ def create_app(tokens: str | None = None, llm: Any = "env", **graph_options: Any
             raise ApiError(401, "invalid token", "unauthorized")
         return match
 
-    app = FastAPI(title="governor-ask", version=service.version(), docs_url=None, redoc_url=None)
+    openapi_url = "/openapi.json" if os.environ.get(DOCS_ENV) == "1" else None
+    app = FastAPI(
+        title="governor-ask", version=service.version(), docs_url=None, redoc_url=None, openapi_url=openapi_url
+    )
 
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, exc: ApiError) -> JSONResponse:

@@ -447,7 +447,11 @@ def build_graph(
         return {"validated_sql": checked.sql, "tables": list(checked.tables), "codes": [], "reasons": [], "dry_run_error": None}
 
     def dry_run(state: AskState) -> dict:
-        result = executor.dry_run(state["validated_sql"], database=database)
+        policy = Policy.for_role(state["role"], access_path=access_path, meta_path=meta_path)
+        try:
+            result = executor.dry_run(state["validated_sql"], timeout_s=policy.timeout_s, database=database)
+        except executor.QueryTimeout as error:
+            return _failed(state, ["TIMEOUT"], [], str(error), "dry_run")
         if not result.ok:
             return _failed(state, ["DRY_RUN_FAILED"], [], result.error, "dry_run")
         return {"dry_run_error": None}

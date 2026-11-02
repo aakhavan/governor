@@ -86,9 +86,24 @@ image, `artifacts/` by default locally):
 * `checkpoints.sqlite`: LangGraph checkpoints for paused (clarify) threads.
 
 Compose mounts the named volume `governor-data` on `/data`. The container
-runs as a non-root user that can write only there. Note that checkpoints hold
-the raw question, the clarification and result rows (including granted
-emails); treat the volume as sensitive and delete it to forget threads.
+runs as a non-root user that can write only there.
+
+Checkpoints hold the raw question, the clarification and result rows, so
+(with `GOVERNOR_TRACE_TEXT` unset) a thread's checkpoints are deleted as soon
+as its run ends; only threads paused at `clarify` keep them. Paused threads
+older than `GOVERNOR_THREAD_TTL_H` hours (default `24`) are deleted at the
+start of the next ask. The checkpoint database runs with SQLite
+`secure_delete` on, so deleted rows do not stay in the file. A finished
+thread leaves only its id, role and end time (so its id cannot be reused).
+With `GOVERNOR_TRACE_TEXT=1` (debugging only) finished checkpoints are kept.
+Treat the volume as sensitive anyway.
+
+## Other settings
+
+* `GOVERNOR_API_DOCS=1` serves the OpenAPI schema at `/openapi.json`. It is
+  off by default (404); there are no `/docs` or `/redoc` pages. Read when the
+  app starts.
+* `GOVERNOR_THREAD_TTL_H`: hours a paused (clarify) thread is kept (default 24).
 
 ## Where to host it (choice waits for the capstone brief)
 

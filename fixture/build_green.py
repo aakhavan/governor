@@ -42,7 +42,7 @@ EXPECTED_RAW = {
 
 
 def _dbt_executable() -> Path:
-    scripts = Path(sys.executable).resolve().parent
+    scripts = Path(sys.executable).parent
     for name in ("dbt.exe", "dbt"):
         candidate = scripts / name
         if candidate.is_file():

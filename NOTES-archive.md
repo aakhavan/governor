@@ -477,3 +477,35 @@ Review: G10a froze draft_sql, plan, and repair after tune-split runs. Saved base
 
 For Amir: Acceptance checks that TUNING.md has at least 8 lines, not that its numbers match the JSON. Run 0 and run 4 match the two saved reports. Runs 1-3 are recorded only in NOTES and TUNING.md. The COUNT paragraph says policy moved from 0.33 to 1.0; the table shows 0.333, 0.667, 0.667, then 1.0. Baseline still answers j03 and j06, which the frozen agent marks unanswerable.
 
+## Relocks
+- 02 Nov 2026 16:18: capstone batch 1, design agreed 2 Nov (changed: plan.yaml, plan/accept/_testbed.py, plan/accept/accept_c1.py, plan/accept/accept_c2.py, plan/accept/accept_c3.py, plan/accept/accept_c4.py, plan/accept/accept_c5.py, plan/accept/accept_c6.py, plan/prompts/C1.md, plan/prompts/C2.md, plan/prompts/C3.md, plan/prompts/C4.md, plan/prompts/C5.md, plan/prompts/C6.md)
+- 02 Nov 2026 21:14: C1: checkpoints.py added to allowed_paths; stray acc_c1.log removed (changed: plan.yaml)
+- 02 Nov 2026 21:52: C1: fixture/build_green.py allowed (dbt lookup broke the Linux image build) (changed: plan.yaml)
+
+## C1 result
+*Close the four G-phase follow-ups (checkpoint privacy, OpenAPI, dry-run timeout, Docker check), 02 Nov 2026 22:06.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 2 fix loop(s); branch `factory/C1`.
+
+| check | ok | detail |
+|---|---|---|
+| CLI runs with the fake LLM | yes | SELECT 1 LIMIT 100 | As of: 2026-10-22T14:11:26+00:00 | {"outcome": "answer", "trace_id": "d63dd9ea-861a-4687-80c9-20970 |
+| state files written | yes | 2 files |
+| no stored file still contains the question text after the run | yes |  |
+| app starts | yes |  |
+| /openapi.json is 404 by default | yes | {'openapi': 404, 'health': 200} |
+| /health still answers | yes | {'openapi': 404, 'health': 200} |
+| app starts with GOVERNOR_API_DOCS=1 | yes |  |
+| /openapi.json is served when GOVERNOR_API_DOCS=1 | yes | {'openapi': 200, 'health': 200} |
+| executor imports | yes |  |
+| dry_run takes timeout_s | yes | {'p': True} |
+| Docker is running | yes | 29.9.2 |
+| docker build succeeds | yes | sha256:2f8e10a7d87cee832e1ab95557515162ec35a6b795725b1f23edaeca1ee99259 |
+| container runs as a non-root user | yes | uid '10001' 10001 |
+| pytest tests | yes | 288 passed in 81.47s (0:01:21) |
+| required tests present | yes | 4 found |
+
+Review: Finished checkpoints are removed from the SQLite file via SqliteSaver.delete_thread, PRAGMA secure_delete, and a WAL truncate, not only hidden from queries. Clarify threads still resume and are pruned after GOVERNOR_THREAD_TTL_H at the next ask. OpenAPI is 404 unless GOVERNOR_API_DOCS=1. dry_run and run_readonly share _deadline and raise QueryTimeout; execute() passes the access.yaml timeout. Prompts and answer wording are unchanged. The image builds and runs as uid 10001.
+
+For Amir: The dry-run acceptance check only looks for a timeout_s parameter. The interrupt behavior is covered by test_dry_run_respects_timeout, which acceptance runs. Tombstones in governor_finished_threads keep finished-thread 409s and store no question text. This review used the code and the passing acceptance output; it did not re-run pytest or Docker.
+

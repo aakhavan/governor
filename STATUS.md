@@ -1,6 +1,6 @@
 # STATUS: governor
 
-Updated 23 Oct 2026 21:17. Run `20261023-211723`.
+Updated 02 Nov 2026 22:06. Run `20261102-215235`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
@@ -18,7 +18,13 @@ Updated 23 Oct 2026 21:17. Run `20261023-211723`.
 | G9 | MCP server with 5 read-only tools (stretch: cut first if late) | mechanical | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T19:58:50 |
 | G10a | Tune on the tune split, then freeze the prompts | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-10-23T20:50:38 |
 | G10b | Holdout once, eval report, README, demo script | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-10-23T21:17:23 |
+| C1 | Close the four G-phase follow-ups (checkpoint privacy, OpenAPI, dry-run timeout, Docker check) | design | - | passed | 2/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-02T22:06:52 |
+| C2 | Warehouse adapter seam, DuckDB first, no behaviour change | design | - | pending | 0/2 |  | - | - | - |
+| C3 | Postgres test bed with the Olist loader and a synthetic sample | mechanical | - | pending | 0/2 |  | - | - | - |
+| C4 | Postgres adapter and database roles | design | yes | pending | 0/2 |  | - | - | - |
+| C5 | Serving schemas and the validator in the Postgres dialect | design | yes | pending | 0/2 |  | - | - | - |
+| C6 | KPI catalogue, layer blueprint and approved-decisions formats | design | yes | pending | 0/2 |  | - | - | - |
 
-Cost so far (reported + notional): $30.57 of $80.00 run budget; 41 agent call(s).
+Cost so far (reported + notional): $32.40 of $80.00 run budget; 46 agent call(s).
 
-Next: all steps done.
+Next: C1 is passed: `factory resume`.

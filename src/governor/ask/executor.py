@@ -11,9 +11,10 @@ locked, and is always closed.
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import duckdb
 
@@ -68,14 +69,40 @@ def _open(database: str | Path | None = None) -> duckdb.DuckDBPyConnection:
     return connection
 
 
-def dry_run(sql: str, *, database: str | Path | None = None) -> DryRun:
-    """Plan ``sql`` with EXPLAIN on a read-only connection; nothing is executed."""
+@contextmanager
+def _deadline(connection: duckdb.DuckDBPyConnection, timeout_s: float) -> Iterator[None]:
+    """Interrupt ``connection`` after ``timeout_s``; a duckdb error after that is a QueryTimeout."""
+    fired = threading.Event()
+
+    def interrupt() -> None:
+        fired.set()
+        connection.interrupt()
+
+    timer = threading.Timer(timeout_s, interrupt)
+    timer.daemon = True
+    timer.start()
+    try:
+        yield
+    except duckdb.Error:
+        if fired.is_set():
+            raise QueryTimeout(f"query interrupted after {timeout_s}s") from None
+        raise
+    finally:
+        timer.cancel()
+
+
+def dry_run(sql: str, *, timeout_s: float, database: str | Path | None = None) -> DryRun:
+    """Plan ``sql`` with EXPLAIN on a read-only connection; nothing is executed.
+
+    Raises QueryTimeout when planning outlives ``timeout_s`` (same timer as ``run_readonly``).
+    """
     try:
         connection = _open(database)
     except duckdb.Error as error:
         return DryRun(ok=False, error=_message(error))
     try:
-        connection.execute(f"EXPLAIN {sql}").fetchall()
+        with _deadline(connection, timeout_s):
+            connection.execute(f"EXPLAIN {sql}").fetchall()
         return DryRun(ok=True)
     except duckdb.Error as error:
         return DryRun(ok=False, error=_message(error))
@@ -99,26 +126,15 @@ def run_readonly(
         connection = _open(database)
     except duckdb.Error as error:
         raise QueryError(_message(error)) from None
-    fired = threading.Event()
-
-    def interrupt() -> None:
-        fired.set()
-        connection.interrupt()
-
-    timer = threading.Timer(timeout_s, interrupt)
-    timer.daemon = True
-    timer.start()
     try:
-        cursor = connection.execute(sql)
-        columns = [d[0] for d in cursor.description or []]
-        rows = cursor.fetchmany(row_cap) if row_cap > 0 else []
+        with _deadline(connection, timeout_s):
+            cursor = connection.execute(sql)
+            columns = [d[0] for d in cursor.description or []]
+            rows = cursor.fetchmany(row_cap) if row_cap > 0 else []
         return columns, rows
     except duckdb.Error as error:
-        if fired.is_set():
-            raise QueryTimeout(f"query interrupted after {timeout_s}s") from None
         raise QueryError(_message(error)) from None
     finally:
-        timer.cancel()
         connection.close()
 
 
@@ -136,10 +152,10 @@ def execute(
         return ExecResult(ok=False, codes=list(checked.codes), reasons=list(checked.reasons))
     policy = Policy.for_role(role, access_path=access_path, meta_path=meta_path)
     safe_sql = checked.sql
-    plan = dry_run(safe_sql, database=database)
-    if not plan.ok:
-        return ExecResult(ok=False, codes=["DRY_RUN_FAILED"], reasons=[plan.error or "EXPLAIN failed"], sql=safe_sql)
     try:
+        plan = dry_run(safe_sql, timeout_s=policy.timeout_s, database=database)
+        if not plan.ok:
+            return ExecResult(ok=False, codes=["DRY_RUN_FAILED"], reasons=[plan.error or "EXPLAIN failed"], sql=safe_sql)
         columns, rows = run_readonly(safe_sql, timeout_s=policy.timeout_s, row_cap=policy.row_cap, database=database)
     except QueryTimeout as error:
         return ExecResult(ok=False, codes=["TIMEOUT"], reasons=[str(error)], sql=safe_sql)

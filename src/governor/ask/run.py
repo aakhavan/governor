@@ -6,7 +6,8 @@
 Prints the answer card (or the clarifying question). The last stdout line is
 JSON ``{outcome, trace_id, thread_id}``; a paused question has outcome
 ``clarify`` and no trace yet. Graph state is checkpointed in SQLite under
-``paths.STATE``, so ``--resume`` works from a new process. ``--llm`` is not
+``paths.STATE``, so ``--resume`` works from a new process; a finished run's
+checkpoints are deleted (see ``governor.ask.checkpoints``). ``--llm`` is not
 saved with the thread: pass the same kind (or a script for the remaining
 replies) when resuming.
 """
@@ -15,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import sys
 import uuid
 from contextlib import contextmanager
@@ -26,6 +26,7 @@ from typing import Any, Iterator
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
+from governor.ask import checkpoints
 from governor.ask.graph import build_graph
 from governor.ask.policy import roles
 from governor.core import paths
@@ -35,14 +36,9 @@ PREVIEW_ROWS = 20
 
 @contextmanager
 def sqlite_checkpointer(path: Path | None = None) -> Iterator[SqliteSaver]:
-    """A SqliteSaver on ``<state dir>/checkpoints.sqlite``; the connection is closed on exit."""
-    target = Path(path or paths.CHECKPOINTS)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(str(target), check_same_thread=False)
-    try:
-        yield SqliteSaver(connection)
-    finally:
-        connection.close()
+    """A SqliteSaver on ``<state dir>/checkpoints.sqlite`` (secure_delete on); closed on exit."""
+    with checkpoints.open_saver(path or paths.CHECKPOINTS) as saver:
+        yield saver
 
 
 def make_llm(spec: str) -> Any:
@@ -130,9 +126,11 @@ def main(argv: list[str] | None = None) -> int:
             if not pending.next:
                 print(f"thread {thread_id} is not waiting for an answer", file=sys.stderr)
                 return 1
-            result = graph.invoke(Command(resume=args.answer), config)
+            role = (pending.values or {}).get("role")
+            result = checkpoints.invoke(graph, saver, Command(resume=args.answer), config, role)
         else:
-            result = graph.invoke({"question": args.question, "role": args.role}, config)
+            checkpoints.prune_stale(saver)
+            result = checkpoints.invoke(graph, saver, {"question": args.question, "role": args.role}, config, args.role)
 
     if result.get("__interrupt__"):
         print(f"Clarification needed: {result['__interrupt__'][0].value['missing_slot']}")

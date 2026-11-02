@@ -2,7 +2,8 @@
 
 The graph is compiled once per process on a SqliteSaver over
 ``paths.CHECKPOINTS``, so a paused question can be resumed by a later
-request. ``configure`` sets the chat model (None = the real per-node models)
+request. A finished run's checkpoints are deleted, and paused threads past
+their TTL are pruned at the start of each ask (``governor.ask.checkpoints``). ``configure`` sets the chat model (None = the real per-node models)
 and fixture options and drops the compiled graph; the next call compiles it
 again.
 
@@ -29,7 +30,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 from pydantic_core import to_jsonable_python
 
-from governor.ask import catalog, executor, retrieval, traces, validator
+from governor.ask import catalog, checkpoints, executor, retrieval, traces, validator
 from governor.ask.graph import build_graph
 from governor.ask.policy import Policy, roles
 from governor.core import lineage, paths
@@ -92,6 +93,7 @@ _llm_kind = "openrouter"
 _options: dict[str, Any] = {}
 _graph: Any = None
 _connection: sqlite3.Connection | None = None
+_saver: SqliteSaver | None = None
 
 
 def configure(llm: Any = None, *, llm_kind: str | None = None, **graph_options: Any) -> None:
@@ -111,21 +113,20 @@ def reset() -> None:
 
 
 def _close() -> None:
-    global _graph, _connection
+    global _graph, _connection, _saver
     if _connection is not None:
         _connection.close()
-    _graph, _connection = None, None
+    _graph, _connection, _saver = None, None, None
 
 
 def graph() -> Any:
     """The compiled ask graph on the SQLite checkpointer, built on first use."""
-    global _graph, _connection
+    global _graph, _connection, _saver
     with _lock:
         if _graph is None:
-            target = Path(paths.CHECKPOINTS)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            _connection = sqlite3.connect(str(target), check_same_thread=False)
-            _graph = build_graph(llm=_llm, checkpointer=SqliteSaver(_connection), **_options)
+            _connection = checkpoints.connect(paths.CHECKPOINTS)
+            _saver = SqliteSaver(_connection)
+            _graph = build_graph(llm=_llm, checkpointer=_saver, **_options)
         return _graph
 
 
@@ -180,12 +181,15 @@ def ask(question: str, role: str, thread_id: str | None = None) -> AskResult:
     compiled = graph()
     thread_id = thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
+    checkpoints.prune_stale(_saver)
     existing = compiled.get_state(config).values
-    if existing and existing.get("role") != role:
+    owner = existing.get("role") if existing else checkpoints.finished_role(_saver, thread_id)
+    if owner is not None and owner != role:
         raise NotFound("thread not found")
-    if existing:
+    if owner is not None:
         raise Conflict("this thread already exists; resume it or start a new one", "thread_exists")
-    return to_result(compiled.invoke({"question": question, "role": role}, config), thread_id)
+    state = checkpoints.invoke(compiled, _saver, {"question": question, "role": role}, config, role)
+    return to_result(state, thread_id)
 
 
 def resume(thread_id: str, answer: str, role: str) -> AskResult:
@@ -194,11 +198,12 @@ def resume(thread_id: str, answer: str, role: str) -> AskResult:
     compiled = graph()
     config = {"configurable": {"thread_id": thread_id}}
     snapshot = compiled.get_state(config)
-    if not snapshot.values or snapshot.values.get("role") != role:
+    owner = snapshot.values.get("role") if snapshot.values else checkpoints.finished_role(_saver, thread_id)
+    if owner is None or owner != role:
         raise NotFound("thread not found")
     if not snapshot.next:
         raise Conflict("this thread is not waiting for an answer", "not_waiting")
-    return to_result(compiled.invoke(Command(resume=answer), config), thread_id)
+    return to_result(checkpoints.invoke(compiled, _saver, Command(resume=answer), config, role), thread_id)
 
 
 def list_traces(role: str, outcome: str | None = None, limit: int = 50) -> list[dict]:

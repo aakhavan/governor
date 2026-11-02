@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+import time
+
 import duckdb
 import pytest
 
@@ -220,13 +223,53 @@ def test_timeout_is_not_reported_for_ordinary_errors(env):
 # --- dry run ---------------------------------------------------------------------------
 
 def test_dry_run_bad_column(env):
-    plan = dry_run("SELECT nope FROM customers", database=env.warehouse)
+    plan = dry_run("SELECT nope FROM customers", timeout_s=5, database=env.warehouse)
     assert plan.ok is False and plan.error
 
 
 def test_dry_run_good_query_executes_nothing(env):
-    assert dry_run("SELECT region FROM customers", database=env.warehouse).ok
-    assert dry_run("CREATE TABLE zz AS SELECT 1 AS a", database=env.warehouse).ok is False
+    assert dry_run("SELECT region FROM customers", timeout_s=5, database=env.warehouse).ok
+    assert dry_run("CREATE TABLE zz AS SELECT 1 AS a", timeout_s=5, database=env.warehouse).ok is False
+
+
+class _StuckConnection:
+    """EXPLAIN that only returns when the connection is interrupted (a slow planner)."""
+
+    def __init__(self) -> None:
+        self.interrupted = threading.Event()
+        self.closed = False
+
+    def execute(self, sql):
+        if not self.interrupted.wait(10):
+            raise AssertionError("dry_run was never interrupted")
+        raise duckdb.InterruptException("INTERRUPT Error: Interrupted!")
+
+    def interrupt(self):
+        self.interrupted.set()
+
+    def close(self):
+        self.closed = True
+
+
+def test_dry_run_respects_timeout(env, monkeypatch):
+    stuck = _StuckConnection()
+    monkeypatch.setattr(executor, "_open", lambda database=None: stuck)
+    started = time.monotonic()
+    with pytest.raises(QueryTimeout):
+        dry_run("SELECT region FROM customers", timeout_s=0.3, database=env.warehouse)
+    assert time.monotonic() - started < 5 and stuck.closed
+
+    # execute() passes the access.yaml timeout (5 s) to the dry run and reports TIMEOUT
+    seen = {}
+
+    def slow_plan(sql, *, timeout_s, database=None):
+        seen["timeout_s"] = timeout_s
+        raise QueryTimeout(f"query interrupted after {timeout_s}s")
+
+    monkeypatch.setattr(executor, "dry_run", slow_plan)
+    result = env("SELECT region FROM customers", "viewer")
+    assert seen == {"timeout_s": 5.0}
+    assert result.ok is False and result.codes == ["TIMEOUT"] and not result.rows
 
 
 def test_hardening_settings_are_applied(env):

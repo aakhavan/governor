@@ -129,7 +129,7 @@ steps:
     tier: design
     prompt: plan/prompts/C1.md
     accept: plan/accept/accept_c1.py
-    allowed_paths: [src/governor/ask/run.py, src/governor/ask/service.py, src/governor/ask/graph.py, src/governor/ask/executor.py, src/governor/api/app.py, tests/, Dockerfile, docs/deploy.md]
+    allowed_paths: [src/governor/ask/run.py, src/governor/ask/service.py, src/governor/ask/graph.py, src/governor/ask/executor.py, src/governor/ask/checkpoints.py, src/governor/api/app.py, tests/, Dockerfile, docs/deploy.md, fixture/build_green.py]
     human_gate: false
     review_focus: "deleted checkpoints are gone from disk (secure_delete or vacuum), not only from queries; paused clarify threads still resume; no change to ask's prompts or answers; OpenAPI off unless GOVERNOR_API_DOCS=1; dry_run uses the same timeout path as run_readonly"
   - id: C2
