@@ -1,4 +1,5 @@
 # governor-ask on the shared foundation. Spec: PLAN.md (§7 steps). Locked with `factory lock`.
+# Capstone batch 1 (C1-C6) added 2 Nov 2026: contracts in docs/capstone/design.md, vocabulary in CONTEXT.md, decisions in docs/adr/.
 # Revised 22 Oct after the Sol review: G2/G5/G6/G10 split, G7 API/auth/deploy added, MCP (G9) is a stretch.
 project: governor
 notes: NOTES.md
@@ -123,3 +124,51 @@ steps:
     allowed_paths: [src/governor/eval/, evaluation/reports/, evaluation/eval_report.md, evaluation/holdout_runs.log, README.md, docs/, tests/eval/]
     human_gate: true
     review_focus: "holdout run once after the freeze; numbers in README equal the report; limits stated honestly (small catalog, single warehouse, 15 holdout items); agent vs baseline per category; no PII leak (rubric Q6, Q8)"
+  - id: C1
+    title: Close the four G-phase follow-ups (checkpoint privacy, OpenAPI, dry-run timeout, Docker check)
+    tier: design
+    prompt: plan/prompts/C1.md
+    accept: plan/accept/accept_c1.py
+    allowed_paths: [src/governor/ask/run.py, src/governor/ask/service.py, src/governor/ask/graph.py, src/governor/ask/executor.py, src/governor/api/app.py, tests/, Dockerfile, docs/deploy.md]
+    human_gate: false
+    review_focus: "deleted checkpoints are gone from disk (secure_delete or vacuum), not only from queries; paused clarify threads still resume; no change to ask's prompts or answers; OpenAPI off unless GOVERNOR_API_DOCS=1; dry_run uses the same timeout path as run_readonly"
+  - id: C2
+    title: Warehouse adapter seam, DuckDB first, no behaviour change
+    tier: design
+    prompt: plan/prompts/C2.md
+    accept: plan/accept/accept_c2.py
+    allowed_paths: [src/governor/core/adapters/, src/governor/core/warehouse.py, src/governor/core/config.py, src/governor/ask/executor.py, src/governor/ask/validator.py, src/governor/ask/service.py, src/governor/ask/graph.py, tests/core/, tests/ask/]
+    human_gate: false
+    review_focus: "a pure refactor: validator decisions and executor results unchanged (locked G5b still passes); the adapter is the only warehouse path in executor and validator; governor's own stores untouched; error names unchanged"
+  - id: C3
+    title: Postgres test bed with the Olist loader and a synthetic sample
+    tier: mechanical
+    prompt: plan/prompts/C3.md
+    accept: plan/accept/accept_c3.py
+    allowed_paths: [testbed/, tests/testbed/, .gitignore, pyproject.toml, uv.lock]
+    human_gate: false
+    review_focus: "headers exactly as published (including product_name_lenght); loader transactional and idempotent; sample clearly synthetic with every edge case; no real data committed; licence left as a marked TODO"
+  - id: C4
+    title: Postgres adapter and database roles
+    tier: design
+    prompt: plan/prompts/C4.md
+    accept: plan/accept/accept_c4.py
+    allowed_paths: [src/governor/core/adapters/, src/governor/core/config.py, testbed/sql/, testbed/apply_roles.py, testbed/docker-compose.yml, testbed/README.md, tests/core/, tests/testbed/, pyproject.toml, uv.lock]
+    human_gate: true
+    review_focus: "read-only and timeout enforced by the database, not only by the app; SET ROLE only from allowed_roles and never from SQL text; no passwords in files beyond the documented test-bed defaults; governor_build limited to dev_governor"
+  - id: C5
+    title: Serving schemas and the validator in the Postgres dialect
+    tier: design
+    prompt: plan/prompts/C5.md
+    accept: plan/accept/accept_c5.py
+    allowed_paths: [src/governor/core/serving.py, src/governor/ask/validator.py, src/governor/ask/policy.py, testbed/sql/, testbed/README.md, tests/testbed/, tests/ask/, tests/fixtures/]
+    human_gate: true
+    review_focus: "the salt never appears in a view definition or a log; hashing keeps equality and COUNT(DISTINCT); masks follow grants; each reader role sees only its own schema; nothing written under knowledge/"
+  - id: C6
+    title: KPI catalogue, layer blueprint and approved-decisions formats
+    tier: design
+    prompt: plan/prompts/C6.md
+    accept: plan/accept/accept_c6.py
+    allowed_paths: [src/governor/core/catalogue.py, knowledge/blueprint.md, knowledge/kpis.yaml, knowledge/approved.yaml, tests/core/]
+    human_gate: true
+    review_focus: "formats match design sections 6-8; validation errors name the KPI; render can neither leave nor add placeholders; no KPI definitions invented; blueprint wording is plain and matches the agreed rules L1-L9"

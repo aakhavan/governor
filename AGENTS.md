@@ -14,12 +14,19 @@ This repo is **governor** (core + ask modules), built step by step by the code f
 - Tests run offline: fake or scripted LLMs, no network. Only the G10a/G10b evaluation calls real models.
 - DuckDB: open the warehouse `read_only=True`; close every connection (Windows file locks).
 
+## Capstone steps (C1 onwards)
+- Contracts: `docs/capstone/design.md`; vocabulary: `CONTEXT.md`; decisions: `docs/adr/`. Read only the sections your step prompt names.
+- The Postgres test bed runs in Docker (`testbed/docker-compose.yml`, host port 55432). Never point code or tests at any other database. Connection settings come from env (`GOVERNOR_PG_DSN`, `GOVERNOR_PG_ADMIN_DSN`); the only passwords allowed in files are the documented test-bed defaults.
+- Real Olist data lives in `testbed/data/` and is never committed; tests use `testbed/sample/`.
+- Warehouse access goes through `governor.core.adapters`. governor's own stores (`meta.duckdb`, `traces.duckdb`, checkpoints) do not.
+- After their gates, `knowledge/blueprint.md`, `knowledge/kpis.yaml` and `knowledge/approved.yaml` are human-owned like `access.yaml` and `policy.yaml`: code reads them; a step changes them only when its prompt says so.
+
 ## Golden set (from G3 on)
 - Never read `evaluation/golden/questions.yaml` to write prompts, examples or tests. Code loads it through `governor.eval`; tests use their own small fixtures.
 - Never copy golden questions or gold SQL into prompts. The acceptance scripts check for overlap.
 
 ## Never read whole (query or skip instead)
-- `uv.lock`, `artifacts/**` (`manifest.json`, `catalog.json`, `run_results.json`, `sources.json`, `*.duckdb`, `*.sqlite`), `fixture/billing_mart/target/`, `.factory/`, `NOTES-archive.md`, any data file over 200 KB. Use `duckdb` with `LIMIT`, or `python -c` with `json` and a key filter.
+- `uv.lock`, `artifacts/**` (`manifest.json`, `catalog.json`, `run_results.json`, `sources.json`, `*.duckdb`, `*.sqlite`), `fixture/billing_mart/target/`, `.factory/`, `NOTES-archive.md`, `testbed/data/**`, any data file over 200 KB. Use `duckdb` with `LIMIT`, or `python -c` with `json` and a key filter.
 
 ## Output rules
 - Quiet commands: `uv run pytest -q`; dbt logs to a file; print summaries only.

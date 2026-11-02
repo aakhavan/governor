@@ -3,6 +3,8 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
+2 Nov 2026: capstone batch 1 (C1-C6) specced in `docs/capstone/design.md` and `plan.yaml`; waiting for Amir's `factory relock`. Batch 2 follows after the KPI research and Amir's approval of the KPI definitions.
+
 G10b is done. Holdout ran once after the prompt freeze (baseline 2026-10-23T18:53:28Z, agent 18:59:20Z, golden fcce84b6b2f86f3b). Agent holdout execution accuracy is 0.700 against the baseline 0.600; policy compliance is 1.000 vs 0.333; the agent leaked no PII and the baseline did. The agent loses on join (0/2 vs 1/2) and time_grain (1/2 vs 2/2). The four runs cost $0.239. evaluation/eval_report.md, README.md, and docs/demo-script.md quote those JSON figures. Prompts and the golden set are unchanged.
 
 ## Open questions

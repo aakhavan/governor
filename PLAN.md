@@ -160,3 +160,7 @@ Default roles come from `%USERPROFILE%\.factory\agents.yaml` (design: claude-tc-
 - Does `int_invoices_with_payments` carry everything `fct_invoices` needs? (G1 finds out; the mart may need a join to `dim_accounts` for country.)
 - Exact Sprint 4 file names may differ from the S4 spec §2; the import script reports what it found.
 - Langfuse or FastAPI `serve/` boundary: not in this plan (capstone).
+
+## Capstone phase (from 2 Nov 2026)
+
+Steps C1 onward implement the capstone design agreed on 2 Nov 2026. Their contracts are in `docs/capstone/design.md`, the vocabulary in `CONTEXT.md` and the decisions with trade-offs in `docs/adr/`. Step prompts name the sections each step needs.
