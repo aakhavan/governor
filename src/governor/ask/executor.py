@@ -2,49 +2,26 @@
 
 The validator decides what may run; this module makes sure that even a wrong
 validator cannot write, read files or run forever. ``execute`` validates,
-dry-runs the rewritten SQL with ``EXPLAIN`` and runs it with the access.yaml
-limits. Every connection comes from ``warehouse.connect()`` (read-only), has
-external access and extension autoloading switched off and its configuration
-locked, and is always closed.
+dry-runs the rewritten SQL and runs it with the access.yaml limits. The
+warehouse is reached only through ``governor.core.adapters``: every
+connection is read-only, hardened, timed and closed by the adapter.
 """
 
 from __future__ import annotations
 
-import threading
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
-import duckdb
+import yaml
 
-from governor.ask.policy import Policy
+from governor.ask.policy import ACCESS_PATH, Policy
 from governor.ask.validator import validate
-from governor.core import warehouse
+from governor.core import adapters
+from governor.core.adapters import DryRun, QueryError, QueryTimeout, WarehouseAdapter
+from governor.core.adapters import duckdb as duckdb_adapter
 
-# Applied in order to every connection; lock_configuration last, so a query
-# cannot switch any of them back on.
-_HARDENING = (
-    "SET enable_external_access = false",
-    "SET autoinstall_known_extensions = false",
-    "SET autoload_known_extensions = false",
-    "SET allow_community_extensions = false",
-    "SET lock_configuration = true",
-)
-
-
-class QueryError(Exception):
-    """The database refused or failed the query."""
-
-
-class QueryTimeout(QueryError):
-    """The query ran longer than the timeout and was interrupted."""
-
-
-@dataclass
-class DryRun:
-    ok: bool
-    error: str | None = None
+__all__ = ["DryRun", "ExecResult", "QueryError", "QueryTimeout", "dry_run", "execute", "run_readonly"]
 
 
 @dataclass
@@ -58,56 +35,39 @@ class ExecResult:
     row_count: int = 0
 
 
-def _open(database: str | Path | None = None) -> duckdb.DuckDBPyConnection:
-    connection = warehouse.connect(database)
-    try:
-        for statement in _HARDENING:
-            connection.execute(statement)
-    except Exception:
-        connection.close()
-        raise
-    return connection
+def _open(database: str | Path | None = None):
+    """A hardened read-only DuckDB connection (the DuckDB adapter opens every connection this way)."""
+    return duckdb_adapter.open_connection(database)
 
 
-@contextmanager
-def _deadline(connection: duckdb.DuckDBPyConnection, timeout_s: float) -> Iterator[None]:
-    """Interrupt ``connection`` after ``timeout_s``; a duckdb error after that is a QueryTimeout."""
-    fired = threading.Event()
-
-    def interrupt() -> None:
-        fired.set()
-        connection.interrupt()
-
-    timer = threading.Timer(timeout_s, interrupt)
-    timer.daemon = True
-    timer.start()
-    try:
-        yield
-    except duckdb.Error:
-        if fired.is_set():
-            raise QueryTimeout(f"query interrupted after {timeout_s}s") from None
-        raise
-    finally:
-        timer.cancel()
+def _adapter(database: str | Path | None) -> WarehouseAdapter:
+    name = adapters.warehouse_name()
+    if name == "duckdb":
+        # Looked up at call time, so a test can swap _open for a stub connection.
+        return adapters.get_adapter(name, database=database, connect=lambda: _open(database))
+    return adapters.get_adapter(name)
 
 
-def dry_run(sql: str, *, timeout_s: float, database: str | Path | None = None) -> DryRun:
-    """Plan ``sql`` with EXPLAIN on a read-only connection; nothing is executed.
+def _policy_timeout(access_path: Path | None = None) -> float:
+    """``limits.timeout_s`` from access.yaml (the limits are the same for every role)."""
+    access = yaml.safe_load(Path(access_path or ACCESS_PATH).read_text(encoding="utf-8"))
+    return float(access["limits"]["timeout_s"])
 
-    Raises QueryTimeout when planning outlives ``timeout_s`` (same timer as ``run_readonly``).
+
+def dry_run(sql: str, *, timeout_s: float | None = None, database: str | Path | None = None) -> DryRun:
+    """Plan ``sql`` (EXPLAIN) on a read-only connection; nothing is executed.
+
+    Raises QueryTimeout when planning outlives ``timeout_s`` (same timer as
+    ``run_readonly``). Without ``timeout_s`` the access.yaml limit applies, so a
+    dry run is never untimed.
     """
+    if timeout_s is None:
+        timeout_s = _policy_timeout()
+    adapter = _adapter(database)
     try:
-        connection = _open(database)
-    except duckdb.Error as error:
-        return DryRun(ok=False, error=_message(error))
-    try:
-        with _deadline(connection, timeout_s):
-            connection.execute(f"EXPLAIN {sql}").fetchall()
-        return DryRun(ok=True)
-    except duckdb.Error as error:
-        return DryRun(ok=False, error=_message(error))
+        return adapter.dry_run(sql, timeout_s=timeout_s)
     finally:
-        connection.close()
+        adapter.close()
 
 
 def run_readonly(
@@ -122,20 +82,12 @@ def run_readonly(
     Raises QueryTimeout when the query outlives ``timeout_s`` and QueryError on
     any database error (a write on the read-only connection included).
     """
+    adapter = _adapter(database)
     try:
-        connection = _open(database)
-    except duckdb.Error as error:
-        raise QueryError(_message(error)) from None
-    try:
-        with _deadline(connection, timeout_s):
-            cursor = connection.execute(sql)
-            columns = [d[0] for d in cursor.description or []]
-            rows = cursor.fetchmany(row_cap) if row_cap > 0 else []
-        return columns, rows
-    except duckdb.Error as error:
-        raise QueryError(_message(error)) from None
+        columns, rows = adapter.run(sql, timeout_s=timeout_s, row_cap=row_cap, native=True)
     finally:
-        connection.close()
+        adapter.close()
+    return columns, [tuple(row) for row in rows]
 
 
 def execute(
@@ -162,7 +114,3 @@ def execute(
     except QueryError as error:
         return ExecResult(ok=False, codes=["EXEC_ERROR"], reasons=[str(error)], sql=safe_sql)
     return ExecResult(ok=True, sql=safe_sql, columns=columns, rows=rows, row_count=len(rows))
-
-
-def _message(error: Exception) -> str:
-    return str(error).splitlines()[0][:300] if str(error) else type(error).__name__

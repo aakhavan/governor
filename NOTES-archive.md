@@ -509,3 +509,29 @@ Review: Finished checkpoints are removed from the SQLite file via SqliteSaver.de
 
 For Amir: The dry-run acceptance check only looks for a timeout_s parameter. The interrupt behavior is covered by test_dry_run_respects_timeout, which acceptance runs. Tombstones in governor_finished_threads keep finished-thread 409s and store no question text. This review used the code and the passing acceptance output; it did not re-run pytest or Docker.
 
+## C2 result
+*Warehouse adapter seam, DuckDB first, no behaviour change, 02 Nov 2026 22:25.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/C2`.
+
+| check | ok | detail |
+|---|---|---|
+| conformance suite exists | yes | missing |
+| adapter contract runs | yes |  |
+| DuckDB adapter named duckdb with dialect duckdb | yes | {'name': 'duckdb', 'dialect': 'duckdb', 'dry_good': True, 'dry_bad': False, 'row_cap': 7, 'json_safe': True, 'timeout':  |
+| dry_run passes a good query and fails a bad column | yes | {'name': 'duckdb', 'dialect': 'duckdb', 'dry_good': True, 'dry_bad': False, 'row_cap': 7, 'json_safe': True, 'timeout':  |
+| run honours row_cap | yes | 7 |
+| run returns JSON-safe values | yes |  |
+| timeout raises QueryTimeout | yes | QueryTimeout |
+| a write raises QueryError | yes | QueryError |
+| list_columns returns real columns | yes |  |
+| unknown adapter name raises | yes | UnknownWarehouseError |
+| executor and validator do not import duckdb | yes |  |
+| validator has no hard-coded duckdb dialect | yes |  |
+| locked G5b acceptance still passes | yes | 11/11 checks passed | {"step": "G5b", "pass": true, "checks": [{"name": "validator and executor run", "ok": true, "detai |
+| pytest tests | yes | 300 passed, 9 skipped in 72.91s (0:01:12) |
+
+Review: C2 moves warehouse access behind governor.core.adapters without changing validator decisions or executor results. DuckDBAdapter is the only query path in the executor (dry_run and run); the validator uses adapters.dialect() and neither file imports duckdb. Own stores stay out of the adapter. QueryTimeout and QueryError are the same objects the executor re-exports. Conformance, the green-warehouse contract, locked G5b (11/11), and pytest (300 passed) all exercise that path, so the acceptance pass is trustworthy.
+
+For Amir: The "missing" detail on "conformance suite exists" is check()'s failure text; the file is present and ok is true. run(native=True) is an intentional deviation from design section 3 so executor cells stay Decimal and date for format_value; the default remains JSON-safe. The skipped Postgres conformance case points list_columns at information_schema, which the default listing excludes.
+

@@ -1,10 +1,10 @@
-"""SQL validator: the security boundary between a proposed query and DuckDB.
+"""SQL validator: the security boundary between a proposed query and the warehouse.
 
 The model only proposes SQL; this module decides. ``validate`` parses with
-sqlglot (duckdb dialect), rejects anything outside the role's policy, and on
+sqlglot in the warehouse adapter's dialect, rejects anything outside the role's policy, and on
 success returns the SQL to run: LIMIT injected or lowered, and for ``mask``
 roles an outer projection that replaces PII values with the mask, so raw PII
-never leaves DuckDB.
+never leaves the warehouse.
 
 Checks are default-deny: every relation must be an allowlisted model or a CTE
 of the same query, every function in FROM is rejected, and a PII column is
@@ -23,9 +23,8 @@ from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import Scope, traverse_scope
 
 from governor.ask.policy import Policy, UnknownRoleError
+from governor.core import adapters
 from governor.core.warehouse import MARTS_SCHEMA
-
-DIALECT = "duckdb"
 
 # Wall-clock functions. Time must come in as literals derived from as_of.
 _VOLATILE_NODES = (
@@ -73,7 +72,8 @@ class _Reject(Exception):
 
 
 class _Checks:
-    def __init__(self) -> None:
+    def __init__(self, dialect: str) -> None:
+        self.dialect = dialect
         self.codes: list[str] = []
         self.reasons: list[str] = []
 
@@ -90,9 +90,14 @@ def validate(
     *,
     access_path: Path | None = None,
     meta_path: Path | None = None,
+    dialect: str | None = None,
 ) -> ValidationResult:
-    """Decide whether ``role`` may run ``sql``; on success return the rewritten SQL."""
-    checks = _Checks()
+    """Decide whether ``role`` may run ``sql``; on success return the rewritten SQL.
+
+    SQL is parsed and rendered in ``dialect``, by default the dialect of the
+    configured warehouse adapter (``governor.core.adapters.dialect()``).
+    """
+    checks = _Checks(dialect or adapters.dialect())
     try:
         policy = Policy.for_role(role, access_path=access_path, meta_path=meta_path)
     except UnknownRoleError:
@@ -122,7 +127,7 @@ def _validate(sql: str, policy: Policy, checks: _Checks) -> ValidationResult:
     if checks.codes:
         raise _Reject
     scopes = _scopes(qualified, checks)
-    analysis = _Lineage(scopes, policy)
+    analysis = _Lineage(scopes, policy, checks.dialect)
     tables = sorted(analysis.tables)
     pii_refs = sorted(analysis.pii_refs)
     if policy.pii_mode == "aggregate_only" and analysis.forbidden:
@@ -135,10 +140,10 @@ def _validate(sql: str, policy: Policy, checks: _Checks) -> ValidationResult:
         masked = analysis.hidden_outputs(scopes[-1])
     out = _apply_limit(tree, policy)
     if masked:
-        out = _mask(out, _output_names(tree), masked, policy)
+        out = _mask(out, _output_names(tree, checks.dialect), masked, policy)
     return ValidationResult(
         ok=True,
-        sql=out.sql(dialect=DIALECT, comments=False),
+        sql=out.sql(dialect=checks.dialect, comments=False),
         tables=tables,
         pii_columns=pii_refs,
     )
@@ -149,7 +154,7 @@ def _parse(sql: str, checks: _Checks) -> exp.Expression:
         checks.add("PARSE_ERROR", "empty SQL")
         raise _Reject
     try:
-        statements = [s for s in sqlglot.parse(sql, read=DIALECT) if s is not None]
+        statements = [s for s in sqlglot.parse(sql, read=checks.dialect) if s is not None]
     except (ParseError, SqlglotError) as error:
         checks.add("PARSE_ERROR", f"SQL does not parse: {str(error).splitlines()[0][:200]}")
         raise _Reject from None
@@ -186,7 +191,7 @@ def _check_relations(tree: exp.Expression, policy: Policy, checks: _Checks) -> N
         checks.add("TABLE_FUNCTION", f"{node.key.upper()} as a relation is not allowed")
     for table in tree.find_all(exp.Table):
         if not isinstance(table.this, exp.Identifier):
-            name = table.this.sql(dialect=DIALECT)[:80]
+            name = table.this.sql(dialect=checks.dialect)[:80]
             checks.add("TABLE_FUNCTION", f"table function {name} is not allowed")
             continue
         if _looks_like_file(table.name):
@@ -210,7 +215,7 @@ def _check_relations(tree: exp.Expression, policy: Policy, checks: _Checks) -> N
         name = table.name.lower()
         schema = table.db.lower()
         if table.catalog or (schema and schema != MARTS_SCHEMA) or name not in allowed:
-            checks.add("TABLE_NOT_ALLOWED", f"relation {table.sql(dialect=DIALECT)} is not an allowlisted model")
+            checks.add("TABLE_NOT_ALLOWED", f"relation {table.sql(dialect=checks.dialect)} is not an allowlisted model")
 
 
 def _looks_like_file(name: str) -> bool:
@@ -247,7 +252,7 @@ def _qualify(tree: exp.Expression, policy: Policy, checks: _Checks) -> exp.Expre
     try:
         return qualify(
             tree.copy(),
-            dialect=DIALECT,
+            dialect=checks.dialect,
             db=MARTS_SCHEMA,
             schema=schema,
             quote_identifiers=False,
@@ -278,8 +283,9 @@ def _count_protected(column: exp.Column) -> bool:
 class _Lineage:
     """Where each column reference comes from, and which outputs carry hidden PII."""
 
-    def __init__(self, scopes: list[Scope], policy: Policy) -> None:
+    def __init__(self, scopes: list[Scope], policy: Policy, dialect: str) -> None:
         self.policy = policy
+        self.dialect = dialect
         self.by_expression = {id(s.expression): s for s in scopes}
         self.tables: set[str] = set()
         self.pii_refs: set[str] = set()
@@ -362,7 +368,7 @@ class _Lineage:
         if isinstance(source, exp.Table):
             return self.policy.is_hidden(source.name, column.name)
         if isinstance(source, Scope):
-            names = [n.lower() for n in _output_names(source.expression)]
+            names = [n.lower() for n in _output_names(source.expression, self.dialect)]
             name = column.name.lower()
             if name in names:
                 return self._carries(source, names.index(name))
@@ -379,8 +385,8 @@ def _outputs(expression: exp.Expression) -> list[exp.Expression]:
     return list(expression.selects) if isinstance(expression, exp.Select) else []
 
 
-def _output_names(expression: exp.Expression) -> list[str]:
-    return [s.alias_or_name or s.sql(dialect=DIALECT) for s in _outputs(expression)]
+def _output_names(expression: exp.Expression, dialect: str) -> list[str]:
+    return [s.alias_or_name or s.sql(dialect=dialect) for s in _outputs(expression)]
 
 
 def _apply_limit(tree: exp.Expression, policy: Policy) -> exp.Expression:
