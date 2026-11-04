@@ -364,5 +364,7 @@ def test_real_blueprint_loads():
 
 
 def test_real_catalogue_and_approved_load():
-    assert c.load_kpis(ROOT / "knowledge" / "kpis.yaml").model_dump() == {"version": 1, "kpis": []}
+    real = c.load_kpis(ROOT / "knowledge" / "kpis.yaml")  # filled with the definitions Amir approved on 4 Nov
+    assert real.version == 1 and real.kpis
+    assert all(k.status == "approved" and k.owner and k.source for k in real.kpis)
     assert c.load_approved(ROOT / "knowledge" / "approved.yaml").model_dump() == {"version": 1, "decisions": []}

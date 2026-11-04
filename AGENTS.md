@@ -35,3 +35,9 @@ This repo is **governor** (core + ask modules), built step by step by the code f
 ## Coordination
 - `NOTES.md`: current state, open questions, last two steps' result + additions. Under 150 lines. Add a short "Gn result" when you finish.
 - `PROVENANCE.md`: every file imported from Sprint 4, with its source and what was changed.
+
+## Capstone batch 2 (D1 onwards)
+
+- Contract: `docs/capstone/batch2.md`. Code goes in `src/governor/build/`; it never imports `governor.ask`.
+- Tests use the fake LLM only. Never write credentials to a file; connection settings come from env.
+- Scratch output goes to the system temp folder, never the repo root.

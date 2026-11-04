@@ -122,3 +122,7 @@ ask may be polished in another session. That work happens on its own branch and 
 ## 10. UI
 
 Every UI is a thin client of the FastAPI app. No business logic in Streamlit pages, so the UI can be replaced (for example by a React or Next.js front end) without touching the backend.
+
+## 11. Batch 2
+
+Build mode (D steps) is specified in `docs/capstone/batch2.md`, agreed on 4 Nov 2026.

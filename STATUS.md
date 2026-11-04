@@ -23,8 +23,8 @@ Updated 04 Nov 2026 17:26. Run `20261104-172619`.
 | C3 | Postgres test bed with the Olist loader and a synthetic sample | mechanical | - | done | 0/2 |  | claude-tc-sonnet | cursor-grok: pass | 2026-11-02T22:36:33 |
 | C4 | Postgres adapter and database roles | design | yes | done | 2/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-04T11:02:50 |
 | C5 | Serving schemas and the validator in the Postgres dialect | design | yes | done | 2/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T12:43:54 |
-| C6 | KPI catalogue, layer blueprint and approved-decisions formats | design | yes | approved | 2/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T17:26:19 |
+| C6 | KPI catalogue, layer blueprint and approved-decisions formats | design | yes | done | 2/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T17:26:20 |
 
 Cost so far (reported + notional): $56.27 of $80.00 run budget; 76 agent call(s).
 
-Next: C6 is approved: `factory resume`.
+Next: all steps done.

@@ -1,0 +1,13 @@
+# Shop (Olist) column -> PII tag. Human-owned (Amir), agreed 2 Nov 2026: customer ids and locations are treated as
+# personal data even though Olist is released anonymised. Profilers return counts only for these columns.
+customer_id: customer_id
+customer_unique_id: customer_id
+customer_zip_code_prefix: location
+customer_city: location
+customer_state: location
+geolocation_lat: location
+geolocation_lng: location
+seller_zip_code_prefix: location
+seller_city: location
+review_comment_title: free_text
+review_comment_message: free_text

@@ -12,9 +12,11 @@ COMPOSE = ["docker", "compose", "-f", "testbed/docker-compose.yml", "-p", PROJEC
 PG = os.environ.get("GOVERNOR_PG_PASSWORD", "governor_local")
 ASK_PW = os.environ.get("GOVERNOR_ASK_PASSWORD", "governor_ask_local")
 BUILD_PW = os.environ.get("GOVERNOR_BUILD_PASSWORD", "governor_build_local")
-ADMIN_DSN = f"postgresql://governor_admin:{PG}@localhost:55432/shop"
-ASK_DSN = f"postgresql://governor_ask:{ASK_PW}@localhost:55432/shop"
-BUILD_DSN = f"postgresql://governor_build:{BUILD_PW}@localhost:55432/shop"
+# Acceptance runs its own stack on its own port (batch2.md section 3), so a dev test bed on 55432 never collides.
+PORT = os.environ.get("GOVERNOR_ACCEPT_PG_PORT", "55433")
+ADMIN_DSN = f"postgresql://governor_admin:{PG}@localhost:{PORT}/shop"
+ASK_DSN = f"postgresql://governor_ask:{ASK_PW}@localhost:{PORT}/shop"
+BUILD_DSN = f"postgresql://governor_build:{BUILD_PW}@localhost:{PORT}/shop"
 
 EXPECTED = {
     "olist_customers_dataset.csv": ["customer_id", "customer_unique_id", "customer_zip_code_prefix", "customer_city", "customer_state"],
@@ -30,8 +32,12 @@ EXPECTED = {
 
 
 def env(**extra: str) -> dict:
+    """The caller's environment with every test-bed setting pinned to the acceptance stack (never inherited)."""
     e = dict(os.environ)
-    e.setdefault("GOVERNOR_PG_ADMIN_DSN", ADMIN_DSN)
+    e.update({"GOVERNOR_PG_PORT": PORT, "GOVERNOR_PG_HOST": "localhost", "GOVERNOR_PG_DB": "shop",
+              "GOVERNOR_PG_ADMIN_DSN": ADMIN_DSN, "GOVERNOR_PG_DSN": ASK_DSN, "GOVERNOR_BUILD_DSN": BUILD_DSN,
+              "GOVERNOR_BUILD_USER": "governor_build", "GOVERNOR_BUILD_PASSWORD": BUILD_PW,
+              "GOVERNOR_ASK_PASSWORD": ASK_PW, "GOVERNOR_PG_PASSWORD": PG})
     e.update(extra)
     return e
 
@@ -44,13 +50,13 @@ def docker_ok() -> bool:
 def up() -> bool:
     if not check("testbed/docker-compose.yml exists", (ROOT / "testbed" / "docker-compose.yml").is_file(), "missing"):
         return False
-    run(COMPOSE + ["down", "-v"], timeout=300)
-    r = run(COMPOSE + ["up", "-d", "--wait"], timeout=600)
+    run(COMPOSE + ["down", "-v"], timeout=300, env=env())
+    r = run(COMPOSE + ["up", "-d", "--wait"], timeout=600, env=env())
     return check("compose stack up and healthy", r.returncode == 0, tail(r))
 
 
 def down() -> None:
-    run(COMPOSE + ["down", "-v"], timeout=300)
+    run(COMPOSE + ["down", "-v"], timeout=300, env=env())
 
 
 def sample_counts() -> dict:

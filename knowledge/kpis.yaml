@@ -1,14 +1,321 @@
-# KPI catalogue (docs/capstone/design.md section 6). Human-owned.
+# KPI catalogue (design.md section 6, batch2.md). Human-owned: Amir approved these 10 definitions on 4 Nov 2026.
+# Only Amir sets status: approved. Change through a reviewed pull request.
 #
-# KPI definitions are added here only after Amir approves them; only Amir sets
-# `status: approved`. Code reads this file (governor.core.catalogue.load_kpis).
+# Source precedence when definitions conflict: the company's own glossary (tier company) wins, then accounting or
+# regulatory standards (accounting), then the shop platform's documentation (platform), then vendor glossaries
+# (vendor, needs a note). Research behind each definition: Project doc claude/research-kpi-definitions.md.
 #
-# Every KPI names an `owner` (the team or person who owns the definition) and a
-# `source: {tier, ref, note}`; `sources` holds extra citations. When definitions
-# conflict, the source tiers win in this order:
-#   1. company     - the company's own glossary
-#   2. accounting  - an accounting or regulatory standard
-#   3. platform    - the shop platform's documentation
-#   4. vendor      - vendor glossaries (a vendor source must carry a `note`)
+# Templates are Postgres SQL. {relation} and {input} placeholders are filled by catalogue.render() from the
+# approved design's mapping; inputs of type boolean may be mapped to a boolean SQL expression.
 version: 1
-kpis: []
+kpis:
+  - id: gmv
+    label: Gross merchandise value
+    status: approved
+    definition: >-
+      Item price plus freight of valid orders, by purchase month. Valid means the order counts as a sale
+      (for Olist: not canceled or unavailable).
+    grain: month
+    owner: Amir Akhavan (analytics)
+    source: {tier: platform, ref: "https://www.sec.gov/Archives/edgar/data/1594805/000159480526000007/shop-20251231.htm", note: "Shopify 10-K FY2025; eBay's 10-K excludes shipping, Shopify's GMV includes it"}
+    relations:
+      order_lines: {description: one row per order item with the order's status and purchase time}
+    inputs:
+      purchased_at: {relation: order_lines, type: timestamp}
+      item_price: {relation: order_lines, type: money}
+      freight: {relation: order_lines, type: money}
+      valid_order: {relation: order_lines, type: boolean, description: "the order counts as a sale"}
+    template_sql: |
+      WITH l AS (
+        SELECT {purchased_at} AS purchased_at, {item_price} AS item_price, {freight} AS freight, ({valid_order}) AS valid_order
+        FROM {order_lines}
+      )
+      SELECT date_trunc('month', purchased_at) AS month, SUM(item_price + freight) AS gmv
+      FROM l
+      WHERE valid_order
+      GROUP BY 1
+    requires: [order_lines]
+    sources: ["https://www.sec.gov/Archives/edgar/data/1065088/000106508826000027/ebay-20251231.htm"]
+
+  - id: net_revenue
+    label: Net revenue (net merchandise sales)
+    status: approved
+    definition: >-
+      Item price, without freight, of delivered orders by purchase month. Olist has no discount, return or tax
+      data, so the deductions reduce to the delivered-status filter.
+    grain: month
+    owner: Amir Akhavan (analytics)
+    source: {tier: accounting, ref: "https://www.ifrs.org/content/dam/ifrs/meetings/2014/july/trg-rev/rev-rec/ap2-gross-net-amounts-billed.pdf"}
+    relations:
+      order_lines: {description: one row per order item with the order's status and purchase time}
+    inputs:
+      purchased_at: {relation: order_lines, type: timestamp}
+      item_price: {relation: order_lines, type: money}
+      delivered_order: {relation: order_lines, type: boolean, description: "the order was delivered"}
+    template_sql: |
+      WITH l AS (
+        SELECT {purchased_at} AS purchased_at, {item_price} AS item_price, ({delivered_order}) AS delivered_order
+        FROM {order_lines}
+      )
+      SELECT date_trunc('month', purchased_at) AS month, SUM(item_price) AS net_revenue
+      FROM l
+      WHERE delivered_order
+      GROUP BY 1
+    requires: [order_lines]
+    sources: ["https://www.govinfo.gov/content/pkg/CFR-2020-title17-vol3/pdf/CFR-2020-title17-vol3-sec210-5-03.pdf", "https://shopify.dev/docs/api/shopifyql/latest/schemas/sales_revenue/sales.md"]
+
+  - id: aov
+    label: Average order value
+    status: approved
+    definition: >-
+      Item price of valid orders divided by the number of distinct valid orders, by purchase month. Freight excluded.
+    grain: month
+    owner: Amir Akhavan (analytics)
+    source: {tier: platform, ref: "https://changelog.shopify.com/posts/your-average-order-value-now-has-a-new-definition-in-shopify", note: "Shopify changed its AOV definition in January 2023"}
+    relations:
+      order_lines: {description: one row per order item with the order's status and purchase time}
+    inputs:
+      order_id: {relation: order_lines, type: key}
+      purchased_at: {relation: order_lines, type: timestamp}
+      item_price: {relation: order_lines, type: money}
+      valid_order: {relation: order_lines, type: boolean, description: "the order counts as a sale"}
+    template_sql: |
+      WITH l AS (
+        SELECT {order_id} AS order_id, {purchased_at} AS purchased_at, {item_price} AS item_price, ({valid_order}) AS valid_order
+        FROM {order_lines}
+      )
+      SELECT date_trunc('month', purchased_at) AS month, SUM(item_price) / COUNT(DISTINCT order_id) AS aov
+      FROM l
+      WHERE valid_order
+      GROUP BY 1
+    requires: [order_lines]
+    sources: ["https://support.google.com/analytics/answer/12924131"]
+
+  - id: on_time_delivery_rate
+    label: On-time delivery rate
+    status: approved
+    definition: >-
+      Delivered orders whose delivery date is on or before the estimated delivery date (compared by day), divided by
+      delivered orders that have both dates, by purchase month.
+    grain: month
+    owner: Amir Akhavan (operations)
+    source: {tier: platform, ref: "https://marketplacelearn.walmart.com/guides/Policies%20&%20standards/Performance/Seller-performance-standards", note: "marketplace seller standards (Walmart, Amazon, eBay) agree on delivered-by-promise-date"}
+    relations:
+      orders: {description: one row per order}
+    inputs:
+      purchased_at: {relation: orders, type: timestamp}
+      delivered_at: {relation: orders, type: timestamp}
+      estimated_at: {relation: orders, type: timestamp}
+      delivered_order: {relation: orders, type: boolean, description: "the order was delivered"}
+    template_sql: |
+      WITH o AS (
+        SELECT {purchased_at} AS purchased_at, {delivered_at} AS delivered_at, {estimated_at} AS estimated_at,
+               ({delivered_order}) AS delivered_order
+        FROM {orders}
+      )
+      SELECT date_trunc('month', purchased_at) AS month,
+             AVG(CASE WHEN date_trunc('day', delivered_at) <= date_trunc('day', estimated_at) THEN 1.0 ELSE 0.0 END) AS on_time_delivery_rate
+      FROM o
+      WHERE delivered_order AND delivered_at IS NOT NULL AND estimated_at IS NOT NULL
+      GROUP BY 1
+    requires: [orders]
+    sources: ["https://developer.walmart.com/us-marketplace/docs/on-time-delivery-summaries", "https://www.ebay.com/help/selling/selling-seller-performance/seller-performance-standards?id=4347"]
+
+  - id: avg_review_score
+    label: Average review score
+    status: approved
+    definition: >-
+      Mean review score with one review per order (the latest answer), by purchase month; companion: the share of
+      reviews scoring 2 or less.
+    grain: month
+    owner: Amir Akhavan (customer experience)
+    source: {tier: platform, ref: "https://aboutamazon.com/news/retail/amazon-customer-reviews-star-ratings"}
+    relations:
+      order_reviews: {description: one row per order (its latest review) with the order's purchase time}
+    inputs:
+      purchased_at: {relation: order_reviews, type: timestamp}
+      review_score: {relation: order_reviews, type: integer}
+    template_sql: |
+      WITH r AS (
+        SELECT {purchased_at} AS purchased_at, {review_score} AS review_score
+        FROM {order_reviews}
+      )
+      SELECT date_trunc('month', purchased_at) AS month,
+             AVG(review_score * 1.0) AS avg_review_score,
+             AVG(CASE WHEN review_score <= 2 THEN 1.0 ELSE 0.0 END) AS low_score_share
+      FROM r
+      GROUP BY 1
+    requires: [order_reviews]
+    prerequisites: [one_review_per_order]
+    sources: ["https://marketplacelearn.walmart.com/guides/Policies%20&%20standards/Performance/Seller-performance-standards"]
+
+  - id: repeat_purchase_rate
+    label: Repeat purchase rate
+    status: approved
+    definition: >-
+      Customers with 2 or more valid orders divided by customers with at least 1 valid order, over the whole
+      dataset. Customers are counted by the person-level key (Olist: customer_unique_id), not the per-order id.
+    grain: total
+    owner: Amir Akhavan (analytics)
+    source: {tier: platform, ref: "https://help.shopify.com/manual/reports-and-analytics/shopify-reports/report-types/customers-reports?r=ecm-bfs"}
+    relations:
+      orders: {description: one row per order with the person-level customer key}
+    inputs:
+      order_id: {relation: orders, type: key}
+      customer_key: {relation: orders, type: key, description: "person-level customer key"}
+      valid_order: {relation: orders, type: boolean, description: "the order counts as a sale"}
+    template_sql: |
+      WITH o AS (
+        SELECT {order_id} AS order_id, {customer_key} AS customer_key, ({valid_order}) AS valid_order
+        FROM {orders}
+      ),
+      per_customer AS (
+        SELECT customer_key, COUNT(DISTINCT order_id) AS orders
+        FROM o
+        WHERE valid_order
+        GROUP BY 1
+      )
+      SELECT COUNT(*) AS customers,
+             AVG(CASE WHEN orders >= 2 THEN 1.0 ELSE 0.0 END) AS repeat_purchase_rate
+      FROM per_customer
+    requires: [orders]
+    prerequisites: [customer_key_is_person_level]
+    sources: ["https://klaviyo.com/glossary/what-is-a-good-repeat-purchase-rate"]
+
+  - id: cohort_retention
+    label: Monthly cohort retention
+    status: approved
+    definition: >-
+      Cohort = month of a customer's first valid order. Retention in month k = cohort customers with a valid order in
+      the k-th month after the cohort month, divided by cohort size. Cells whose month is the last (incomplete) month
+      of data are flagged.
+    grain: cohort_month
+    owner: Amir Akhavan (analytics)
+    source: {tier: platform, ref: "https://support.google.com/analytics/answer/9670133?hl=en"}
+    relations:
+      orders: {description: one row per order with the person-level customer key}
+    inputs:
+      customer_key: {relation: orders, type: key, description: "person-level customer key"}
+      purchased_at: {relation: orders, type: timestamp}
+      valid_order: {relation: orders, type: boolean, description: "the order counts as a sale"}
+    template_sql: |
+      WITH o AS (
+        SELECT {customer_key} AS customer_key, date_trunc('month', {purchased_at}) AS order_month, ({valid_order}) AS valid_order
+        FROM {orders}
+      ),
+      valid AS (SELECT customer_key, order_month FROM o WHERE valid_order),
+      firsts AS (SELECT customer_key, MIN(order_month) AS cohort_month FROM valid GROUP BY 1),
+      sizes AS (SELECT cohort_month, COUNT(*) AS cohort_size FROM firsts GROUP BY 1),
+      last_month AS (SELECT MAX(order_month) AS m FROM valid),
+      activity AS (
+        SELECT DISTINCT f.cohort_month, v.customer_key,
+               (EXTRACT(YEAR FROM v.order_month) - EXTRACT(YEAR FROM f.cohort_month)) * 12
+                 + EXTRACT(MONTH FROM v.order_month) - EXTRACT(MONTH FROM f.cohort_month) AS months_since_first,
+               v.order_month
+        FROM valid v JOIN firsts f USING (customer_key)
+      )
+      SELECT a.cohort_month, a.months_since_first,
+             COUNT(DISTINCT a.customer_key) * 1.0 / MAX(s.cohort_size) AS retention,
+             BOOL_OR(a.order_month = lm.m) AS incomplete_month
+      FROM activity a
+      JOIN sizes s USING (cohort_month)
+      CROSS JOIN last_month lm
+      GROUP BY 1, 2
+    requires: [orders]
+    prerequisites: [customer_key_is_person_level]
+    sources: ["https://amplitude.com/docs/en/analytics/charts/retention-analysis/retention-analysis-interpret", "https://docs.mixpanel.com/docs/reports/retention.md"]
+
+  - id: historical_clv
+    label: Historical customer lifetime value
+    status: approved
+    definition: >-
+      Mean net revenue (item price of delivered orders) per customer within 90, 180 and 365 days of the customer's
+      first valid order, by first-order cohort month. Revenue-based, since there is no cost data.
+    grain: cohort_month
+    owner: Amir Akhavan (analytics)
+    source: {tier: platform, ref: "https://help.shopify.com/manual/reports-and-analytics/shopify-reports/report-types/customers-reports?r=ecm-bfs"}
+    relations:
+      order_lines: {description: "one row per order item with the order's status, purchase time and person-level customer key"}
+    inputs:
+      customer_key: {relation: order_lines, type: key, description: "person-level customer key"}
+      purchased_at: {relation: order_lines, type: timestamp}
+      item_price: {relation: order_lines, type: money}
+      valid_order: {relation: order_lines, type: boolean, description: "the order counts as a sale"}
+      delivered_order: {relation: order_lines, type: boolean, description: "the order was delivered"}
+    template_sql: |
+      WITH l AS (
+        SELECT {customer_key} AS customer_key, {purchased_at} AS purchased_at, {item_price} AS item_price,
+               ({valid_order}) AS valid_order, ({delivered_order}) AS delivered_order
+        FROM {order_lines}
+      ),
+      firsts AS (SELECT customer_key, MIN(purchased_at) AS first_at FROM l WHERE valid_order GROUP BY 1),
+      per_customer AS (
+        SELECT f.customer_key, date_trunc('month', f.first_at) AS cohort_month,
+               COALESCE(SUM(CASE WHEN l.delivered_order AND l.purchased_at < f.first_at + INTERVAL '90 days' THEN l.item_price END), 0) AS rev_90,
+               COALESCE(SUM(CASE WHEN l.delivered_order AND l.purchased_at < f.first_at + INTERVAL '180 days' THEN l.item_price END), 0) AS rev_180,
+               COALESCE(SUM(CASE WHEN l.delivered_order AND l.purchased_at < f.first_at + INTERVAL '365 days' THEN l.item_price END), 0) AS rev_365
+        FROM firsts f LEFT JOIN l ON l.customer_key = f.customer_key
+        GROUP BY 1, 2
+      )
+      SELECT cohort_month, COUNT(*) AS customers,
+             AVG(rev_90) AS clv_90d, AVG(rev_180) AS clv_180d, AVG(rev_365) AS clv_365d
+      FROM per_customer
+      GROUP BY 1
+    requires: [order_lines]
+    prerequisites: [customer_key_is_person_level]
+    sources: ["https://support.google.com/analytics/answer/9947257?hl=en", "https://help.klaviyo.com/hc/en-us/articles/360020919731"]
+
+  - id: conversion_rate
+    label: Conversion rate
+    status: approved
+    definition: >-
+      Sessions with a purchase divided by sessions, by month. Needs session or visit data.
+    grain: month
+    owner: Amir Akhavan (marketing)
+    source: {tier: platform, ref: "https://shopify.dev/docs/api/shopifyql/latest/schemas/sessions_and_behavior/sessions.md"}
+    relations:
+      sessions: {description: one row per site session with whether it converted}
+    inputs:
+      session_start: {relation: sessions, type: timestamp}
+      converted: {relation: sessions, type: boolean, description: "the session included a purchase"}
+    template_sql: |
+      WITH s AS (SELECT {session_start} AS session_start, ({converted}) AS converted FROM {sessions})
+      SELECT date_trunc('month', session_start) AS month,
+             AVG(CASE WHEN converted THEN 1.0 ELSE 0.0 END) AS conversion_rate
+      FROM s
+      GROUP BY 1
+    requires: [sessions]
+    sources: ["https://support.google.com/analytics/answer/12923437?hl=en"]
+
+  - id: gross_margin
+    label: Gross margin
+    status: approved
+    definition: >-
+      (Net revenue minus cost of goods sold) divided by net revenue, by purchase month. Needs product cost data.
+    grain: month
+    owner: Amir Akhavan (finance)
+    source: {tier: accounting, ref: "https://www.govinfo.gov/content/pkg/CFR-2020-title17-vol3/pdf/CFR-2020-title17-vol3-sec210-5-03.pdf", note: "Regulation S-X gross profit presentation; IFRS 18 subtotals"}
+    relations:
+      order_lines: {description: one row per order item with the order's status and purchase time}
+      product_costs: {description: one row per product with its unit cost}
+    inputs:
+      purchased_at: {relation: order_lines, type: timestamp}
+      item_price: {relation: order_lines, type: money}
+      product_key: {relation: order_lines, type: key}
+      delivered_order: {relation: order_lines, type: boolean, description: "the order was delivered"}
+      cost_product_key: {relation: product_costs, type: key}
+      unit_cost: {relation: product_costs, type: money}
+    template_sql: |
+      WITH l AS (
+        SELECT {purchased_at} AS purchased_at, {item_price} AS item_price, {product_key} AS product_key,
+               ({delivered_order}) AS delivered_order
+        FROM {order_lines}
+      ),
+      c AS (SELECT {cost_product_key} AS product_key, {unit_cost} AS unit_cost FROM {product_costs})
+      SELECT date_trunc('month', l.purchased_at) AS month,
+             (SUM(l.item_price) - SUM(c.unit_cost)) / NULLIF(SUM(l.item_price), 0) AS gross_margin
+      FROM l JOIN c USING (product_key)
+      WHERE l.delivered_order
+      GROUP BY 1
+    requires: [order_lines, product_costs]
+    sources: ["https://help.shopify.com/manual/reports-and-analytics/shopify-reports/report-types/profit-reports?ld=1", "https://ifrs.org/content/dam/ifrs/supporting-implementation/ifrs-18/subtotals-and-categories-webinar-slides.pdf"]

@@ -1,0 +1,20 @@
+# Shop (Olist) access policy for ask and the serving schemas. Human-owned (Amir). Same format as knowledge/access.yaml.
+version: 1
+
+allowlist:              # filled with the certified gold models by the review gate (D6)
+  models: []
+
+limits:
+  default_limit: 100
+  row_cap: 1000
+  timeout_s: 10
+
+mask_value: "***"
+
+roles:
+  analyst:
+    pii: aggregate_only
+    grants: []
+  finance_admin:
+    pii: mask
+    grants: []
