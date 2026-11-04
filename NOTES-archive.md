@@ -753,3 +753,38 @@ For Amir: The green pytest skipped all six tests in tests/testbed/test_serving.p
 ## Additions for C6
 Serving is `python -m governor.core.serving apply --source <schema> --policy <file> [--access <file>]` using GOVERNOR_PG_ADMIN_DSN and GOVERNOR_PII_SALT. It writes one view per source table in serve_analyst and serve_finance_admin. Analyst PII is encode(sha256(convert_to((SELECT salt FROM private.pii_salt) || cast(value as text), 'UTF8')), 'hex'). Finance PII is the access mask unless finance_admin grants table.column. The salt row is replaced on each apply and is not in the view definition. Database roles are governor_analyst and governor_finance_admin (USAGE and SELECT on their own schema only). governor_ask does not inherit those grants; it still needs SET ROLE. In the postgres dialect the validator allows only unqualified functions in POSTGRES_FUNCTIONS and rejects anything else as FUNCTION_NOT_ALLOWED. That code is not in the graph POLICY_RULES, so a bad function is repaired rather than refused immediately. PostgresAdapter clamps statement_timeout to 10s (MAX_TIMEOUT_S). knowledge/ was not changed; shop policy and access are still unwritten. tests/testbed/test_testbed.py::test_load_sample_idempotent loads through GOVERNOR_PG_DSN, the ask login, so a full pytest with both DSNs set can fail that older test.
 
+## C6 result
+*KPI catalogue, layer blueprint and approved-decisions formats, 04 Nov 2026 17:26.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 2 fix loop(s); branch `factory/C6`.
+
+| check | ok | detail |
+|---|---|---|
+| src/governor/core/catalogue.py exists | yes | missing |
+| knowledge/blueprint.md exists | yes | missing |
+| knowledge/kpis.yaml exists | yes | missing |
+| knowledge/approved.yaml exists | yes | missing |
+| catalogue module runs | yes |  |
+| a valid catalogue loads | yes |  |
+| validation catches duplicate_id and names the KPI | yes | True |
+| validation catches bad_status and names the KPI | yes | True |
+| validation catches undeclared_placeholder and names the KPI | yes | True |
+| validation catches unknown_relation and names the KPI | yes | True |
+| render fills every placeholder | yes |  |
+| render refuses a missing mapping | yes | refused |
+| render refuses an unknown name | yes | refused |
+| blueprint maps bronze/silver/gold to sources, staging+intermediate, marts | yes | {'bronze': ['sources'], 'silver': ['staging', 'intermediate'], 'gold': ['marts']} |
+| blueprint rules L1-L9 with the agreed severities | yes | {'L1': 'high', 'L2': 'high', 'L3': 'high', 'L4': 'high', 'L5': 'medium', 'L6': 'high', 'L7': 'high', 'L8': 'high', 'L9': |
+| blueprint starts with no exceptions | yes | [] |
+| no KPI definitions invented (catalogue empty) | yes | [] |
+| approved decisions start empty | yes | [] |
+| pytest tests/core/test_catalogue.py | yes | 35 passed in 0.95s |
+| required tests present | yes | 1 found |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: The blueprint prose is plain and follows L1-L9; your gate is still the wording approval. Design section 6's AOV sample leaves "item price, freight excluded" unquoted inside a flow mapping, so YAML splits it at the comma. The loader rejects that form; quote those descriptions in real entries. Catalogue status approved means you approved the definition, separate from a certified metric.
+
+## Additions for the next plan
+Use governor.core.catalogue. load_kpis, load_blueprint and load_approved raise CatalogueError (a ValueError) and name the file; KPI errors also name the id. model_dump() mirrors the YAML: catalogue.kpis, blueprint.layers['silver'].dbt, and decisions. SOURCE_PRECEDENCE is company, then accounting, then platform, then vendor. A proposed KPI may omit owner and source; an approved KPI needs both; a vendor source needs a note. There is no conflict resolver yet; the order is only recorded on SOURCE_PRECEDENCE and in the kpis.yaml header. render(kpi, mapping) substitutes relation and input names and refuses unknown names, blanks, and any {placeholder} in a value or in the result. knowledge/kpis.yaml and knowledge/approved.yaml are empty and human-owned; do not invent KPIs or decisions. knowledge/blueprint.md is the standard: bronze=sources, silver=staging and intermediate, gold=marts, rules L1-L9, exceptions []. Quote flow-mapping values that contain commas. Catalogue status approved means the definition was approved; it is not a certified metric.
+
