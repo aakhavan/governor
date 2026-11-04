@@ -1,5 +1,12 @@
-"""CLI: python -m governor.build init --target <dir> --project-name <name>
-       python -m governor.build profile --schema raw [--policy <file>] [--out <file>]"""
+"""CLI (batch2.md section 8; each command prints one JSON line last):
+
+    python -m governor.build init --target <dir> --project-name <name>
+    python -m governor.build profile --schema raw [--policy <file>] [--out <file>]
+    python -m governor.build run --target <dir> --project-name <name> [--llm fake:<script.json>|openrouter]
+                                 [--policy <file>] [--profile <profile.json>]
+    python -m governor.build approve <thread_id> --by <name> [--llm ...]
+    python -m governor.build reject <thread_id> --note "<text>" [--llm ...]
+"""
 
 from __future__ import annotations
 
@@ -11,6 +18,9 @@ from pathlib import Path
 import psycopg
 
 from governor.build.workspace import build_dsn, init_target, write_sources
+from governor.core.paths import KNOWLEDGE
+
+DEFAULT_POLICY = KNOWLEDGE / "shop" / "policy.yaml"
 
 
 def raw_tables() -> dict[str, list[str]]:
@@ -68,6 +78,42 @@ def _profile(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run(args: argparse.Namespace) -> int:
+    from governor.build import graph
+    from governor.build.llm import make_llm
+
+    profile = None
+    try:
+        llm = make_llm(args.llm)
+        if args.profile is not None:
+            profile = json.loads(args.profile.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        return _fail("cannot start the build", e)
+    init_target(args.target, args.project_name)
+    try:
+        out = graph.start(args.target, args.project_name, llm, policy=args.policy, profile=profile)
+    except Exception as e:  # noqa: BLE001
+        return _fail("build run failed", e)
+    print(json.dumps(out))
+    return 0
+
+
+def _resume(args: argparse.Namespace) -> int:
+    from governor.build import graph
+    from governor.build.llm import make_llm
+
+    try:
+        llm = make_llm(args.llm)
+        if args.cmd == "approve":
+            out = graph.approve(args.thread_id, args.by, llm)
+        else:
+            out = graph.reject(args.thread_id, args.note, llm)
+    except Exception as e:  # noqa: BLE001
+        return _fail(f"build {args.cmd} failed", e)
+    print(json.dumps(out))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="governor.build")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -80,6 +126,24 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--policy", type=Path, help="column -> PII tag file, e.g. knowledge/shop/policy.yaml")
     p.add_argument("--out", type=Path, help="write the profile here and print a one-line summary")
     p.set_defaults(func=_profile)
+    llm_help = "openrouter (default) or fake:<script.json>"
+    p = sub.add_parser("run", help="profile raw, propose and validate the design, stop at the design gate")
+    p.add_argument("--target", required=True, type=Path)
+    p.add_argument("--project-name", required=True)
+    p.add_argument("--llm", default="openrouter", help=llm_help)
+    p.add_argument("--policy", type=Path, default=DEFAULT_POLICY, help="column -> PII tag file")
+    p.add_argument("--profile", type=Path, help="use a saved profile (from profile --out) instead of profiling raw")
+    p.set_defaults(func=_run)
+    p = sub.add_parser("approve", help="approve the design of a thread paused at the design gate")
+    p.add_argument("thread_id")
+    p.add_argument("--by", required=True)
+    p.add_argument("--llm", default="openrouter", help=llm_help)
+    p.set_defaults(func=_resume)
+    p = sub.add_parser("reject", help="send the design back to the plan model with a note")
+    p.add_argument("thread_id")
+    p.add_argument("--note", required=True)
+    p.add_argument("--llm", default="openrouter", help=llm_help)
+    p.set_defaults(func=_resume)
     args = ap.parse_args(argv)
     return args.func(args)
 

@@ -1,0 +1,144 @@
+{
+  "silver_models": [
+    {
+      "name": "stg_orders", "folder": "staging", "source_table": "olist_orders_dataset", "refs": [],
+      "description": "one row per order: status and lifecycle timestamps",
+      "primary_key": ["order_id"],
+      "columns": [
+        {"name": "order_id", "expr": "order_id", "type": "text", "pii": false, "description": "order key"},
+        {"name": "customer_id", "expr": "customer_id", "type": "text", "pii": true, "description": "per-order customer key"},
+        {"name": "order_status", "expr": "order_status", "type": "text", "pii": false, "description": "order lifecycle status"},
+        {"name": "purchased_at", "expr": "CAST(NULLIF(order_purchase_timestamp, '') AS timestamp)", "type": "timestamp", "pii": false, "description": ""},
+        {"name": "approved_at", "expr": "CAST(NULLIF(order_approved_at, '') AS timestamp)", "type": "timestamp", "pii": false, "description": ""},
+        {"name": "delivered_carrier_at", "expr": "CAST(NULLIF(order_delivered_carrier_date, '') AS timestamp)", "type": "timestamp", "pii": false, "description": ""},
+        {"name": "delivered_at", "expr": "CAST(NULLIF(order_delivered_customer_date, '') AS timestamp)", "type": "timestamp", "pii": false, "description": "delivered to the customer"},
+        {"name": "estimated_delivery_at", "expr": "CAST(NULLIF(order_estimated_delivery_date, '') AS timestamp)", "type": "timestamp", "pii": false, "description": "promised delivery date"}
+      ]
+    },
+    {
+      "name": "stg_order_items", "folder": "staging", "source_table": "olist_order_items_dataset", "refs": [],
+      "description": "one row per order item",
+      "primary_key": ["order_id", "order_item_id"],
+      "columns": [
+        {"name": "order_id", "expr": "order_id", "type": "text", "pii": false, "description": ""},
+        {"name": "order_item_id", "expr": "CAST(NULLIF(order_item_id, '') AS integer)", "type": "integer", "pii": false, "description": "item number within the order"},
+        {"name": "product_id", "expr": "product_id", "type": "text", "pii": false, "description": ""},
+        {"name": "seller_id", "expr": "seller_id", "type": "text", "pii": false, "description": ""},
+        {"name": "shipping_limit_at", "expr": "CAST(NULLIF(shipping_limit_date, '') AS timestamp)", "type": "timestamp", "pii": false, "description": ""},
+        {"name": "item_price", "expr": "CAST(NULLIF(price, '') AS numeric(12, 2))", "type": "numeric", "pii": false, "description": "item price"},
+        {"name": "freight_value", "expr": "CAST(NULLIF(freight_value, '') AS numeric(12, 2))", "type": "numeric", "pii": false, "description": "freight charged for the item"}
+      ]
+    },
+    {
+      "name": "stg_customers", "folder": "staging", "source_table": "olist_customers_dataset", "refs": [],
+      "description": "one row per per-order customer id, with the person-level customer key",
+      "primary_key": ["customer_id"],
+      "columns": [
+        {"name": "customer_id", "expr": "customer_id", "type": "text", "pii": true, "description": "per-order customer key"},
+        {"name": "customer_unique_id", "expr": "customer_unique_id", "type": "text", "pii": true, "description": "person-level customer key"},
+        {"name": "customer_zip_code_prefix", "expr": "customer_zip_code_prefix", "type": "text", "pii": true, "description": ""},
+        {"name": "customer_city", "expr": "customer_city", "type": "text", "pii": true, "description": ""},
+        {"name": "customer_state", "expr": "customer_state", "type": "text", "pii": true, "description": ""}
+      ]
+    },
+    {
+      "name": "stg_reviews", "folder": "staging", "source_table": "olist_order_reviews_dataset", "refs": [],
+      "description": "one row per review answer for an order (free-text comments left out)",
+      "primary_key": ["review_id", "order_id"],
+      "columns": [
+        {"name": "review_id", "expr": "review_id", "type": "text", "pii": false, "description": ""},
+        {"name": "order_id", "expr": "order_id", "type": "text", "pii": false, "description": ""},
+        {"name": "review_score", "expr": "CAST(NULLIF(review_score, '') AS integer)", "type": "integer", "pii": false, "description": "1 to 5"},
+        {"name": "review_created_at", "expr": "CAST(NULLIF(review_creation_date, '') AS timestamp)", "type": "timestamp", "pii": false, "description": ""},
+        {"name": "review_answered_at", "expr": "CAST(NULLIF(review_answer_timestamp, '') AS timestamp)", "type": "timestamp", "pii": false, "description": ""}
+      ]
+    },
+    {
+      "name": "int_order_lines", "folder": "intermediate", "source_table": null,
+      "refs": ["stg_order_items", "stg_orders", "stg_customers"],
+      "description": "one row per order item (stg_order_items) joined to its order (stg_orders on order_id) for status and purchase time, and to stg_customers on customer_id for the person-level customer key",
+      "primary_key": ["order_id", "order_item_id"],
+      "columns": [
+        {"name": "order_id", "expr": null, "type": "text", "pii": false, "description": ""},
+        {"name": "order_item_id", "expr": null, "type": "integer", "pii": false, "description": ""},
+        {"name": "product_id", "expr": null, "type": "text", "pii": false, "description": ""},
+        {"name": "seller_id", "expr": null, "type": "text", "pii": false, "description": ""},
+        {"name": "item_price", "expr": null, "type": "numeric", "pii": false, "description": ""},
+        {"name": "freight_value", "expr": null, "type": "numeric", "pii": false, "description": ""},
+        {"name": "order_status", "expr": null, "type": "text", "pii": false, "description": ""},
+        {"name": "purchased_at", "expr": null, "type": "timestamp", "pii": false, "description": ""},
+        {"name": "customer_id", "expr": null, "type": "text", "pii": true, "description": ""},
+        {"name": "customer_unique_id", "expr": null, "type": "text", "pii": true, "description": "person-level customer key"}
+      ]
+    },
+    {
+      "name": "int_orders", "folder": "intermediate", "source_table": null,
+      "refs": ["stg_orders", "stg_customers"],
+      "description": "one row per order (stg_orders) with the person-level customer key from stg_customers joined on customer_id",
+      "primary_key": ["order_id"],
+      "columns": [
+        {"name": "order_id", "expr": null, "type": "text", "pii": false, "description": ""},
+        {"name": "customer_id", "expr": null, "type": "text", "pii": true, "description": ""},
+        {"name": "customer_unique_id", "expr": null, "type": "text", "pii": true, "description": "person-level customer key"},
+        {"name": "order_status", "expr": null, "type": "text", "pii": false, "description": ""},
+        {"name": "purchased_at", "expr": null, "type": "timestamp", "pii": false, "description": ""},
+        {"name": "delivered_at", "expr": null, "type": "timestamp", "pii": false, "description": ""},
+        {"name": "estimated_delivery_at", "expr": null, "type": "timestamp", "pii": false, "description": ""}
+      ]
+    },
+    {
+      "name": "int_order_reviews", "folder": "intermediate", "source_table": null,
+      "refs": ["stg_reviews", "stg_orders"],
+      "description": "one row per reviewed order: its latest review (greatest review_answered_at, then review_id) from stg_reviews, with the order's purchase time from stg_orders joined on order_id",
+      "primary_key": ["order_id"],
+      "columns": [
+        {"name": "order_id", "expr": null, "type": "text", "pii": false, "description": ""},
+        {"name": "review_id", "expr": null, "type": "text", "pii": false, "description": ""},
+        {"name": "review_score", "expr": null, "type": "integer", "pii": false, "description": ""},
+        {"name": "review_answered_at", "expr": null, "type": "timestamp", "pii": false, "description": ""},
+        {"name": "purchased_at", "expr": null, "type": "timestamp", "pii": false, "description": ""}
+      ]
+    }
+  ],
+  "kpis": [
+    {"id": "gmv", "decision": "build", "domain": "sales",
+     "mapping": {"order_lines": "int_order_lines", "purchased_at": "purchased_at", "item_price": "item_price",
+                 "freight": "freight_value", "valid_order": "order_status NOT IN ('canceled', 'unavailable')"}},
+    {"id": "net_revenue", "decision": "build", "domain": "sales",
+     "mapping": {"order_lines": "int_order_lines", "purchased_at": "purchased_at", "item_price": "item_price",
+                 "delivered_order": "order_status = 'delivered'"}},
+    {"id": "aov", "decision": "build", "domain": "sales",
+     "mapping": {"order_lines": "int_order_lines", "order_id": "order_id", "purchased_at": "purchased_at",
+                 "item_price": "item_price", "valid_order": "order_status NOT IN ('canceled', 'unavailable')"}},
+    {"id": "on_time_delivery_rate", "decision": "build", "domain": "delivery",
+     "mapping": {"orders": "int_orders", "purchased_at": "purchased_at", "delivered_at": "delivered_at",
+                 "estimated_at": "estimated_delivery_at", "delivered_order": "order_status = 'delivered'"}},
+    {"id": "avg_review_score", "decision": "build", "domain": "customer_experience",
+     "mapping": {"order_reviews": "int_order_reviews", "purchased_at": "purchased_at", "review_score": "review_score"}},
+    {"id": "repeat_purchase_rate", "decision": "build", "domain": "customers",
+     "mapping": {"orders": "int_orders", "order_id": "order_id", "customer_key": "customer_unique_id",
+                 "valid_order": "order_status NOT IN ('canceled', 'unavailable')"}},
+    {"id": "cohort_retention", "decision": "build", "domain": "customers",
+     "mapping": {"orders": "int_orders", "customer_key": "customer_unique_id", "purchased_at": "purchased_at",
+                 "valid_order": "order_status NOT IN ('canceled', 'unavailable')"}},
+    {"id": "historical_clv", "decision": "build", "domain": "customers",
+     "mapping": {"order_lines": "int_order_lines", "customer_key": "customer_unique_id", "purchased_at": "purchased_at",
+                 "item_price": "item_price", "valid_order": "order_status NOT IN ('canceled', 'unavailable')",
+                 "delivered_order": "order_status = 'delivered'"}},
+    {"id": "conversion_rate", "decision": "decline", "reason": "no session or visit data in raw",
+     "gap": {"missing": ["site sessions with a converted flag"],
+             "typical_sources": ["web analytics such as GA4", "the shop platform's session export"],
+             "next_step": "load daily session data (session start, converted) into raw, then rerun the build"}},
+    {"id": "gross_margin", "decision": "decline", "reason": "no product cost data in raw",
+     "gap": {"missing": ["unit cost per product"],
+             "typical_sources": ["the ERP or purchasing system", "supplier invoices"],
+             "next_step": "load a product cost table (product_id, unit_cost) into raw, then rerun the build"}}
+  ],
+  "assumptions": [
+    "order_status values 'canceled' and 'unavailable' mean the order is not a sale",
+    "order_status 'delivered' means the order was delivered",
+    "customer_unique_id is the person-level customer key; customer_id is created per order",
+    "an order with several review answers keeps the latest one (greatest review_answered_at, then review_id)",
+    "review comment title and message are free text (PII) and are left out of silver; no KPI needs them"
+  ]
+}
