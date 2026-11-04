@@ -107,5 +107,6 @@ def database():
 
 guarded("database", database)
 pytest_check("tests", required=["test_validator_postgres_rejects_select_star", "test_validator_postgres_injects_limit",
-                                "test_validator_postgres_default_deny"])
+                                "test_validator_postgres_default_deny",
+                                "test_validator_postgres_rejects_role_switch", "test_postgres_timeout_clamped"])
 finish("C5")

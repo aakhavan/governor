@@ -2,7 +2,8 @@
 
 Each case brings an adapter plus the few SQL strings that differ by warehouse;
 the assertions are the same for all. DuckDB runs on a small file built here;
-Postgres skips when GOVERNOR_PG_DSN is unset.
+Postgres runs on a ``conformance`` schema created as admin and skips when
+GOVERNOR_PG_DSN or GOVERNOR_PG_ADMIN_DSN is unset.
 """
 
 from __future__ import annotations
@@ -57,25 +58,45 @@ def _duckdb_case(tmp_path) -> Case:
     )
 
 
+def _pg_env() -> tuple[str, str]:
+    dsn, admin = os.environ.get("GOVERNOR_PG_DSN"), os.environ.get("GOVERNOR_PG_ADMIN_DSN")
+    if not dsn or not admin:
+        pytest.skip("GOVERNOR_PG_DSN or GOVERNOR_PG_ADMIN_DSN is unset")
+    return dsn, admin
+
+
+def _postgres_conformance_schema(admin_dsn: str) -> None:
+    """As admin: a small ``conformance`` schema, readable by governor_ask when that role exists."""
+    import psycopg
+
+    with psycopg.connect(admin_dsn, autocommit=True) as c:
+        c.execute("CREATE SCHEMA IF NOT EXISTS conformance")
+        c.execute(
+            "CREATE TABLE IF NOT EXISTS conformance.invoices AS SELECT g AS invoice_id, "
+            "CAST(g * 1.25 AS NUMERIC(18,2)) AS amount_eur, 'acct_' || g AS account_id "
+            "FROM generate_series(0, 59) AS g"
+        )
+        if c.execute("SELECT 1 FROM pg_roles WHERE rolname = 'governor_ask'").fetchone():
+            c.execute("GRANT USAGE ON SCHEMA conformance TO governor_ask")
+            c.execute("GRANT SELECT ON ALL TABLES IN SCHEMA conformance TO governor_ask")
+
+
 def _postgres_case(tmp_path) -> Case:
-    if not os.environ.get("GOVERNOR_PG_DSN"):
-        pytest.skip("GOVERNOR_PG_DSN is unset")
-    try:
-        adapter = get_adapter("postgres")
-    except adapters.UnknownWarehouseError:
-        pytest.skip("the postgres adapter arrives at C4")
+    _, admin = _pg_env()
+    _postgres_conformance_schema(admin)
+    adapter = get_adapter("postgres")
     return Case(
         adapter=adapter,
-        good="SELECT table_name FROM information_schema.tables",
-        bad="SELECT nope FROM information_schema.tables",
+        good="SELECT account_id FROM conformance.invoices",
+        bad="SELECT nope FROM conformance.invoices",
         many=(
             "SELECT g AS n, CAST(g * 1.25 AS NUMERIC(18,2)) AS amount, DATE '2026-01-01' + g AS day, "
             "TIMESTAMP '2026-01-01 08:00:00' + g * INTERVAL '1 hour' AS ts, 'acct_' || g AS label "
             "FROM generate_series(0, 59) AS g"
         ),
         slow="SELECT pg_sleep(30)",
-        write="CREATE TABLE zz_probe AS SELECT 1 AS a",
-        known_column=("information_schema", "tables", "table_name"),
+        write="CREATE TABLE conformance.zz_probe AS SELECT 1 AS a",
+        known_column=("conformance", "invoices", "amount_eur"),
     )
 
 
@@ -166,3 +187,107 @@ def test_default_adapter_is_duckdb(monkeypatch):
 def test_executor_keeps_reexporting_errors():
     assert executor.QueryTimeout is QueryTimeout and executor.QueryError is QueryError
     assert executor.DryRun is DryRun
+
+
+# -- Postgres roles (design section 4): the role comes from the caller, never from SQL --
+
+
+def test_postgres_refuses_unlisted_role_before_connecting(monkeypatch):
+    from governor.core.adapters import postgres
+
+    def no_connect(*_a, **_k):
+        raise AssertionError("connected before the role check")
+
+    monkeypatch.setattr(postgres.psycopg, "connect", no_connect)
+    adapter = get_adapter("postgres", dsn="postgresql://nobody@localhost:1/none", allowed_roles=["governor_analyst"])
+    for role in ("governor_admin", "governor_analyst; RESET ROLE", ""):
+        with pytest.raises(QueryError, match="not allowed"):
+            adapter.run("SELECT 1", timeout_s=1, row_cap=1, role=role)
+        with pytest.raises(QueryError, match="not allowed"):
+            adapter.dry_run("SELECT 1", timeout_s=1, role=role)
+    with pytest.raises(QueryError, match="not allowed"):
+        get_adapter("postgres", dsn="postgresql://x@localhost:1/none").run(
+            "SELECT 1", timeout_s=1, row_cap=1, role="governor_analyst"
+        )
+
+
+def test_postgres_without_dsn_is_a_query_error(monkeypatch):
+    monkeypatch.delenv("GOVERNOR_PG_DSN", raising=False)
+    with pytest.raises(QueryError, match="GOVERNOR_PG_DSN"):
+        get_adapter("postgres").run("SELECT 1", timeout_s=1, row_cap=1)
+
+
+def test_postgres_allowed_role_is_set():
+    _pg_env()
+    adapter = get_adapter("postgres", allowed_roles=["governor_analyst"])
+    try:
+        _, rows = adapter.run("SELECT current_user", timeout_s=5, row_cap=1, role="governor_analyst")
+        assert rows == [["governor_analyst"]]
+        assert adapter.dry_run("SELECT 1", timeout_s=5, role="governor_analyst").ok
+        _, rows = adapter.run("SELECT current_setting('transaction_read_only')", timeout_s=5, row_cap=1)
+        assert rows == [["on"]]
+    finally:
+        adapter.close()
+
+
+def test_postgres_dry_run_runs_one_statement_only():
+    """A semicolon in dry_run SQL cannot SET ROLE outside allowed_roles or clear the timeout."""
+    import time
+
+    _pg_env()
+    adapter = get_adapter("postgres", allowed_roles=["governor_analyst"])
+    try:
+        # If the role switch applied, the cast error would name governor_finance_admin.
+        smuggled_role = "SELECT 1; SET ROLE governor_finance_admin; SELECT CAST(current_user AS int)"
+        try:
+            result = adapter.dry_run(smuggled_role, timeout_s=5, role="governor_analyst")
+            assert result.ok is False
+            message = result.error or ""
+        except QueryError as error:
+            message = str(error)
+        assert "governor_finance_admin" not in message
+
+        # If the timeout were cleared, the sleep would run its full 3 s.
+        smuggled_timeout = "SELECT 1; SET statement_timeout = 0; SELECT pg_sleep(3)"
+        started = time.monotonic()
+        try:
+            assert adapter.dry_run(smuggled_timeout, timeout_s=0.5).ok is False
+        except QueryError:
+            pass
+        assert time.monotonic() - started < 2
+
+        _, rows = adapter.run("SELECT current_user", timeout_s=5, row_cap=1)
+        assert rows != [["governor_finance_admin"]]
+    finally:
+        adapter.close()
+
+
+def test_postgres_run_runs_one_statement_only():
+    """A semicolon in run() SQL cannot clear the timeout or SET ROLE; QueryError is a pass."""
+    import time
+
+    _pg_env()
+    adapter = get_adapter("postgres", allowed_roles=["governor_analyst"])
+    try:
+        # If the timeout were cleared, the sleep would run its full 3 s.
+        smuggled_timeout = "SELECT 1; SET statement_timeout = 0; SELECT pg_sleep(3)"
+        started = time.monotonic()
+        try:
+            columns, _ = adapter.run(smuggled_timeout, timeout_s=0.5, row_cap=1)
+            assert "pg_sleep" not in columns
+        except QueryError:
+            pass
+        assert time.monotonic() - started < 2
+
+        smuggled_role = "SELECT current_user; SET ROLE governor_finance_admin"
+        try:
+            _, rows = adapter.run(smuggled_role, timeout_s=5, row_cap=1, role="governor_analyst")
+            assert rows != [["governor_finance_admin"]]
+        except QueryError:
+            pass
+
+        # A literal percent sign is SQL, not a placeholder.
+        _, rows = adapter.run("SELECT '100%' AS p", timeout_s=5, row_cap=1)
+        assert rows == [["100%"]]
+    finally:
+        adapter.close()

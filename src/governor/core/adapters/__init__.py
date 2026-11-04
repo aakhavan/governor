@@ -23,7 +23,7 @@ from governor.core.adapters.base import (
 ENV = "GOVERNOR_WAREHOUSE"
 DEFAULT = "duckdb"
 # name -> sqlglot dialect; the validator needs the dialect without opening anything.
-DIALECTS = {"duckdb": "duckdb"}
+DIALECTS = {"duckdb": "duckdb", "postgres": "postgres"}
 
 __all__ = [
     "ColumnInfo",
@@ -59,4 +59,8 @@ def get_adapter(name: str | None = None, **options: Any) -> WarehouseAdapter:
         from governor.core.adapters.duckdb import DuckDBAdapter
 
         return DuckDBAdapter(**options)
+    if chosen == "postgres":
+        from governor.core.adapters.postgres import PostgresAdapter
+
+        return PostgresAdapter(**options)
     raise UnknownWarehouseError(f"no adapter for {chosen!r}")  # pragma: no cover - DIALECTS guards this

@@ -161,9 +161,9 @@ steps:
     tier: design
     prompt: plan/prompts/C5.md
     accept: plan/accept/accept_c5.py
-    allowed_paths: [src/governor/core/serving.py, src/governor/ask/validator.py, src/governor/ask/policy.py, testbed/sql/, testbed/README.md, tests/testbed/, tests/ask/, tests/fixtures/]
+    allowed_paths: [src/governor/core/serving.py, src/governor/core/adapters/postgres.py, src/governor/ask/validator.py, src/governor/ask/policy.py, testbed/sql/, testbed/README.md, tests/testbed/, tests/ask/, tests/fixtures/]
     human_gate: true
-    review_focus: "the salt never appears in a view definition or a log; hashing keeps equality and COUNT(DISTINCT); masks follow grants; each reader role sees only its own schema; nothing written under knowledge/"
+    review_focus: "the salt never appears in a view definition or a log; hashing keeps equality and COUNT(DISTINCT); masks follow grants; each reader role sees only its own schema; nothing written under knowledge/; in the Postgres dialect no function outside the allowlist passes (set_config role switch and query_to_xml refused); statement_timeout clamped to 10 s"
   - id: C6
     title: KPI catalogue, layer blueprint and approved-decisions formats
     tier: design

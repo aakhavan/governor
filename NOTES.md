@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-C3 is done. The Postgres test bed is testbed/docker-compose.yml: Postgres 16, host port 55432, database shop, admin governor_admin, default password governor_local, named volume, and a healthcheck. load_olist.py checks the nine published Olist headers, then COPY-loads each CSV into schema raw as text plus _loaded_at, in one truncate-and-load transaction per table. testbed/sample is synthetic and has one customer_unique_id with two customer_ids, a canceled order, a late delivery, two reviews on one order, and two payments on one order. Real files stay in gitignored testbed/data/. The README licence note is still a TODO. psycopg[binary] is a dependency. The Postgres adapter and roles are C4. Ask still uses the DuckDB adapter until then; meta, traces, and checkpoints stay outside the adapter. as_of remains 2026-10-22T14:11:26+00:00.
+C4 is done. PostgresAdapter, registered as get_adapter("postgres"), takes the DSN from GOVERNOR_PG_DSN and optional allowed_roles. Each call opens its own connection, sets the transaction read-only, sets statement_timeout from timeout_s, and may SET LOCAL ROLE after checking allowed_roles. dry_run (EXPLAIN) and run (DECLARE plus FETCH, capped at row_cap) send the user SQL as one prepared statement, so a second command cannot change the role or the timeout. QueryCanceled becomes QueryTimeout; other database errors become QueryError. testbed/sql/roles.sql, applied by testbed/apply_roles.py, creates governor_ask, governor_analyst, governor_finance_admin, and governor_build. governor_ask is read-only with statement_timeout 10s and belongs to the reader roles WITH INHERIT FALSE, SET TRUE. governor_build has USAGE and CREATE on dev_governor only. Schema private is admin-only. Conformance tests need GOVERNOR_PG_DSN and GOVERNOR_PG_ADMIN_DSN. as_of remains 2026-10-22T14:11:26+00:00.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,53 +20,6 @@ C3 is done. The Postgres test bed is testbed/docker-compose.yml: Postgres 16, ho
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## G10b result
-*Holdout once, eval report, README, demo script, 23 Oct 2026 21:17.*
-
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/G10b`.
-
-| check | ok | detail |
-|---|---|---|
-| report baseline-tune.json exists | yes |  |
-| baseline-tune.json covers exactly the tune split | yes | 25 items |
-| baseline-tune.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
-| report baseline-holdout.json exists | yes |  |
-| baseline-holdout.json covers exactly the holdout split | yes | 15 items |
-| baseline-holdout.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
-| report agent-tune.json exists | yes |  |
-| agent-tune.json covers exactly the tune split | yes | 25 items |
-| agent-tune.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
-| report agent-holdout.json exists | yes |  |
-| agent-holdout.json covers exactly the holdout split | yes | 15 items |
-| agent-holdout.json used the frozen golden set | yes | fcce84b6b2f86f3bc194 |
-| holdout run exactly once per system | yes | log: ['baseline', 'agent'] |
-| PROMPTS_FROZEN.sha256 exists | yes |  |
-| prompts unchanged since the freeze | yes | frozen ['answer.md', 'baseline.md', 'draft_sql.md', 'plan.md', 'repair.md'] vs now ['answer.md', 'baseline.md', 'draft_s |
-| prompts frozen before both holdout runs | yes |  |
-| no PII leak in agent runs | yes |  |
-| total eval cost within the $3 budget | yes | $0.239 |
-| evaluation/eval_report.md exists | yes |  |
-| README has the required sections | yes | missing: [] |
-| README has a Mermaid diagram and points to PROVENANCE.md | yes |  |
-| README shows the holdout execution accuracy exactly as in the reports | yes | missing [] |
-| demo script exists | yes |  |
-| no golden text in prompts | yes |  |
-| golden set still frozen | yes | golden set unchanged |
-| pytest tests | yes | 281 passed in 73.75s (0:01:13) |
-
-Review: cursor-grok: pass | claude-tc-fable: pass
-
-For Amir: Acceptance checks that eval_report.md and the demo script exist, not that the prose matches the JSON. Summary and per-category counts match all four reports, and the three agent failure notes match the stored SQL. The rule classifier never labels wrong join; j05's country subquery is only in the note, and the scored miss is an extra month_start column.
-
-## Additions for the next plan
-Do not rerun holdout or edit src/governor/ask/prompts/. PROMPTS_FROZEN.sha256 is the freeze, and evaluation/holdout_runs.log already has one baseline line and one agent line. Headline holdout: execution accuracy 0.600 baseline vs 0.700 agent; policy 0.333 vs 1.000; PII leak true vs false; agent loses join 0/2 vs 1/2 and time_grain 1/2 vs 2/2. Four-run cost $0.239. evaluation/eval_report.md is generated by python -m governor.eval.report. taxonomy.yaml overrides j02, j05, and t06. The rule classifier has no wrong-join branch.
-
-## Additions for C2
-C2 is a pure refactor of the warehouse path. Keep executor results: dry_run(sql, *, timeout_s, database) and run_readonly both use _deadline and raise QueryTimeout; execute() passes Policy.timeout_s and maps QueryTimeout to code TIMEOUT. The graph dry_run node does the same and refuses with the existing warehouse-limits text. Do not send checkpoints, traces, or meta through the adapter (design section 3). Privacy stays in governor.ask.checkpoints: SqliteSaver.delete_thread, PRAGMA secure_delete=ON, PRAGMA wal_checkpoint(TRUNCATE), and question-free tombstones in governor_finished_threads so a finished id is still 409. Clarify threads stay until resume; prune_stale runs at the start of a new ask in the API and the CLI (GOVERNOR_THREAD_TTL_H, default 24, wall clock). GOVERNOR_TRACE_TEXT=1 keeps finished checkpoints. Prompts were not edited. fixture/build_green.py resolves dbt.exe or dbt next to sys.executable so the Linux image builds. as_of remains 2026-10-22T14:11:26+00:00.
-
-## Additions for C3
-Next step is C3 (Postgres test bed), not the adapter. get_adapter("postgres") raises UnknownWarehouseError until C4; GOVERNOR_WAREHOUSE defaults to duckdb. Do not send meta.duckdb, traces.duckdb, or checkpoints through the adapter. Keep dry_run's timeout_s optional: if omitted it uses access.yaml limits.timeout_s, because locked G5b calls dry_run(sql) with no timeout. Keep executor._open; tests stub it, and the duckdb branch passes connect=lambda: _open(database) into DuckDBAdapter. Adapter run defaults to JSON-safe lists (native=False). The executor passes native=True and converts rows to tuples so Decimal and date still reach graph.format_value and the eval checker; C4 must implement native. The conformance Postgres case skips when GOVERNOR_PG_DSN is unset. Its known_column is information_schema.tables.table_name, but list_columns() drops information_schema and pg_catalog, so point that case at a real test-bed table before C4 stops skipping. as_of remains 2026-10-22T14:11:26+00:00. Connection settings come from env only. Test-bed host port is 55432, database shop.
 
 ## C3 result
 *Postgres test bed with the Olist loader and a synthetic sample, 02 Nov 2026 22:36.*
@@ -129,3 +82,45 @@ For Amir: The live load checks compare the loader JSON to CSV counts and do not 
 
 ## Additions for C4
 C4 adds the Postgres adapter and roles. Leave the loader as it is. Compose: Postgres 16, host 55432, database shop, admin governor_admin, password default governor_local. A fresh database is empty until python testbed/load_olist.py --source testbed/sample (GOVERNOR_PG_DSN or --dsn). Only schema raw is created. Tables are raw.<csv stem>, source columns text, plus _loaded_at timestamptz NOT NULL DEFAULT now(). COPY CSV stores blanks as NULL. Zip prefixes stay text (01000). Keep spellings product_name_lenght and product_description_lenght. Truncate plus COPY is one transaction per table; headers are checked before any connection. psycopg[binary] is locked at 3.3.6. roles.sql, apply_roles.py, dev_governor, and private do not exist yet. Adapter DSN is GOVERNOR_PG_DSN; the acceptance admin DSN is GOVERNOR_PG_ADMIN_DSN. Conformance skips if unset; point its known column at a table the test creates, because list_columns drops information_schema and pg_catalog. Sample: uniq-0001 is cust-0001 and cust-0002; ord-0002 is canceled; ord-0003 is late; ord-0001 has two reviews and two payments. Do not commit testbed/data/. The README licence line is still a TODO. as_of remains 2026-10-22T14:11:26+00:00.
+
+## C4 result
+*Postgres adapter and database roles, 04 Nov 2026 11:02.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 2 fix loop(s); branch `factory/C4`.
+
+| check | ok | detail |
+|---|---|---|
+| src/governor/core/adapters/postgres.py exists | yes | missing |
+| testbed/sql/roles.sql exists | yes | missing |
+| testbed/apply_roles.py exists | yes | missing |
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw | yes | 9 tables |
+| roles applied | yes | roles applied |
+| roles applied a second time (idempotent) | yes | roles applied |
+| conformance schema set up as admin | yes |  |
+| governor_ask defaults to read-only transactions | yes | default_transaction_read_only=on statement_timeout=10s |
+| governor_ask has a 10s statement timeout | yes | default_transaction_read_only=on statement_timeout=10s |
+| Postgres adapter runs as governor_ask | yes |  |
+| adapter named postgres with dialect postgres | yes | {'name': 'postgres', 'dialect': 'postgres', 'dry_good': True, 'dry_bad': False, 'row_cap': 1000, 'json_safe': True, 'tim |
+| dry_run passes a good query and fails a bad column | yes | {'name': 'postgres', 'dialect': 'postgres', 'dry_good': True, 'dry_bad': False, 'row_cap': 1000, 'json_safe': True, 'tim |
+| run honours row_cap | yes | 1000 |
+| run returns JSON-safe values (numeric included) | yes |  |
+| statement timeout raises QueryTimeout | yes | QueryTimeout |
+| a write is refused by the database with QueryError | yes | QueryError |
+| governor_ask cannot read raw tables | yes | QueryError |
+| a role outside allowed_roles is refused with QueryError | yes | QueryError |
+| an allowed role can be set | yes | ok |
+| list_columns returns real columns | yes |  |
+| governor_build can log in | yes |  |
+| governor_build can create tables in dev_governor | yes | ok |
+| governor_build cannot create tables in raw | yes | InsufficientPrivilege |
+| pytest tests | yes | 304 passed, 13 skipped in 75.38s (0:01:15) |
+
+Review: C4 matches its prompt and the review focus. governor_ask is read-only with a 10s statement_timeout in the database, and every adapter call also sets a read-only transaction and a transaction-local timeout. Roles are checked against allowed_roles before connect and applied with SET LOCAL ROLE as a quoted identifier. dry_run and run send the user SQL as one prepared statement, so a second command cannot SET ROLE or clear the timeout. Only the documented test-bed passwords appear. governor_build has CREATE on dev_governor only.
+
+For Amir: accept_c4 does not send a two-statement query, and it stops Docker before pytest, so the smuggle tests did not run in the green pytest (they skip without a DSN). The guard is connection.execute(..., prepare=True): psycopg sends a Parse, and Postgres rejects a second command before it runs. Writes through run() fail at DECLARE because a cursor query must be a SELECT; the transaction is still read-only, and governor_ask has default_transaction_read_only=on.
+
+## Additions for C5
+C5 grants belong on governor_analyst and governor_finance_admin, not on governor_ask. governor_ask is a member of both WITH INHERIT FALSE, SET TRUE, so those grants apply only after SET ROLE. Pass role= to PostgresAdapter.run and dry_run; get_adapter("postgres", allowed_roles=[...]) raises QueryError before connecting if the role is not listed. list_columns takes no role and runs as the login, so a governor_ask connection will not see serve_* columns. Schema private already exists and is revoked from all four roles and PUBLIC; store the salt in private.pii_salt and do not put it in a view definition. dev_governor is the only schema where governor_build has CREATE. raw is not granted to ask, build, or the readers. Adapter DSN is GOVERNOR_PG_DSN (the acceptance ask login); admin DDL uses GOVERNOR_PG_ADMIN_DSN. Password env vars are GOVERNOR_ASK_PASSWORD and GOVERNOR_BUILD_PASSWORD, with defaults governor_ask_local and governor_build_local. run() is JSON-safe unless native=True, which the executor already passes. Conformance tests skip unless both DSNs are set, and accept_c4 stops Docker before pytest. as_of remains 2026-10-22T14:11:26+00:00.
