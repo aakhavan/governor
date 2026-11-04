@@ -12,6 +12,10 @@
   are compared with the design through ``information_schema``. A failing model (SQL check, dbt error, failing
   test, column mismatch) goes back for repair (``prompts/repair.md``) with its error and SQL: at most
   :data:`WRITE_REPAIRS` repairs by the write model, then one by the plan model, then the build is ``escalated``.
+  Only intermediate SQL is repaired: a failing staging model is the approved design, so it escalates at once with
+  the dbt error (the fix is a new design through the gate).
+- :func:`prune_stale` runs first: model, yml and key-test files the approved design no longer contains are removed
+  from staging, intermediate and marts, so stale models never reach dbt.
 
 The steps (:func:`write_silver`, :func:`dbt_build_silver`, :func:`repair_silver`, :func:`next_step`) work on a
 plain JSON-able dict so the build graph can checkpoint between them; :func:`build_silver` chains them.
@@ -209,7 +213,7 @@ def new_state() -> dict:
     """``sql``: model -> current SQL; ``failures``: model -> error; ``attempts``: model -> repairs made;
     ``repairs``: total repair calls."""
     return {"sql": {}, "failures": {}, "attempts": {}, "repairs": 0, "tests_passed": 0,
-            "models": [], "dbt_runs": 0, "status": None, "escalated": None}
+            "models": [], "dbt_runs": 0, "status": None, "escalated": None, "folders": {}, "pruned": []}
 
 
 def _accept(target: Path, m: SilverModel, sql: str, prop: Proposal, st: dict) -> None:
@@ -225,10 +229,68 @@ def _accept(target: Path, m: SilverModel, sql: str, prop: Proposal, st: dict) ->
     path.write_text(sql, encoding="utf-8")
 
 
+MODEL_FOLDERS = (STAGING, INTERMEDIATE, "marts")
+_YML_SUFFIXES = (".yml", ".yaml")
+
+
+def mart_folder(domain: str | None) -> str:
+    """The ``models/marts/<domain>`` folder name for a KPI domain: lower case, ``[a-z0-9_]`` only."""
+    return re.sub(r"[^a-z0-9_]+", "_", (domain or "").strip().lower()).strip("_") or "general"
+
+
+def expected_files(target: str | Path, design: Proposal | dict) -> set[Path]:
+    """Model, yml and singular-test files the approved design produces (silver here, gold in ``gold.py``)."""
+    target, prop = Path(target), _proposal(design)
+    models = target / "models"
+    out: set[Path] = set()
+    for m in prop.silver_models:
+        out.add(models / m.folder / f"{m.name}.sql")
+        if len(m.primary_key) > 1:
+            out.add(target / "tests" / f"{key_test_name(m)}.sql")
+    out.add(models / STAGING / "_staging.yml")
+    out.add(models / INTERMEDIATE / "_intermediate.yml")
+    for k in prop.kpis:
+        if k.decision == "build":
+            domain = mart_folder(k.domain)
+            out.add(models / "marts" / domain / f"kpi_{k.id}.sql")
+            out.add(models / "marts" / domain / f"_{domain}.yml")
+    return {p.resolve() for p in out}
+
+
+def prune_stale(target: str | Path, design: Proposal | dict) -> list[Path]:
+    """Remove model and yml files under staging, intermediate and marts (and composite-key tests) that the approved
+    design no longer contains, so stale models never reach dbt. Returns the removed paths."""
+    target = Path(target)
+    keep = expected_files(target, design)
+    removed: list[Path] = []
+    candidates: list[Path] = []
+    for folder in MODEL_FOLDERS:
+        d = target / "models" / folder
+        if d.is_dir():
+            candidates += [p for p in d.rglob("*") if p.is_file() and p.suffix in (".sql", *_YML_SUFFIXES)]
+    tests = target / "tests"
+    if tests.is_dir():
+        candidates += [p for p in tests.glob("*__primary_key.sql") if p.is_file()]
+    for p in candidates:
+        if p.resolve() not in keep:
+            p.unlink()
+            removed.append(p)
+    marts = target / "models" / "marts"
+    if marts.is_dir():
+        for d in sorted((p for p in marts.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
+            if not any(d.iterdir()):
+                d.rmdir()
+    return removed
+
+
 def write_silver(target: str | Path, design: Proposal | dict, llm: BuildLLM, state: dict | None = None) -> dict:
-    """Write staging (code), intermediate (write model), the yml files and the composite-key tests."""
+    """Write staging (code), intermediate (write model), the yml files and the composite-key tests.
+
+    Files from an earlier design that this one no longer contains are removed first (:func:`prune_stale`)."""
     target, prop = Path(target), _proposal(design)
     st = state if state is not None else new_state()
+    st["pruned"] = [p.relative_to(target).as_posix() for p in prune_stale(target, prop)]
+    st["folders"] = {m.name: m.folder for m in prop.silver_models}
     for folder, yml in ((STAGING, "_staging.yml"), (INTERMEDIATE, "_intermediate.yml")):
         models = [m for m in prop.silver_models if m.folder == folder]
         d = target / "models" / folder
@@ -354,9 +416,9 @@ def repair_silver(target: str | Path, design: Proposal | dict, llm: BuildLLM, st
     st = state
     for name, error in list(st["failures"].items()):
         made = st["attempts"].get(name, 0)
-        if made >= MAX_REPAIRS:
-            continue
         m = prop.model(name)
+        if made >= MAX_REPAIRS or m is None or m.folder != INTERMEDIATE:
+            continue  # only intermediate SQL is repaired; staging comes from the approved design (next_step)
         role = "write" if made < WRITE_REPAIRS else "plan"
         st["attempts"][name] = made + 1
         st["repairs"] = st.get("repairs", 0) + 1
@@ -373,11 +435,22 @@ def next_step(state: dict) -> str:
     """``dbt``, ``repair``, ``built`` or ``escalated``.
 
     A model still failing after :data:`MAX_REPAIRS` repairs escalates the build (naming it and its last error);
-    any other failure (refused by check_sql or failed in dbt) is repaired; no failure means dbt runs next.
+    A failing staging model (or any model that is not intermediate) is never repaired: its SQL is the approved
+    design, so the build escalates at once with the error and the fix is a new design through the gate. Any other
+    failure (refused by check_sql or failed in dbt) is repaired; no failure means dbt runs next.
     """
     st = state
     if st.get("status") in (BUILT, ESCALATED):
         return "built" if st["status"] == BUILT else "escalated"
+    folders = st.get("folders") or {}
+    fixed = [n for n in st["failures"] if folders.get(n, STAGING if n.startswith("stg_") else INTERMEDIATE) != INTERMEDIATE]
+    if fixed:
+        st["status"] = ESCALATED
+        st["escalated"] = {"model": fixed[0], "folder": folders.get(fixed[0], STAGING),
+                           "error": st["failures"][fixed[0]][-3000:],
+                           "fix": "staging SQL is the approved design and is not repaired by a model; "
+                                  "propose a corrected design and approve it at the design gate"}
+        return "escalated"
     out = [n for n in st["failures"] if st["attempts"].get(n, 0) >= MAX_REPAIRS]
     if out:
         st["status"] = ESCALATED
@@ -424,5 +497,6 @@ def build_silver(target: str | Path, design: Proposal | dict, llm: BuildLLM, *, 
 
 
 __all__ = ["BUILT", "ESCALATED", "MAX_REPAIRS", "SilverResult", "build_silver", "check_sql", "clean_sql",
-           "composite_key_test", "dbt_build_silver", "intermediate_prompt", "models_yml", "next_step",
+           "composite_key_test", "dbt_build_silver", "intermediate_prompt", "mart_folder", "models_yml", "next_step",
+           "prune_stale",
            "repair_prompt", "repair_silver", "result", "staging_sql", "write_silver"]

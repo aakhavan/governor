@@ -10,14 +10,21 @@
                                     record_decisions -> write_silver --SQL refused--> repair_silver
                                                              | ok                          ^   |
                                                        dbt_build_silver --fail-------------+   |
-                                                             | ok          (write model <= 2, then plan model once)
-                                                            END (silver_built)      out of repairs -> END (escalated)
+                                                             | ok          (write model <= 2, then plan model once;
+                                                             |              a failing staging model escalates at once)
+                                                        silver_done --escalated--> END
+                                                             | silver_built
+                                                        write_gold (models, gaps.md, blueprint check)
+                                                             | ok                 \\ high finding (blueprint_failed)
+                                                        dbt_build_gold -> summarise (governor/build.json) -> END
+                                                        (built | escalated)
 
 Code owns every edge. Checkpoints live in ``GOVERNOR_STATE_DIR/build_checkpoints.sqlite``, so ``approve`` and
 ``reject`` resume the thread from a new process. The state holds the profile (no data values for PII columns), the
 proposal and the findings; no raw rows.
 
-``approve`` resumes the thread at the gate and runs on to ``silver_built`` or ``escalated`` in the same call. The
+``approve`` resumes the thread at the gate and runs on to ``built``, ``escalated`` or ``blueprint_failed`` in the
+same call, returning ``kpis_built``, ``gaps``, ``tests_passed``, ``repairs`` and the ``blueprint`` findings. The
 silver step state (SQL per model, failures, repairs per model) is kept under ``silver``; ``sql_repairs`` counts
 repair calls (``repairs`` stays the design-loop count).
 
@@ -43,7 +50,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from governor.build import design, silver
+from governor.build import design, gold, silver
 from governor.build.dbt import run_dbt
 from governor.build.llm import BuildLLM, LLMOutputError
 from governor.build.models import Finding, Proposal
@@ -85,6 +92,9 @@ class BuildState(TypedDict, total=False):
     approved_file: str
     silver: dict
     sql_repairs: int
+    gold: dict
+    blueprint: list[dict]
+    summary: dict
     calls: Annotated[list[dict], operator.add]
 
 
@@ -189,6 +199,7 @@ def build_graph(
     today: Callable[[], dt.date] = dt.date.today,
     dbt_runner: silver.Runner = run_dbt,
     inspector: silver.Inspector = silver.built_columns,
+    row_counter: gold.RowCounter = gold.kpi_rows,
 ):
     catalogue = load_kpis(kpis_path)
     blueprint = load_blueprint(blueprint_path)
@@ -300,6 +311,44 @@ def build_graph(
         silver.next_step(st)  # sets the escalation (model and last error) when a model is out of repairs
         return {"silver": st, "status": st.get("status") or silver.ESCALATED}
 
+    def after_silver_done(state: BuildState) -> str:
+        return "write_gold" if state.get("status") == silver.BUILT else END
+
+    def write_gold(state: BuildState) -> dict:
+        target, proposal = state["target"], state["proposal"]
+        files = gold.write_gold(target, proposal, catalogue)
+        gaps_file = gold.write_gaps(target, proposal)
+        found = gold.check_project(target, catalogue, _policy(state.get("policy")), blueprint=blueprint)
+        st = {"files": [Path(f).relative_to(target).as_posix() for f in files],
+              "gaps_file": str(gaps_file), "models": [], "tests_passed": 0}
+        update: dict[str, Any] = {"gold": st, "blueprint": [f.model_dump() for f in found]}
+        if gold.high(found):
+            update["status"] = gold.BLUEPRINT_FAILED
+        return update
+
+    def after_write_gold(state: BuildState) -> str:
+        return "summarise" if state.get("status") == gold.BLUEPRINT_FAILED else "dbt_build_gold"
+
+    def dbt_build_gold(state: BuildState) -> dict:
+        res = gold.dbt_build_gold(state["target"], state["proposal"], runner=dbt_runner)
+        st = {**dict(state.get("gold") or {}), **res}
+        if res["status"] == gold.BUILT:
+            try:
+                st["rows"] = row_counter(res["models"])
+            except Exception as exc:  # noqa: BLE001
+                st["rows"] = {}
+                st["rows_error"] = f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
+        return {"gold": st, "status": res["status"]}
+
+    def summarise(state: BuildState, config: RunnableConfig) -> dict:
+        st = dict(state.get("gold") or {})
+        summary = gold.summarise(state["target"], state["proposal"], status=state["status"],
+                                 silver_state=dict(state.get("silver") or {}), gold_state=st,
+                                 findings=list(state.get("blueprint") or []), calls=list(state.get("calls") or []),
+                                 sql_repairs=int(state.get("sql_repairs") or 0), rows=st.get("rows"),
+                                 thread_id=config["configurable"]["thread_id"])
+        return {"summary": summary}
+
     g = StateGraph(BuildState)
     g.add_node("profile", profile)
     g.add_node("propose", propose)
@@ -311,6 +360,9 @@ def build_graph(
     g.add_node("dbt_build_silver", dbt_build_silver)
     g.add_node("repair_silver", repair_silver)
     g.add_node("silver_done", silver_done)
+    g.add_node("write_gold", write_gold)
+    g.add_node("dbt_build_gold", dbt_build_gold)
+    g.add_node("summarise", summarise)
     g.add_edge(START, "profile")
     g.add_edge("profile", "propose")
     g.add_edge("propose", "validate")
@@ -321,7 +373,10 @@ def build_graph(
     routes = ["dbt_build_silver", "repair_silver", "silver_done"]
     for node in ("write_silver", "dbt_build_silver", "repair_silver"):
         g.add_conditional_edges(node, after_silver, routes)
-    g.add_edge("silver_done", END)
+    g.add_conditional_edges("silver_done", after_silver_done, ["write_gold", END])
+    g.add_conditional_edges("write_gold", after_write_gold, ["dbt_build_gold", "summarise"])
+    g.add_edge("dbt_build_gold", "summarise")
+    g.add_edge("summarise", END)
     return g.compile(checkpointer=checkpointer)
 
 
@@ -352,9 +407,24 @@ def _summary(graph, config: dict) -> dict:
         out["findings"] = sorted({f["code"] for f in values.get("findings") or []})
     if values.get("approved_file"):
         out["approved"] = values.get("approved_file")
-    if values.get("status") in (silver.BUILT, silver.ESCALATED):
-        out.update(silver.result(values.get("silver") or {}).to_dict())
+    status = values.get("status")
+    if status in (silver.BUILT, BUILT, ESCALATED, BLUEPRINT_FAILED):
+        sv = silver.result(values.get("silver") or {}).to_dict()
+        gd = values.get("gold") or {}
+        out.update(sv)
+        out["status"] = status
+        out["models"] = list(sv.get("models") or []) + list(gd.get("models") or [])
+        out["tests_passed"] = int(sv.get("tests_passed") or 0) + int(gd.get("tests_passed") or 0)
         out["repairs"] = int(values.get("sql_repairs") or 0)
+        proposal = values.get("proposal")
+        out["kpis_built"] = [k.id for k in gold.built_kpis(proposal)] if status == BUILT and proposal else []
+        out["gaps"] = [g["id"] for g in gold.gaps(proposal)] if proposal else []
+        if gd.get("escalated"):
+            out["escalated"] = gd["escalated"]
+        if values.get("blueprint") is not None:
+            out["blueprint"] = values.get("blueprint")
+        if values.get("summary"):
+            out["build"] = str(Path(values["target"]) / "governor" / "build.json")
     calls = values.get("calls") or []
     costs = [c.get("cost_usd") for c in calls]
     out["llm_calls"] = len(calls)
@@ -404,7 +474,8 @@ def reject(thread_id: str, note: str, llm: BuildLLM, *, checkpoints: str | Path 
     return _resume(thread_id, {"action": "reject", "note": note.strip()}, llm, checkpoints, **graph_kwargs)
 
 
-BUILT, ESCALATED = silver.BUILT, silver.ESCALATED
+SILVER_BUILT = silver.BUILT
+BUILT, ESCALATED, BLUEPRINT_FAILED = gold.BUILT, gold.ESCALATED, gold.BLUEPRINT_FAILED
 
-__all__ = ["APPROVED", "AWAITING", "BUILT", "ESCALATED", "INVALID", "REJECTED", "BuildError", "approve",
+__all__ = ["APPROVED", "AWAITING", "BLUEPRINT_FAILED", "BUILT", "ESCALATED", "SILVER_BUILT", "INVALID", "REJECTED", "BuildError", "approve",
            "build_graph", "record_decisions", "reject", "start"]

@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-D4 is in place on D3. approve resumes the design-gate interrupt and writes silver: staging SQL from the approved design in code, intermediate SQL from the write model, both checked before dbt. check_sql requires one Postgres SELECT, declared refs only, source() only for that staging model's raw table, and no DDL or DML. dbt build --select staging intermediate runs as governor_build into dev_governor; column names are then checked in information_schema. A failing model is repaired twice with the write model and once with the plan model, then the run ends silver_built or escalated (model plus last error). repairs is the number of repair calls. Yml tags PII at config.meta, unique and not_null on a single-column key, and a singular test for a composite key. build does not import ask.
+The build graph runs from the profile and the design gate through silver to gold. Gold models are the catalogue template with each relation replaced by a ref, under models/marts/<domain>/. Declined KPIs go to governor/gaps.md and are not models. check_project applies blueprint L1-L9; a high finding ends approve as blueprint_failed without building marts. A failing staging model escalates and is not repaired. governor/build.json records models, tests, KPI row counts, gaps, findings and cost. On the sample the eight buildable KPIs build, and gmv, net revenue, AOV, on-time delivery, average review score and repeat purchase rate match a computation from the sample CSVs.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,53 +20,6 @@ D4 is in place on D3. approve resumes the design-gate interrupt and writes silve
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## D3 result
-*Design proposal, validation, report and the design gate, 04 Nov 2026 18:34.*
-
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/D3`.
-
-| check | ok | detail |
-|---|---|---|
-| build never imports ask | yes |  |
-| prompts/propose.md exists | yes | missing |
-| sample design fixture exists | yes | tests/fixtures/build/sample_design.json |
-| Docker is running | yes | 29.9.2 |
-| testbed/docker-compose.yml exists | yes | missing |
-| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
-| sample loads into raw | yes | 9 tables |
-| roles applied | yes | roles applied |
-| build init lists the 9 raw tables | yes |  |
-| run pauses at the design gate | yes | {"thread_id": "361ad025-7769-4363-82ec-4975ac82930b", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
-| design report written | yes | C:\Users\amir0\AppData\Local\Temp\governor_accept_0e4y7ogz\olist-dbt\governor\design.md |
-| report lists every catalogue KPI | yes |  |
-| report has a gap report section | yes |  |
-| report shows the approve command with the thread id | yes |  |
-| design.json written | yes |  |
-| conversion_rate and gross_margin declined with complete gaps | yes |  |
-| invalid proposal stops as design_invalid (MAPPING_UNKNOWN_COLUMN) | yes | {"thread_id": "ec3f60f9-a4d3-4c84-aa63-98a950e873cf", "status": "design_invalid", "report": "C:\\Users\\amir0\\AppData\\ |
-| invalid proposal stops as design_invalid (unbuildable KPI marked build) | yes | {"thread_id": "87c6b230-b6e9-433b-a73f-d75e42734feb", "status": "design_invalid", "report": "C:\\Users\\amir0\\AppData\\ |
-| invalid proposal stops as design_invalid (PII_UNTAGGED) | yes | {"thread_id": "0820a3b0-7982-4210-92c9-b030cab8703b", "status": "design_invalid", "report": "C:\\Users\\amir0\\AppData\\ |
-| a bad first proposal is repaired | yes | {"thread_id": "baae2829-65d5-4e08-9f17-68675fe8cb38", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
-| reject sends the design back and pauses again | yes | {"thread_id": "361ad025-7769-4363-82ec-4975ac82930b", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
-| approve in a new process records the design | yes | {"thread_id": "361ad025-7769-4363-82ec-4975ac82930b", "status": "design_approved", "report": "C:\\Users\\amir0\\AppData\ |
-| approved column mappings recorded in the target's approved.yaml | yes | [['column_mapping', 'amir'], ['column_mapping', 'amir'], ['column_mapping', 'amir'], ['column_mapping', 'amir'], ['colum |
-| pytest tests/build | yes | 67 passed, 8 skipped in 13.25s |
-
-Review: D3 matches the step. Every section 6 code is implemented and fires on a minimal bad proposal; EXPR_UNPARSEABLE, KPI_DUPLICATE, and PROPOSAL_UNPARSEABLE cover the gaps the table leaves. The prompt strips min/max and sends PII columns as name, null rate, and distinct count, with no sample cell values. Code owns every edge. The gate is an interrupt, and approve/reject resume it from SQLite in a new process. Approvals append column_mapping decisions to the target's governor/approved.yaml and never write knowledge/. build does not import ask. Acceptance exercised that path on the Docker test bed.
-
-For Amir: The unbuildable-KPI acceptance check is any() of three code names. This run's only finding was MAPPING_UNKNOWN_MODEL, which is the right code (product_costs mapped to stg_product_costs). Staging with no source_table is implemented as BAD_FOLDER but is not its own parametrized case. A later design_invalid after a rejection does not delete the previous design.json. CLI approved_on is date.today.
-
-## Additions for D4
-Extend the same StateGraph. record_decisions currently goes to END and sets status design_approved; point it at write_silver and set the final status to built or escalated in that same approve() resume. approve() resumes only while the next node is design_gate. State: target (absolute), project_name, policy, profile, proposal, findings, repairs, rejections, note, status, report, design, approved_by, approved_file, calls. repairs is the design-loop count and can already be 1 or 2 at approval; use a separate counter for SQL repair. calls uses operator.add, so return only the new usage dicts. design.json is Proposal.to_json_dict(), written only when validation passed, at <target>/governor/design.json. Staging expr is raw-table SQL; intermediate expr is null and the write model owns that SQL. Fake LLM via make_llm('fake:<script.json>'): propose[], intermediate{model:[]}, repair{model:[]}; the last reply repeats. Plan and write roles use GOVERNOR_BUILD_PLAN_MODEL and GOVERNOR_BUILD_WRITE_MODEL. Do not import governor.ask. Do not write knowledge/; company decisions stay in <target>/governor/approved.yaml. tests/fixtures/build/sample_design.json builds every catalogue KPI except conversion_rate and gross_margin, which it declines with gaps.
-
-## D4 notes (implementer)
-- `governor.build.silver`: `check_sql`, `staging_sql`, `write_silver` / `dbt_build_silver` / `repair_silver` / `next_step` over a JSON-able state dict (checkpointed by the graph under `silver`), and `build_silver(target, design, llm, runner=, inspector=)` chaining them. Prompts `prompts/intermediate.md`, `prompts/repair.md` (design only, no data values).
-- Graph: `record_decisions -> write_silver -> {dbt_build_silver | repair_silver | silver_done}`, code-routed by `silver.next_step`. SQL refused by `check_sql` is never written and goes to repair before dbt runs. Per model: 2 write-model repairs, then 1 plan-model repair; still failing -> `escalated` with `{"model", "error"}`. `approve` returns `status` (`silver_built`|`escalated`), `models`, `tests_passed`, `repairs` (= state `sql_repairs`, repair calls), plus `escalated` when it applies. `build_graph` takes `dbt_runner`/`inspector` for offline tests.
-- A failing test is attributed to the silver model whose name it contains (longest match). dbt with no results (profile/connection/parse error) escalates with `model: null` and no repair.
-- yml: PII as column `config: {meta: {pii: true}}` (dbt 1.12 moved `meta` under `config`); key tests under `data_tests`; model `config.meta.primary_key`. Composite keys: `tests/<model>__primary_key.sql` (duplicates or null parts). Models stay views (dbt default); only marts are tables.
-- Column check: names only (case-insensitive) against `information_schema.columns` in `dev_governor`, as the build login.
-- For Amir: stale `stg_*`/`int_*` files from an earlier design are not deleted from the target. The offline CLI cycle in `test_graph.py` now ends `escalated` (its approve script has no intermediate SQL). The live pytest cases in `test_silver.py` skip without `GOVERNOR_BUILD_PASSWORD`; acceptance covers the live path.
 
 ## D4 result
 *Silver writer, dbt build in the dev schema, repair and escalation, 04 Nov 2026 21:54.*
@@ -98,5 +51,50 @@ Review: cursor-grok: pass | claude-tc-fable: pass
 
 For Amir: The live run is the evidence: tests_passed 11 equals 4 single-column keys times unique and not_null, plus 3 composite singular tests, and int_order_lines exists only after the repair replaced i.price with i.item_price. The yml checks in accept_d4.py are substring searches. Section 8 still says status built; the step and the script use silver_built until D5. When several models run out of repairs together, only the first is named. A dbt failure tied to no model escalates with model null. Reused targets keep stale SQL files. approved_on is still date.today.
 
+## D5 notes (implementer)
+- `governor.build.gold`: `write_gold` (file = `catalogue.render` with relations as `{{ ref() }}`, written as LF bytes; `_<domain>.yml` with definition, meta kpi_id/owner/source_tier/source_ref/template_sha256/rendered_sha256, `not_null` on month/cohort_month), `check_project(target, catalogue, policy, blueprint=)` -> `BlueprintFinding{rule, severity, target, problem}` (severity from blueprint.md, its exceptions honoured), `write_gaps`, `dbt_build_gold`, `kpi_rows`, `summarise` (`governor/build.json`). Hashes are SHA-256 of LF-normalised text.
+- L7 checks the final SELECT's output columns, followed through renaming CTE columns, against policy PII plus silver columns tagged pii; PII used inside CTEs and aggregated away is allowed (repeat_purchase_rate reads customer_unique_id). `SELECT *` in gold is an L7 finding. L9 is a regex over gold SQL without comments and string literals.
+- Graph: `silver_done -> write_gold (models, gaps.md, check) -> dbt_build_gold -> summarise -> END`; a high finding skips dbt (`blueprint_failed`, build.json still written). A failing gold model escalates (no model repair). `approve` returns status, `kpis_built` (ids), `gaps` (ids), `tests_passed` (silver + gold), `repairs` (SQL repairs), `models`, `blueprint`, plus `escalated` when it applies. `build_graph(row_counter=)` for offline tests.
+- Design-gate guard: a failing (or check_sql-refused) staging model escalates at once with `{model, folder, error, fix}`; `repair_silver` only touches intermediate models. `silver.prune_stale` runs at the start of `write_silver` (and `write_gold`): removes .sql/.yml under staging, intermediate and marts, and `tests/*__primary_key.sql`, that the design does not produce; empty mart folders go too. Stale tables in `dev_governor` are not dropped.
+- Mart folder = `mart_folder(domain)` (lower case, `[a-z0-9_]`).
+
 ## Additions for D5
 On silver_built, continue to write_gold; leave escalated at END. Section 8's approve status built is the post-gold name; D4 returns silver_built plus models, tests_passed, and repairs. State.repairs is the design-loop count. SQL repairs are state.sql_repairs and silver.repairs, with per-model counts in silver.attempts (2 write, then 1 plan). calls uses operator.add; return only new usage dicts. Files: models/staging/_staging.yml, models/intermediate/_intermediate.yml, models/<folder>/<name>.sql, and tests/<model>__primary_key.sql for a composite key. PII is columns[].config.meta.pii (dbt 1.12). Single-column keys use data_tests [unique, not_null]. Composite keys do not get per-column unique tests; the singular test returns rows for a duplicate or a null key part. Model config.meta.primary_key lists the key. Silver models stay views; marts are tables via dbt_project.yml. The profile already targets dev_governor as governor_build. That schema is shared and not dropped, and a reused target keeps stale stg_/int_ files. The column check compares names only. design.json is the proposal at <target>/governor/design.json. The sample declines conversion_rate and gross_margin. Do not import governor.ask. Do not write knowledge/.
+
+## D5 result
+*Gold from catalogue templates, blueprint checks, gap report, 04 Nov 2026 23:03.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/D5`.
+
+| check | ok | detail |
+|---|---|---|
+| sample design and silver fixtures exist | yes |  |
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw | yes | 9 tables |
+| roles applied | yes | roles applied |
+| build init lists the 9 raw tables | yes |  |
+| run pauses at the design gate | yes | {"thread_id": "fbe9ed5e-9b10-4ba6-bb95-7aad45d73a6e", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
+| approve builds silver and gold | yes | {"thread_id": "fbe9ed5e-9b10-4ba6-bb95-7aad45d73a6e", "status": "built", "report": "C:\\Users\\amir0\\AppData\\Local\\Te |
+| all eight buildable KPIs built | yes | ['gmv', 'net_revenue', 'aov', 'on_time_delivery_rate', 'avg_review_score', 'repeat_purchase_rate', 'cohort_retention', ' |
+| gaps list conversion_rate and gross_margin | yes |  |
+| target has governor/gaps.md | yes |  |
+| target has governor/build.json | yes |  |
+| gold yml carries owner, source tier and template hash | yes |  |
+| gmv equals the independent computation | yes | got {'2026-01': 455.0} want {'2026-01': 455.0} |
+| net_revenue equals the independent computation | yes | got {'2026-01': 325.5} want {'2026-01': 325.5} |
+| aov equals the independent computation | yes | got {'2026-01': 100.25} want {'2026-01': 100.25} |
+| on_time_delivery_rate equals the independent computation | yes | got {'2026-01': 0.6666666666666666} want {'2026-01': 0.6666666666666666} |
+| avg_review_score equals the independent computation | yes | got {'2026-01': 3.3333333333333335} want {'2026-01': 3.3333333333333335} |
+| repeat_purchase_rate equals the independent computation | yes | got [['0.3333333333333333']] want 0.3333333333333333 |
+| blueprint check is clean on the built project | yes | [] |
+| blueprint check catches a cast in gold (L9) and a changed template (L8) | yes | [{"rule": "L8", "severity": "high", "target": "kpi_gmv", "problem": "rendered_sha256 does not match the model file"}, {" |
+| pytest tests/build | yes | 122 passed, 11 skipped in 22.12s |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: The acceptance line "blueprint check is clean" fails only when a high finding is present, so a lone L9 would still pass that line. The unit test requires an empty finding list, and the generated project is empty. cohort_retention and historical_clv are built with rows; the step asked for an independent value check only for the five order-level KPIs and the repeat purchase rate.
+
+## Additions for the next plan
+D6 opens the PR on the target after approve. approve already runs silver and gold and returns status built, escalated or blueprint_failed, plus kpis_built (ids), gaps (declined ids), tests_passed, repairs, blueprint findings, and build pointing at <target>/governor/build.json. That file has models, silver/gold/total test counts, KPI row counts, full gap objects, findings and cost. Gold files are models/marts/<domain>/kpi_<id>.sql (tables via the marts materialization) and _<domain>.yml (owner, source_tier, source_ref, template_sha256, rendered_sha256, not_null on month or cohort_month). L8 re-renders from governor/design.json; do not add a model that writes gold SQL. High rules stop the build. L5 is medium and L9 is low, so they are recorded and do not stop it. A failing staging model escalates with zero repairs; only intermediate SQL is repaired. On the sample the gaps are conversion_rate and gross_margin. cohort_retention and historical_clv are built and non-empty; their values were not checked against an independent computation.

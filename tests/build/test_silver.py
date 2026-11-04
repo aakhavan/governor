@@ -162,12 +162,14 @@ def test_column_mismatch_is_a_failure(good):
 
 def test_approve_runs_silver_in_the_graph(tmp_path, profile, good):
     dbt = FakeDbt(good)
-    kw = {"checkpoints": tmp_path / "cp.sqlite", "dbt_runner": dbt, "inspector": dbt.columns}
+    kw = {"checkpoints": tmp_path / "cp.sqlite", "dbt_runner": dbt, "inspector": dbt.columns,
+          "row_counter": lambda names: {n: 1 for n in names}}
     out = graph.start(tmp_path / "t", "shop", FakeBuildLLM({"propose": [json.dumps(good)]}), profile=profile, **kw)
     llm = FakeBuildLLM({"intermediate": SILVER["intermediate"], "repair": SILVER["repair"]})
     a = graph.approve(out["thread_id"], "amir", llm, **kw)
-    assert a["status"] == "silver_built" and a["repairs"] == 1 and a["tests_passed"] == 7
-    assert a["models"] == [m["name"] for m in good["silver_models"]] and a["llm_calls"] == 1 + 3 + 1
+    # silver is built, then gold (D5): the fake dbt answers the marts run with the silver results
+    assert a["status"] == "built" and a["repairs"] == 1 and dbt.runs == 3
+    assert a["models"][:7] == [m["name"] for m in good["silver_models"]] and a["llm_calls"] == 1 + 3 + 1
     assert (tmp_path / "t" / "governor" / "approved.yaml").is_file()
 
 

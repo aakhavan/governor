@@ -885,3 +885,50 @@ profile_schema(dsn, schema, policy) and the profile CLI use build_dsn(). Shape: 
 - Approved context for the prompt: `knowledge/approved.yaml` then `<target>/governor/approved.yaml`.
 - For Amir: sample_design.json leaves review comment title/message out of silver (free text, no KPI needs it), and int_order_reviews keeps the latest answer per order by `review_answered_at`, then `review_id`.
 
+## D3 result
+*Design proposal, validation, report and the design gate, 04 Nov 2026 18:34.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/D3`.
+
+| check | ok | detail |
+|---|---|---|
+| build never imports ask | yes |  |
+| prompts/propose.md exists | yes | missing |
+| sample design fixture exists | yes | tests/fixtures/build/sample_design.json |
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw | yes | 9 tables |
+| roles applied | yes | roles applied |
+| build init lists the 9 raw tables | yes |  |
+| run pauses at the design gate | yes | {"thread_id": "361ad025-7769-4363-82ec-4975ac82930b", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
+| design report written | yes | C:\Users\amir0\AppData\Local\Temp\governor_accept_0e4y7ogz\olist-dbt\governor\design.md |
+| report lists every catalogue KPI | yes |  |
+| report has a gap report section | yes |  |
+| report shows the approve command with the thread id | yes |  |
+| design.json written | yes |  |
+| conversion_rate and gross_margin declined with complete gaps | yes |  |
+| invalid proposal stops as design_invalid (MAPPING_UNKNOWN_COLUMN) | yes | {"thread_id": "ec3f60f9-a4d3-4c84-aa63-98a950e873cf", "status": "design_invalid", "report": "C:\\Users\\amir0\\AppData\\ |
+| invalid proposal stops as design_invalid (unbuildable KPI marked build) | yes | {"thread_id": "87c6b230-b6e9-433b-a73f-d75e42734feb", "status": "design_invalid", "report": "C:\\Users\\amir0\\AppData\\ |
+| invalid proposal stops as design_invalid (PII_UNTAGGED) | yes | {"thread_id": "0820a3b0-7982-4210-92c9-b030cab8703b", "status": "design_invalid", "report": "C:\\Users\\amir0\\AppData\\ |
+| a bad first proposal is repaired | yes | {"thread_id": "baae2829-65d5-4e08-9f17-68675fe8cb38", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
+| reject sends the design back and pauses again | yes | {"thread_id": "361ad025-7769-4363-82ec-4975ac82930b", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
+| approve in a new process records the design | yes | {"thread_id": "361ad025-7769-4363-82ec-4975ac82930b", "status": "design_approved", "report": "C:\\Users\\amir0\\AppData\ |
+| approved column mappings recorded in the target's approved.yaml | yes | [['column_mapping', 'amir'], ['column_mapping', 'amir'], ['column_mapping', 'amir'], ['column_mapping', 'amir'], ['colum |
+| pytest tests/build | yes | 67 passed, 8 skipped in 13.25s |
+
+Review: D3 matches the step. Every section 6 code is implemented and fires on a minimal bad proposal; EXPR_UNPARSEABLE, KPI_DUPLICATE, and PROPOSAL_UNPARSEABLE cover the gaps the table leaves. The prompt strips min/max and sends PII columns as name, null rate, and distinct count, with no sample cell values. Code owns every edge. The gate is an interrupt, and approve/reject resume it from SQLite in a new process. Approvals append column_mapping decisions to the target's governor/approved.yaml and never write knowledge/. build does not import ask. Acceptance exercised that path on the Docker test bed.
+
+For Amir: The unbuildable-KPI acceptance check is any() of three code names. This run's only finding was MAPPING_UNKNOWN_MODEL, which is the right code (product_costs mapped to stg_product_costs). Staging with no source_table is implemented as BAD_FOLDER but is not its own parametrized case. A later design_invalid after a rejection does not delete the previous design.json. CLI approved_on is date.today.
+
+## Additions for D4
+Extend the same StateGraph. record_decisions currently goes to END and sets status design_approved; point it at write_silver and set the final status to built or escalated in that same approve() resume. approve() resumes only while the next node is design_gate. State: target (absolute), project_name, policy, profile, proposal, findings, repairs, rejections, note, status, report, design, approved_by, approved_file, calls. repairs is the design-loop count and can already be 1 or 2 at approval; use a separate counter for SQL repair. calls uses operator.add, so return only the new usage dicts. design.json is Proposal.to_json_dict(), written only when validation passed, at <target>/governor/design.json. Staging expr is raw-table SQL; intermediate expr is null and the write model owns that SQL. Fake LLM via make_llm('fake:<script.json>'): propose[], intermediate{model:[]}, repair{model:[]}; the last reply repeats. Plan and write roles use GOVERNOR_BUILD_PLAN_MODEL and GOVERNOR_BUILD_WRITE_MODEL. Do not import governor.ask. Do not write knowledge/; company decisions stay in <target>/governor/approved.yaml. tests/fixtures/build/sample_design.json builds every catalogue KPI except conversion_rate and gross_margin, which it declines with gaps.
+
+## D4 notes (implementer)
+- `governor.build.silver`: `check_sql`, `staging_sql`, `write_silver` / `dbt_build_silver` / `repair_silver` / `next_step` over a JSON-able state dict (checkpointed by the graph under `silver`), and `build_silver(target, design, llm, runner=, inspector=)` chaining them. Prompts `prompts/intermediate.md`, `prompts/repair.md` (design only, no data values).
+- Graph: `record_decisions -> write_silver -> {dbt_build_silver | repair_silver | silver_done}`, code-routed by `silver.next_step`. SQL refused by `check_sql` is never written and goes to repair before dbt runs. Per model: 2 write-model repairs, then 1 plan-model repair; still failing -> `escalated` with `{"model", "error"}`. `approve` returns `status` (`silver_built`|`escalated`), `models`, `tests_passed`, `repairs` (= state `sql_repairs`, repair calls), plus `escalated` when it applies. `build_graph` takes `dbt_runner`/`inspector` for offline tests.
+- A failing test is attributed to the silver model whose name it contains (longest match). dbt with no results (profile/connection/parse error) escalates with `model: null` and no repair.
+- yml: PII as column `config: {meta: {pii: true}}` (dbt 1.12 moved `meta` under `config`); key tests under `data_tests`; model `config.meta.primary_key`. Composite keys: `tests/<model>__primary_key.sql` (duplicates or null parts). Models stay views (dbt default); only marts are tables.
+- Column check: names only (case-insensitive) against `information_schema.columns` in `dev_governor`, as the build login.
+- For Amir: stale `stg_*`/`int_*` files from an earlier design are not deleted from the target. The offline CLI cycle in `test_graph.py` now ends `escalated` (its approve script has no intermediate SQL). The live pytest cases in `test_silver.py` skip without `GOVERNOR_BUILD_PASSWORD`; acceptance covers the live path.
+

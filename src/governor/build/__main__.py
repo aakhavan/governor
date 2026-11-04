@@ -4,7 +4,7 @@
     python -m governor.build profile --schema raw [--policy <file>] [--out <file>]
     python -m governor.build run --target <dir> --project-name <name> [--llm fake:<script.json>|openrouter]
                                  [--policy <file>] [--profile <profile.json>]
-    python -m governor.build approve <thread_id> --by <name> [--llm ...]   (builds silver: silver_built | escalated)
+    python -m governor.build approve <thread_id> --by <name> [--llm ...]   (builds silver and gold: built | escalated | blueprint_failed)
     python -m governor.build reject <thread_id> --note "<text>" [--llm ...]
 """
 

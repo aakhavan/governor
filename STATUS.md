@@ -1,6 +1,6 @@
 # STATUS: governor
 
-Updated 04 Nov 2026 21:54. Run `20261104-215430`.
+Updated 04 Nov 2026 23:03. Run `20261104-230357`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
@@ -27,9 +27,9 @@ Updated 04 Nov 2026 21:54. Run `20261104-215430`.
 | D1 | Test-bed isolation, build role reads raw, target dbt workspace | mechanical | - | done | 2/2 |  | claude-tc-sonnet | cursor-grok: pass | 2026-11-04T17:41:14 |
 | D2 | Profile the raw schema | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-04T18:09:23 |
 | D3 | Design proposal, validation, report and the design gate | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-04T18:34:10 |
-| D4 | Silver writer, dbt build in the dev schema, repair and escalation | design | yes | approved | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T21:54:30 |
-| D5 | Gold from catalogue templates, blueprint checks, gap report | design | yes | pending | 0/2 |  | - | - | - |
+| D4 | Silver writer, dbt build in the dev schema, repair and escalation | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T21:54:31 |
+| D5 | Gold from catalogue templates, blueprint checks, gap report | design | yes | approved | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T23:03:56 |
 
-Cost so far (reported + notional): $66.30 of $150.00 run budget; 87 agent call(s).
+Cost so far (reported + notional): $72.17 of $150.00 run budget; 90 agent call(s).
 
-Next: D4 is approved: `factory resume`.
+Next: D5 is approved: `factory resume`.
