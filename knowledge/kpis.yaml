@@ -1,0 +1,14 @@
+# KPI catalogue (docs/capstone/design.md section 6). Human-owned.
+#
+# KPI definitions are added here only after Amir approves them; only Amir sets
+# `status: approved`. Code reads this file (governor.core.catalogue.load_kpis).
+#
+# Every KPI names an `owner` (the team or person who owns the definition) and a
+# `source: {tier, ref, note}`; `sources` holds extra citations. When definitions
+# conflict, the source tiers win in this order:
+#   1. company     - the company's own glossary
+#   2. accounting  - an accounting or regulatory standard
+#   3. platform    - the shop platform's documentation
+#   4. vendor      - vendor glossaries (a vendor source must carry a `note`)
+version: 1
+kpis: []

@@ -1,0 +1,8 @@
+# Approved decisions (docs/capstone/design.md section 8). Human-owned.
+#
+# The reviewed record of column mappings, blueprint exceptions and corrections
+# that later builds reuse. Changed only through reviewed pull requests. Each
+# entry has an id, a kind (column_mapping | blueprint_exception | correction),
+# a subject, a value, a reason, approved_by, approved_on and a source.
+version: 1
+decisions: []

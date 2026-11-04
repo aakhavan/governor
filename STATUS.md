@@ -1,6 +1,6 @@
 # STATUS: governor
 
-Updated 04 Nov 2026 12:43. Run `20261104-124353`.
+Updated 04 Nov 2026 17:26. Run `20261104-172619`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
@@ -22,9 +22,9 @@ Updated 04 Nov 2026 12:43. Run `20261104-124353`.
 | C2 | Warehouse adapter seam, DuckDB first, no behaviour change | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-02T22:25:47 |
 | C3 | Postgres test bed with the Olist loader and a synthetic sample | mechanical | - | done | 0/2 |  | claude-tc-sonnet | cursor-grok: pass | 2026-11-02T22:36:33 |
 | C4 | Postgres adapter and database roles | design | yes | done | 2/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-04T11:02:50 |
-| C5 | Serving schemas and the validator in the Postgres dialect | design | yes | approved | 2/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T12:43:53 |
-| C6 | KPI catalogue, layer blueprint and approved-decisions formats | design | yes | pending | 0/2 |  | - | - | - |
+| C5 | Serving schemas and the validator in the Postgres dialect | design | yes | done | 2/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T12:43:54 |
+| C6 | KPI catalogue, layer blueprint and approved-decisions formats | design | yes | approved | 2/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T17:26:19 |
 
-Cost so far (reported + notional): $49.83 of $80.00 run budget; 64 agent call(s).
+Cost so far (reported + notional): $56.27 of $80.00 run budget; 76 agent call(s).
 
-Next: C5 is approved: `factory resume`.
+Next: C6 is approved: `factory resume`.
