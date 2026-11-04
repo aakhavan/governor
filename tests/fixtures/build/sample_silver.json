@@ -1,0 +1,18 @@
+{
+  "intermediate": {
+    "int_order_lines": [
+      "select\n    i.order_id as order_id,\n    i.order_item_id as order_item_id,\n    i.product_id as product_id,\n    i.seller_id as seller_id,\n    i.price as item_price,\n    i.freight_value as freight_value,\n    o.order_status as order_status,\n    o.purchased_at as purchased_at,\n    o.customer_id as customer_id,\n    c.customer_unique_id as customer_unique_id\nfrom {{ ref('stg_order_items') }} as i\njoin {{ ref('stg_orders') }} as o on o.order_id = i.order_id\nleft join {{ ref('stg_customers') }} as c on c.customer_id = o.customer_id"
+    ],
+    "int_orders": [
+      "select\n    o.order_id as order_id,\n    o.customer_id as customer_id,\n    c.customer_unique_id as customer_unique_id,\n    o.order_status as order_status,\n    o.purchased_at as purchased_at,\n    o.delivered_at as delivered_at,\n    o.estimated_delivery_at as estimated_delivery_at\nfrom {{ ref('stg_orders') }} as o\nleft join {{ ref('stg_customers') }} as c on c.customer_id = o.customer_id"
+    ],
+    "int_order_reviews": [
+      "with ranked as (\n    select\n        r.order_id,\n        r.review_id,\n        r.review_score,\n        r.review_answered_at,\n        row_number() over (\n            partition by r.order_id\n            order by r.review_answered_at desc nulls last, r.review_id desc\n        ) as rn\n    from {{ ref('stg_reviews') }} as r\n)\nselect\n    ranked.order_id as order_id,\n    ranked.review_id as review_id,\n    ranked.review_score as review_score,\n    ranked.review_answered_at as review_answered_at,\n    o.purchased_at as purchased_at\nfrom ranked\njoin {{ ref('stg_orders') }} as o on o.order_id = ranked.order_id\nwhere ranked.rn = 1"
+    ]
+  },
+  "repair": {
+    "int_order_lines": [
+      "select\n    i.order_id as order_id,\n    i.order_item_id as order_item_id,\n    i.product_id as product_id,\n    i.seller_id as seller_id,\n    i.item_price as item_price,\n    i.freight_value as freight_value,\n    o.order_status as order_status,\n    o.purchased_at as purchased_at,\n    o.customer_id as customer_id,\n    c.customer_unique_id as customer_unique_id\nfrom {{ ref('stg_order_items') }} as i\njoin {{ ref('stg_orders') }} as o on o.order_id = i.order_id\nleft join {{ ref('stg_customers') }} as c on c.customer_id = o.customer_id"
+    ]
+  }
+}

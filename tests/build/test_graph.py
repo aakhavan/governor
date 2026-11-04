@@ -67,13 +67,18 @@ def test_reject_then_approve_with_a_fresh_saver(tmp_path, profile, good):
     r = graph.reject(tid, "use int_orders for on-time delivery", llm2, checkpoints=cp)
     assert r["status"] == graph.AWAITING and len(llm2.prompts) == 1
     assert "use int_orders for on-time delivery" in llm2.prompts[0][1]
-    a = graph.approve(tid, "amir", FakeBuildLLM({}), checkpoints=cp)
-    assert a["status"] == graph.APPROVED
+    # no intermediate SQL in the script: silver escalates before dbt runs (never called here)
+    a = graph.approve(tid, "amir", FakeBuildLLM({}), checkpoints=cp, dbt_runner=_no_dbt)
+    assert a["status"] == graph.ESCALATED and a["escalated"]["model"].startswith("int_")
     decisions = load_approved(tmp_path / "target" / "governor" / "approved.yaml").decisions
     assert {d.subject.split(".")[1] for d in decisions} == BUILT
     assert all(d.kind == "column_mapping" and d.approved_by == "amir" for d in decisions)
     with pytest.raises(graph.BuildError, match="not waiting"):
         graph.approve(tid, "amir", FakeBuildLLM({}), checkpoints=cp)
+
+
+def _no_dbt(target, args):
+    raise AssertionError("dbt must not run while SQL is refused")
 
 
 def test_second_reject_ends_the_thread(tmp_path, profile, good):
@@ -118,7 +123,8 @@ def _gate_cycle(tmp_path, good, run_extra, env):
     d = _cli(["reject", tid, "--note", "use int_orders", "--llm", _script(tmp_path / "s2.json", good)], env)
     assert d["status"] == "awaiting_design_approval"
     d = _cli(["approve", tid, "--by", "amir", "--llm", _script(tmp_path / "s3.json", good)], env)
-    assert d["status"] == "design_approved"
+    # the approve script has no intermediate SQL: silver escalates without reaching dbt
+    assert d["status"] == "escalated" and d["escalated"]["model"].startswith("int_") and d["repairs"] == 9
     decisions = load_approved(target / "governor" / "approved.yaml").decisions
     assert len(decisions) >= len(BUILT) and all(x.approved_by == "amir" for x in decisions)
 

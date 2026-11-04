@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-D3 is in place on top of D2. python -m governor.build run profiles raw, asks the plan model for a design, and validates it in code. A valid design writes governor/design.json and governor/design.md in the target and pauses on an interrupt with status awaiting_design_approval. approve and reject resume that thread from GOVERNOR_STATE_DIR/build_checkpoints.sqlite in a new process. Approve appends one column_mapping decision per built-KPI mapping to <target>/governor/approved.yaml, with approver, date, and source, and finishes as design_approved. knowledge/approved.yaml is only the cross-company default read into the prompt. A proposal with findings is sent back at most twice, then design_invalid, and design.json is not written. One rejection returns the design to the plan model with the note; a second ends as design_rejected. The prompt has no min, max, or raw cell values. build does not import ask.
+D4 is in place on D3. approve resumes the design-gate interrupt and writes silver: staging SQL from the approved design in code, intermediate SQL from the write model, both checked before dbt. check_sql requires one Postgres SELECT, declared refs only, source() only for that staging model's raw table, and no DDL or DML. dbt build --select staging intermediate runs as governor_build into dev_governor; column names are then checked in information_schema. A failing model is repaired twice with the write model and once with the plan model, then the run ends silver_built or escalated (model plus last error). repairs is the number of repair calls. Yml tags PII at config.meta, unique and not_null on a single-column key, and a singular test for a composite key. build does not import ask.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,47 +20,6 @@ D3 is in place on top of D2. python -m governor.build run profiles raw, asks the
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## D2 result
-*Profile the raw schema, 04 Nov 2026 18:09.*
-
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/D2`.
-
-| check | ok | detail |
-|---|---|---|
-| Docker is running | yes | 29.9.2 |
-| testbed/docker-compose.yml exists | yes | missing |
-| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
-| sample loads into raw | yes | 9 tables |
-| roles applied | yes | roles applied |
-| profile CLI writes the profile | yes | {"out": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_accept_qfhdv2gk\\profile.json", "schema": "raw", "tables": 9,  |
-| all 9 raw tables profiled | yes | ['olist_customers_dataset', 'olist_geolocation_dataset', 'olist_order_items_dataset', 'olist_order_payments_dataset', 'o |
-| row counts match the sample | yes |  |
-| loader columns starting with _ are left out | yes |  |
-| orders key is order_id | yes | [['order_id'], ['customer_id'], ['order_purchase_timestamp'], ['order_approved_at'], ['order_estimated_delivery_date']] |
-| customer_id is a key and customer_unique_id is not | yes | [['customer_id']] |
-| orders.customer_id relates to customers.customer_id | yes | [('olist_order_items_dataset.order_id', 'olist_orders_dataset.order_id'), ('olist_order_items_dataset.product_id', 'olis |
-| purchase timestamp inferred as timestamp | yes | {'name': 'order_purchase_timestamp', 'inferred_type': 'timestamp', 'null_rate': 0.0, 'distinct': 5, 'pii': False, 'min': |
-| price inferred as numeric | yes | {'name': 'price', 'inferred_type': 'numeric', 'null_rate': 0.0, 'distinct': 3, 'pii': False, 'min': 50.0, 'max': 100.0} |
-| customer_unique_id is flagged PII with no min or max | yes | {'name': 'customer_unique_id', 'inferred_type': 'text', 'null_rate': 0.0, 'distinct': 5, 'pii': True, 'min': None, 'max' |
-| no PII value appears in the profile | yes | [] |
-| pytest tests/build | yes | 23 passed, 7 skipped in 0.61s |
-
-Review: D2 profiles raw in SQL and matches section 5. Python receives counts plus min/max only for non-PII integer, numeric, date, and timestamp columns; policy columns, including numeric lat/lng, are counts only. Sample keys, the seven relationships, types, row counts, and the PII-string check all follow from that rule. Table and relationship order is sorted, and nothing reads the clock.
-
-For Amir: On this five-row sample, section 5 treats every unique column as a key, so orders also keys its purchase, approved, and estimated-delivery timestamps, and products keys its measure columns. It will not hold on the full extract. The policy file does not name geolocation_zip_code_prefix, geolocation_city, geolocation_state, or seller_state. Those columns are text in the sample, so no value is written. Lat and lng are listed and their min/max are suppressed. Live pytest was skipped (no DB env in that process); the CLI check in accept_d2.py is what ran the profile.
-
-## Additions for D3
-profile_schema(dsn, schema, policy) and the profile CLI use build_dsn(). Shape: schema, profiled_at_rows (always true), tables (name order), relationships (from, to order). Columns are ordinal, skipping names that start with _. Fields: inferred_type (boolean|integer|numeric|date|timestamp|text), null_rate (6 d.p.), distinct, pii, min, max. pii means the column or table.column is a policy key (load_policy on knowledge/shop/policy.yaml). min/max only for non-PII integer (int), numeric (float), date (YYYY-MM-DD), timestamp (YYYY-MM-DD HH:MM:SS). Keys: non-null, distinct == rows; pairs only if no single-column key. Relationships: single-column keys only, from the other column to the key, coverage of non-null distinct values >= 0.95, 4 d.p. Sample has seven: items.order_id, items.product_id, items.seller_id, payments.order_id, reviews.order_id, orders.customer_id, products.product_category_name. customer_id is a key; customer_unique_id is not. Extra keys are tiny-sample artifacts (timestamps, review_score, product measures, seller zip/city/state); do not treat them as business primary keys. Models live in governor.build.models. build does not import governor.ask.
-
-## D3 notes (implementer)
-- New module `governor.build.llm` (not in the section 2 table): `make_llm("openrouter"|"fake:<script>")`, `BuildLLM.structured(kind, prompt, schema, role)` / `.text(kind, prompt, key, role)`; roles `plan`/`write` read `GOVERNOR_BUILD_PLAN_MODEL`/`GOVERNOR_BUILD_WRITE_MODEL` (default CHAT_MODEL), clients built on first call. Fake lists: in order, last repeats; `intermediate`/`repair` keyed by model name for D4. Every call appends a usage dict to `llm.calls`; the graph keeps them in state `calls`.
-- Prompt has no data values at all: min/max are dropped for every column (not only PII), PII columns are name, pii, null_rate, distinct. Catalogue goes in without `template_sql`.
-- Extra finding codes beyond section 6: `PROPOSAL_UNPARSEABLE` (reply is not a Proposal; graph), `EXPR_UNPARSEABLE` (staging expr or boolean mapping is not one expression, or is a query), `KPI_DUPLICATE`. `PII_UNTAGGED` also fires on an intermediate column that carries a PII column of its refs by name. A build KPI without `domain` is `MAPPING_INCOMPLETE`.
-- Graph: `propose` counts a repair when it gets findings; 1 + 2 proposals, then write_report and `design_invalid` (design.md with findings, no approve command; design.json is not written for an invalid design). Reject resets the repair budget for one more round with the note and the previous proposal in the prompt; a second reject ends with `design_rejected`. `approve` writes one `column_mapping` per mapping entry (`id map-<kpi>-<name>`, value = the mapping value verbatim, `approved_on` = today's date), replacing same-id entries; the file is checked with `load_approved`.
-- `run --profile <file>` uses a saved profile instead of the database; `tests/build/test_graph.py` uses it to run run/reject/approve in new processes offline. `run --policy` defaults to `knowledge/shop/policy.yaml` (answers the D2 question for `run`; `profile` is unchanged).
-- Approved context for the prompt: `knowledge/approved.yaml` then `<target>/governor/approved.yaml`.
-- For Amir: sample_design.json leaves review comment title/message out of silver (free text, no KPI needs it), and int_order_reviews keeps the latest answer per order by `review_answered_at`, then `review_id`.
 
 ## D3 result
 *Design proposal, validation, report and the design gate, 04 Nov 2026 18:34.*
@@ -100,3 +59,44 @@ For Amir: The unbuildable-KPI acceptance check is any() of three code names. Thi
 
 ## Additions for D4
 Extend the same StateGraph. record_decisions currently goes to END and sets status design_approved; point it at write_silver and set the final status to built or escalated in that same approve() resume. approve() resumes only while the next node is design_gate. State: target (absolute), project_name, policy, profile, proposal, findings, repairs, rejections, note, status, report, design, approved_by, approved_file, calls. repairs is the design-loop count and can already be 1 or 2 at approval; use a separate counter for SQL repair. calls uses operator.add, so return only the new usage dicts. design.json is Proposal.to_json_dict(), written only when validation passed, at <target>/governor/design.json. Staging expr is raw-table SQL; intermediate expr is null and the write model owns that SQL. Fake LLM via make_llm('fake:<script.json>'): propose[], intermediate{model:[]}, repair{model:[]}; the last reply repeats. Plan and write roles use GOVERNOR_BUILD_PLAN_MODEL and GOVERNOR_BUILD_WRITE_MODEL. Do not import governor.ask. Do not write knowledge/; company decisions stay in <target>/governor/approved.yaml. tests/fixtures/build/sample_design.json builds every catalogue KPI except conversion_rate and gross_margin, which it declines with gaps.
+
+## D4 notes (implementer)
+- `governor.build.silver`: `check_sql`, `staging_sql`, `write_silver` / `dbt_build_silver` / `repair_silver` / `next_step` over a JSON-able state dict (checkpointed by the graph under `silver`), and `build_silver(target, design, llm, runner=, inspector=)` chaining them. Prompts `prompts/intermediate.md`, `prompts/repair.md` (design only, no data values).
+- Graph: `record_decisions -> write_silver -> {dbt_build_silver | repair_silver | silver_done}`, code-routed by `silver.next_step`. SQL refused by `check_sql` is never written and goes to repair before dbt runs. Per model: 2 write-model repairs, then 1 plan-model repair; still failing -> `escalated` with `{"model", "error"}`. `approve` returns `status` (`silver_built`|`escalated`), `models`, `tests_passed`, `repairs` (= state `sql_repairs`, repair calls), plus `escalated` when it applies. `build_graph` takes `dbt_runner`/`inspector` for offline tests.
+- A failing test is attributed to the silver model whose name it contains (longest match). dbt with no results (profile/connection/parse error) escalates with `model: null` and no repair.
+- yml: PII as column `config: {meta: {pii: true}}` (dbt 1.12 moved `meta` under `config`); key tests under `data_tests`; model `config.meta.primary_key`. Composite keys: `tests/<model>__primary_key.sql` (duplicates or null parts). Models stay views (dbt default); only marts are tables.
+- Column check: names only (case-insensitive) against `information_schema.columns` in `dev_governor`, as the build login.
+- For Amir: stale `stg_*`/`int_*` files from an earlier design are not deleted from the target. The offline CLI cycle in `test_graph.py` now ends `escalated` (its approve script has no intermediate SQL). The live pytest cases in `test_silver.py` skip without `GOVERNOR_BUILD_PASSWORD`; acceptance covers the live path.
+
+## D4 result
+*Silver writer, dbt build in the dev schema, repair and escalation, 04 Nov 2026 21:54.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/D4`.
+
+| check | ok | detail |
+|---|---|---|
+| sample design and silver fixtures exist | yes | tests/fixtures/build/ |
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw | yes | 9 tables |
+| roles applied | yes | roles applied |
+| build init lists the 9 raw tables | yes |  |
+| run pauses at the design gate | yes | {"thread_id": "7c556dce-bf99-4cbc-b038-a14c66ada5ff", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
+| approve builds silver | yes | {"thread_id": "7c556dce-bf99-4cbc-b038-a14c66ada5ff", "status": "silver_built", "report": "C:\\Users\\amir0\\AppData\\Lo |
+| tests ran and passed | yes | 11 |
+| the scripted bad draft was repaired | yes | 1 |
+| every silver model exists in dev_governor | yes | [] |
+| nothing written outside dev_governor | yes | [] |
+| silver yml tags PII columns | yes |  |
+| silver yml has unique and not_null key tests | yes |  |
+| composite keys have singular tests | yes |  |
+| a model that cannot be repaired ends escalated | yes | {"thread_id": "9fd8b17c-fc24-4565-8de1-9e03ca00db18", "status": "escalated", "report": "C:\\Users\\amir0\\AppData\\Local |
+| pytest tests/build | yes | 88 passed, 10 skipped in 14.46s |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: The live run is the evidence: tests_passed 11 equals 4 single-column keys times unique and not_null, plus 3 composite singular tests, and int_order_lines exists only after the repair replaced i.price with i.item_price. The yml checks in accept_d4.py are substring searches. Section 8 still says status built; the step and the script use silver_built until D5. When several models run out of repairs together, only the first is named. A dbt failure tied to no model escalates with model null. Reused targets keep stale SQL files. approved_on is still date.today.
+
+## Additions for D5
+On silver_built, continue to write_gold; leave escalated at END. Section 8's approve status built is the post-gold name; D4 returns silver_built plus models, tests_passed, and repairs. State.repairs is the design-loop count. SQL repairs are state.sql_repairs and silver.repairs, with per-model counts in silver.attempts (2 write, then 1 plan). calls uses operator.add; return only new usage dicts. Files: models/staging/_staging.yml, models/intermediate/_intermediate.yml, models/<folder>/<name>.sql, and tests/<model>__primary_key.sql for a composite key. PII is columns[].config.meta.pii (dbt 1.12). Single-column keys use data_tests [unique, not_null]. Composite keys do not get per-column unique tests; the singular test returns rows for a duplicate or a null key part. Model config.meta.primary_key lists the key. Silver models stay views; marts are tables via dbt_project.yml. The profile already targets dev_governor as governor_build. That schema is shared and not dropped, and a reused target keeps stale stg_/int_ files. The column check compares names only. design.json is the proposal at <target>/governor/design.json. The sample declines conversion_rate and gross_margin. Do not import governor.ask. Do not write knowledge/.

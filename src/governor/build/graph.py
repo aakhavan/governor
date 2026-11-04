@@ -1,4 +1,4 @@
-"""The build ``StateGraph`` (batch2.md section 8), D3 part: profile to the design gate and the recorded decisions.
+"""The build ``StateGraph`` (batch2.md section 8), D3 and D4 parts: profile to the design gate, then silver.
 
 ::
 
@@ -7,11 +7,19 @@
                         write_report -> design_gate (interrupt)
              reject + note (once) <------|  approve
              -> propose                  v
-                                    record_decisions -> END (D3: status design_approved)
+                                    record_decisions -> write_silver --SQL refused--> repair_silver
+                                                             | ok                          ^   |
+                                                       dbt_build_silver --fail-------------+   |
+                                                             | ok          (write model <= 2, then plan model once)
+                                                            END (silver_built)      out of repairs -> END (escalated)
 
 Code owns every edge. Checkpoints live in ``GOVERNOR_STATE_DIR/build_checkpoints.sqlite``, so ``approve`` and
 ``reject`` resume the thread from a new process. The state holds the profile (no data values for PII columns), the
 proposal and the findings; no raw rows.
+
+``approve`` resumes the thread at the gate and runs on to ``silver_built`` or ``escalated`` in the same call. The
+silver step state (SQL per model, failures, repairs per model) is kept under ``silver``; ``sql_repairs`` counts
+repair calls (``repairs`` stays the design-loop count).
 
 A rejection sends the design back once, with the note, for one more proposal round (that round has its own repair
 budget). A second rejection ends the thread with status ``design_rejected``.
@@ -35,7 +43,8 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from governor.build import design
+from governor.build import design, silver
+from governor.build.dbt import run_dbt
 from governor.build.llm import BuildLLM, LLMOutputError
 from governor.build.models import Finding, Proposal
 from governor.core import paths
@@ -74,6 +83,8 @@ class BuildState(TypedDict, total=False):
     design: str | None
     approved_by: str
     approved_file: str
+    silver: dict
+    sql_repairs: int
     calls: Annotated[list[dict], operator.add]
 
 
@@ -176,6 +187,8 @@ def build_graph(
     blueprint_path: Path = DEFAULT_BLUEPRINT,
     default_approved: Path | None = DEFAULT_APPROVED,
     today: Callable[[], dt.date] = dt.date.today,
+    dbt_runner: silver.Runner = run_dbt,
+    inspector: silver.Inspector = silver.built_columns,
 ):
     catalogue = load_kpis(kpis_path)
     blueprint = load_blueprint(blueprint_path)
@@ -252,6 +265,41 @@ def build_graph(
                                 today(), config["configurable"]["thread_id"])
         return {"status": APPROVED, "approved_file": str(path)}
 
+    def _silver_update(st: dict, before: int) -> dict:
+        out = {"silver": st, "sql_repairs": int(st.get("repairs") or 0), "calls": list(llm.calls[before:])}
+        if st.get("status") in (silver.BUILT, silver.ESCALATED):
+            out["status"] = st["status"]
+        return out
+
+    def write_silver(state: BuildState) -> dict:
+        before = len(llm.calls)
+        st = silver.write_silver(state["target"], state["proposal"], llm)
+        return _silver_update(st, before)
+
+    def dbt_build_silver(state: BuildState) -> dict:
+        st = silver.dbt_build_silver(state["target"], state["proposal"], dict(state["silver"]),
+                                     runner=dbt_runner, inspector=inspector)
+        return _silver_update(st, len(llm.calls))
+
+    def repair_silver(state: BuildState) -> dict:
+        before = len(llm.calls)
+        st = silver.repair_silver(state["target"], state["proposal"], llm, dict(state["silver"]))
+        return _silver_update(st, before)
+
+    def after_silver(state: BuildState) -> Any:
+        st = dict(state["silver"])
+        step = silver.next_step(st)
+        if step == "dbt":
+            return "dbt_build_silver"
+        if step == "repair":
+            return "repair_silver"
+        return "silver_done"
+
+    def silver_done(state: BuildState) -> dict:
+        st = dict(state["silver"])
+        silver.next_step(st)  # sets the escalation (model and last error) when a model is out of repairs
+        return {"silver": st, "status": st.get("status") or silver.ESCALATED}
+
     g = StateGraph(BuildState)
     g.add_node("profile", profile)
     g.add_node("propose", propose)
@@ -259,13 +307,21 @@ def build_graph(
     g.add_node("write_report", write_report)
     g.add_node("design_gate", design_gate)
     g.add_node("record_decisions", record)
+    g.add_node("write_silver", write_silver)
+    g.add_node("dbt_build_silver", dbt_build_silver)
+    g.add_node("repair_silver", repair_silver)
+    g.add_node("silver_done", silver_done)
     g.add_edge(START, "profile")
     g.add_edge("profile", "propose")
     g.add_edge("propose", "validate")
     g.add_conditional_edges("validate", after_validate, ["propose", "write_report"])
     g.add_conditional_edges("write_report", after_report, ["design_gate", END])
     g.add_conditional_edges("design_gate", after_gate, ["record_decisions", "propose", END])
-    g.add_edge("record_decisions", END)
+    g.add_edge("record_decisions", "write_silver")
+    routes = ["dbt_build_silver", "repair_silver", "silver_done"]
+    for node in ("write_silver", "dbt_build_silver", "repair_silver"):
+        g.add_conditional_edges(node, after_silver, routes)
+    g.add_edge("silver_done", END)
     return g.compile(checkpointer=checkpointer)
 
 
@@ -294,8 +350,11 @@ def _summary(graph, config: dict) -> dict:
            "report": values.get("report")}
     if values.get("status") == INVALID:
         out["findings"] = sorted({f["code"] for f in values.get("findings") or []})
-    if values.get("status") == APPROVED:
+    if values.get("approved_file"):
         out["approved"] = values.get("approved_file")
+    if values.get("status") in (silver.BUILT, silver.ESCALATED):
+        out.update(silver.result(values.get("silver") or {}).to_dict())
+        out["repairs"] = int(values.get("sql_repairs") or 0)
     calls = values.get("calls") or []
     costs = [c.get("cost_usd") for c in calls]
     out["llm_calls"] = len(calls)
@@ -345,5 +404,7 @@ def reject(thread_id: str, note: str, llm: BuildLLM, *, checkpoints: str | Path 
     return _resume(thread_id, {"action": "reject", "note": note.strip()}, llm, checkpoints, **graph_kwargs)
 
 
-__all__ = ["APPROVED", "AWAITING", "INVALID", "REJECTED", "BuildError", "approve",
+BUILT, ESCALATED = silver.BUILT, silver.ESCALATED
+
+__all__ = ["APPROVED", "AWAITING", "BUILT", "ESCALATED", "INVALID", "REJECTED", "BuildError", "approve",
            "build_graph", "record_decisions", "reject", "start"]

@@ -841,3 +841,47 @@ Use governor.build. init_target(target, project_name) creates the layout and wil
 - The policy matches a bare column name or `table.column`. Without `--policy` nothing is PII, so pass the shop policy. For Amir: should the CLI default to `knowledge/shop/policy.yaml`?
 - Sample: orders has 5 single-column candidate keys (5 rows, every timestamp unique); that's expected on tiny data, and D3's design should prefer `*_id` keys.
 
+## Relocks
+- 04 Nov 2026 21:54: D5: staging never model-repaired; stale model clean-up (D4 gate finding by Fable) (changed: plan/prompts/D5.md)
+
+## D2 result
+*Profile the raw schema, 04 Nov 2026 18:09.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/D2`.
+
+| check | ok | detail |
+|---|---|---|
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw | yes | 9 tables |
+| roles applied | yes | roles applied |
+| profile CLI writes the profile | yes | {"out": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_accept_qfhdv2gk\\profile.json", "schema": "raw", "tables": 9,  |
+| all 9 raw tables profiled | yes | ['olist_customers_dataset', 'olist_geolocation_dataset', 'olist_order_items_dataset', 'olist_order_payments_dataset', 'o |
+| row counts match the sample | yes |  |
+| loader columns starting with _ are left out | yes |  |
+| orders key is order_id | yes | [['order_id'], ['customer_id'], ['order_purchase_timestamp'], ['order_approved_at'], ['order_estimated_delivery_date']] |
+| customer_id is a key and customer_unique_id is not | yes | [['customer_id']] |
+| orders.customer_id relates to customers.customer_id | yes | [('olist_order_items_dataset.order_id', 'olist_orders_dataset.order_id'), ('olist_order_items_dataset.product_id', 'olis |
+| purchase timestamp inferred as timestamp | yes | {'name': 'order_purchase_timestamp', 'inferred_type': 'timestamp', 'null_rate': 0.0, 'distinct': 5, 'pii': False, 'min': |
+| price inferred as numeric | yes | {'name': 'price', 'inferred_type': 'numeric', 'null_rate': 0.0, 'distinct': 3, 'pii': False, 'min': 50.0, 'max': 100.0} |
+| customer_unique_id is flagged PII with no min or max | yes | {'name': 'customer_unique_id', 'inferred_type': 'text', 'null_rate': 0.0, 'distinct': 5, 'pii': True, 'min': None, 'max' |
+| no PII value appears in the profile | yes | [] |
+| pytest tests/build | yes | 23 passed, 7 skipped in 0.61s |
+
+Review: D2 profiles raw in SQL and matches section 5. Python receives counts plus min/max only for non-PII integer, numeric, date, and timestamp columns; policy columns, including numeric lat/lng, are counts only. Sample keys, the seven relationships, types, row counts, and the PII-string check all follow from that rule. Table and relationship order is sorted, and nothing reads the clock.
+
+For Amir: On this five-row sample, section 5 treats every unique column as a key, so orders also keys its purchase, approved, and estimated-delivery timestamps, and products keys its measure columns. It will not hold on the full extract. The policy file does not name geolocation_zip_code_prefix, geolocation_city, geolocation_state, or seller_state. Those columns are text in the sample, so no value is written. Lat and lng are listed and their min/max are suppressed. Live pytest was skipped (no DB env in that process); the CLI check in accept_d2.py is what ran the profile.
+
+## Additions for D3
+profile_schema(dsn, schema, policy) and the profile CLI use build_dsn(). Shape: schema, profiled_at_rows (always true), tables (name order), relationships (from, to order). Columns are ordinal, skipping names that start with _. Fields: inferred_type (boolean|integer|numeric|date|timestamp|text), null_rate (6 d.p.), distinct, pii, min, max. pii means the column or table.column is a policy key (load_policy on knowledge/shop/policy.yaml). min/max only for non-PII integer (int), numeric (float), date (YYYY-MM-DD), timestamp (YYYY-MM-DD HH:MM:SS). Keys: non-null, distinct == rows; pairs only if no single-column key. Relationships: single-column keys only, from the other column to the key, coverage of non-null distinct values >= 0.95, 4 d.p. Sample has seven: items.order_id, items.product_id, items.seller_id, payments.order_id, reviews.order_id, orders.customer_id, products.product_category_name. customer_id is a key; customer_unique_id is not. Extra keys are tiny-sample artifacts (timestamps, review_score, product measures, seller zip/city/state); do not treat them as business primary keys. Models live in governor.build.models. build does not import governor.ask.
+
+## D3 notes (implementer)
+- New module `governor.build.llm` (not in the section 2 table): `make_llm("openrouter"|"fake:<script>")`, `BuildLLM.structured(kind, prompt, schema, role)` / `.text(kind, prompt, key, role)`; roles `plan`/`write` read `GOVERNOR_BUILD_PLAN_MODEL`/`GOVERNOR_BUILD_WRITE_MODEL` (default CHAT_MODEL), clients built on first call. Fake lists: in order, last repeats; `intermediate`/`repair` keyed by model name for D4. Every call appends a usage dict to `llm.calls`; the graph keeps them in state `calls`.
+- Prompt has no data values at all: min/max are dropped for every column (not only PII), PII columns are name, pii, null_rate, distinct. Catalogue goes in without `template_sql`.
+- Extra finding codes beyond section 6: `PROPOSAL_UNPARSEABLE` (reply is not a Proposal; graph), `EXPR_UNPARSEABLE` (staging expr or boolean mapping is not one expression, or is a query), `KPI_DUPLICATE`. `PII_UNTAGGED` also fires on an intermediate column that carries a PII column of its refs by name. A build KPI without `domain` is `MAPPING_INCOMPLETE`.
+- Graph: `propose` counts a repair when it gets findings; 1 + 2 proposals, then write_report and `design_invalid` (design.md with findings, no approve command; design.json is not written for an invalid design). Reject resets the repair budget for one more round with the note and the previous proposal in the prompt; a second reject ends with `design_rejected`. `approve` writes one `column_mapping` per mapping entry (`id map-<kpi>-<name>`, value = the mapping value verbatim, `approved_on` = today's date), replacing same-id entries; the file is checked with `load_approved`.
+- `run --profile <file>` uses a saved profile instead of the database; `tests/build/test_graph.py` uses it to run run/reject/approve in new processes offline. `run --policy` defaults to `knowledge/shop/policy.yaml` (answers the D2 question for `run`; `profile` is unchanged).
+- Approved context for the prompt: `knowledge/approved.yaml` then `<target>/governor/approved.yaml`.
+- For Amir: sample_design.json leaves review comment title/message out of silver (free text, no KPI needs it), and int_order_reviews keeps the latest answer per order by `review_answered_at`, then `review_id`.
+
