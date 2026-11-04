@@ -37,9 +37,21 @@ _SYSTEM_SCHEMAS = ("information_schema", "pg_catalog")
 _CURSOR = "governor_run"
 
 
+# The governor_ask role default (testbed/sql/roles.sql). A call may ask for less,
+# never for more, so a caller cannot lift the database's own limit.
+MAX_TIMEOUT_S = 10
+
+
 def _timeout_ms(timeout_s: float) -> int:
-    # statement_timeout = 0 means "no timeout", so never send 0.
-    return max(1, int(timeout_s * 1000))
+    # statement_timeout = 0 means "no timeout", so never send 0; cap at the role default.
+    try:
+        requested = float(timeout_s)
+    except (TypeError, ValueError):
+        requested = MAX_TIMEOUT_S
+    if requested != requested:  # NaN
+        requested = MAX_TIMEOUT_S
+    requested = min(max(requested, 0.0), float(MAX_TIMEOUT_S))
+    return max(1, int(requested * 1000))
 
 
 class PostgresAdapter:

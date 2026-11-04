@@ -593,3 +593,68 @@ C2 is a pure refactor of the warehouse path. Keep executor results: dry_run(sql,
 ## Additions for C3
 Next step is C3 (Postgres test bed), not the adapter. get_adapter("postgres") raises UnknownWarehouseError until C4; GOVERNOR_WAREHOUSE defaults to duckdb. Do not send meta.duckdb, traces.duckdb, or checkpoints through the adapter. Keep dry_run's timeout_s optional: if omitted it uses access.yaml limits.timeout_s, because locked G5b calls dry_run(sql) with no timeout. Keep executor._open; tests stub it, and the duckdb branch passes connect=lambda: _open(database) into DuckDBAdapter. Adapter run defaults to JSON-safe lists (native=False). The executor passes native=True and converts rows to tuples so Decimal and date still reach graph.format_value and the eval checker; C4 must implement native. The conformance Postgres case skips when GOVERNOR_PG_DSN is unset. Its known_column is information_schema.tables.table_name, but list_columns() drops information_schema and pg_catalog, so point that case at a real test-bed table before C4 stops skipping. as_of remains 2026-10-22T14:11:26+00:00. Connection settings come from env only. Test-bed host port is 55432, database shop.
 
+## Relocks
+- 04 Nov 2026 12:43: C6: KPI owner + source tier (glossary precedence), agreed 4 Nov (changed: plan/accept/accept_c6.py, plan/prompts/C6.md)
+
+## C3 result
+*Postgres test bed with the Olist loader and a synthetic sample, 02 Nov 2026 22:36.*
+
+Implementer `claude-tc-sonnet`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/C3`.
+
+| check | ok | detail |
+|---|---|---|
+| testbed/docker-compose.yml exists | yes | missing |
+| testbed/load_olist.py exists | yes | missing |
+| testbed/README.md exists | yes | missing |
+| .gitignore keeps testbed/data/ out of git | yes |  |
+| psycopg is a dependency | yes |  |
+| README marks the licence check as TODO or states the licence | yes |  |
+| sample olist_customers_dataset.csv exists | yes | missing |
+| sample olist_customers_dataset.csv header is exact | yes | ['customer_id', 'customer_unique_id', 'customer_zip_code_prefix', 'customer_city', 'customer_state'] |
+| sample olist_customers_dataset.csv has 1-30 rows | yes | 6 rows |
+| sample olist_geolocation_dataset.csv exists | yes | missing |
+| sample olist_geolocation_dataset.csv header is exact | yes | ['geolocation_zip_code_prefix', 'geolocation_lat', 'geolocation_lng', 'geolocation_city', 'geolocation_state'] |
+| sample olist_geolocation_dataset.csv has 1-30 rows | yes | 5 rows |
+| sample olist_order_items_dataset.csv exists | yes | missing |
+| sample olist_order_items_dataset.csv header is exact | yes | ['order_id', 'order_item_id', 'product_id', 'seller_id', 'shipping_limit_date', 'price', 'freight_value'] |
+| sample olist_order_items_dataset.csv has 1-30 rows | yes | 6 rows |
+| sample olist_order_payments_dataset.csv exists | yes | missing |
+| sample olist_order_payments_dataset.csv header is exact | yes | ['order_id', 'payment_sequential', 'payment_type', 'payment_installments', 'payment_value'] |
+| sample olist_order_payments_dataset.csv has 1-30 rows | yes | 6 rows |
+| sample olist_order_reviews_dataset.csv exists | yes | missing |
+| sample olist_order_reviews_dataset.csv header is exact | yes | ['review_id', 'order_id', 'review_score', 'review_comment_title', 'review_comment_message', 'review_creation_date', 'rev |
+| sample olist_order_reviews_dataset.csv has 1-30 rows | yes | 4 rows |
+| sample olist_orders_dataset.csv exists | yes | missing |
+| sample olist_orders_dataset.csv header is exact | yes | ['order_id', 'customer_id', 'order_status', 'order_purchase_timestamp', 'order_approved_at', 'order_delivered_carrier_da |
+| sample olist_orders_dataset.csv has 1-30 rows | yes | 5 rows |
+| sample olist_products_dataset.csv exists | yes | missing |
+| sample olist_products_dataset.csv header is exact | yes | ['product_id', 'product_category_name', 'product_name_lenght', 'product_description_lenght', 'product_photos_qty', 'prod |
+| sample olist_products_dataset.csv has 1-30 rows | yes | 3 rows |
+| sample olist_sellers_dataset.csv exists | yes | missing |
+| sample olist_sellers_dataset.csv header is exact | yes | ['seller_id', 'seller_zip_code_prefix', 'seller_city', 'seller_state'] |
+| sample olist_sellers_dataset.csv has 1-30 rows | yes | 2 rows |
+| sample product_category_name_translation.csv exists | yes | missing |
+| sample product_category_name_translation.csv header is exact | yes | ['product_category_name', 'product_category_name_english'] |
+| sample product_category_name_translation.csv has 1-30 rows | yes | 2 rows |
+| edge: one customer_unique_id with two customer_ids | yes |  |
+| edge: a canceled order | yes |  |
+| edge: an order delivered after its estimated date | yes |  |
+| edge: an order with two reviews | yes |  |
+| edge: an order with two payments | yes |  |
+| every order's customer exists in the customers sample | yes | [] |
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw with the right row counts | yes | 9 tables |
+| a second load gives the same counts (idempotent) | yes | 9 tables |
+| a wrong header is refused and the file is named | yes | Olist source check failed: |   olist_orders_dataset.csv: header differs (missing columns ['order_status'], unexpected co |
+| pytest tests/testbed | yes | 2 passed, 1 skipped in 0.46s |
+| required tests present | yes | 2 found |
+
+Review: C3 matches its prompt. Postgres 16 listens on host port 55432 (database shop, user governor_admin, default password governor_local, named volume, healthcheck). The loader checks the nine published headers, including product_name_lenght, and COPY-loads each CSV into raw as text plus _loaded_at, with truncate and load in one transaction per table. The sample is synthetic and includes every design edge case. testbed/data/ is gitignored. The README licence note is a marked TODO. Acceptance loaded the sample twice with the same counts.
+
+For Amir: The live load checks compare the loader JSON to CSV counts and do not query raw themselves. In this loader that JSON is SELECT count(*) after COPY, both loads matched, and a failed COPY would not print the line, so the rows were loaded. The licence acceptance check is the substring licen; the README marks a TODO and the dataset licence is still unknown. Schemas other than raw, and the roles, belong to C4.
+
+## Additions for C4
+C4 adds the Postgres adapter and roles. Leave the loader as it is. Compose: Postgres 16, host 55432, database shop, admin governor_admin, password default governor_local. A fresh database is empty until python testbed/load_olist.py --source testbed/sample (GOVERNOR_PG_DSN or --dsn). Only schema raw is created. Tables are raw.<csv stem>, source columns text, plus _loaded_at timestamptz NOT NULL DEFAULT now(). COPY CSV stores blanks as NULL. Zip prefixes stay text (01000). Keep spellings product_name_lenght and product_description_lenght. Truncate plus COPY is one transaction per table; headers are checked before any connection. psycopg[binary] is locked at 3.3.6. roles.sql, apply_roles.py, dev_governor, and private do not exist yet. Adapter DSN is GOVERNOR_PG_DSN; the acceptance admin DSN is GOVERNOR_PG_ADMIN_DSN. Conformance skips if unset; point its known column at a table the test creates, because list_columns drops information_schema and pg_catalog. Sample: uniq-0001 is cust-0001 and cust-0002; ord-0002 is canceled; ord-0003 is late; ord-0001 has two reviews and two payments. Do not commit testbed/data/. The README licence line is still a TODO. as_of remains 2026-10-22T14:11:26+00:00.
+

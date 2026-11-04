@@ -9,6 +9,13 @@ never leaves the warehouse.
 Checks are default-deny: every relation must be an allowlisted model or a CTE
 of the same query, every function in FROM is rejected, and a PII column is
 tracked through aliases, CTEs, subqueries and set operations by sqlglot scopes.
+
+In the Postgres dialect the relations are the role's serving views
+(``serve_<role>.<model>``, always schema-qualified), and every function call
+must be on ``POSTGRES_FUNCTIONS``, an explicit allowlist of read-only scalar,
+aggregate and window functions. The ask login may ``SET ROLE`` to any reader
+role, so ``set_config('role', ...)`` or ``query_to_xml(...)`` (SQL text the
+validator never parsed) would otherwise get around the role boundary.
 """
 
 from __future__ import annotations
@@ -55,6 +62,40 @@ _VOLATILE_NAMES = (
 )
 # Relations that are table-valued functions however they are spelled.
 _TABLE_FUNCTION_NODES = (exp.Unnest, exp.Lateral, exp.Values)
+
+POSTGRES = "postgres"
+SERVING_PREFIX = "serve_"
+# Postgres dialect: the only functions a query may call, by sqlglot name (the
+# typed node's sql_name(), or the lower-case name of a function sqlglot does not
+# know). Read-only scalar, aggregate and window functions only. Deliberately
+# absent: set_config, current_setting, query_to_xml and every other *_to_xml,
+# xpath, dblink*, pg_*, lo_*, sequence functions, random and uuid functions,
+# JSON/XML builders, set-returning functions and anything that takes SQL text.
+POSTGRES_FUNCTIONS = frozenset(
+    {
+        # control flow and casts
+        "CASE", "IF", "CAST", "COALESCE", "NULLIF", "GREATEST", "LEAST", "EXISTS", "ARRAY",
+        # aggregates
+        "COUNT", "SUM", "AVG", "MIN", "MAX", "MEDIAN", "MODE", "PERCENTILE_CONT", "PERCENTILE_DISC",
+        "STDDEV", "STDDEV_POP", "STDDEV_SAMP", "VARIANCE", "VARIANCE_POP", "CORR", "COVAR_POP",
+        "COVAR_SAMP", "LOGICAL_AND", "LOGICAL_OR", "GROUP_CONCAT", "ARRAY_AGG",
+        # window
+        "ROW_NUMBER", "RANK", "DENSE_RANK", "PERCENT_RANK", "CUME_DIST", "NTILE", "LAG", "LEAD",
+        "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE",
+        # numbers
+        "ABS", "CEIL", "FLOOR", "ROUND", "TRUNC", "SIGN", "SQRT", "POWER", "EXP", "LN", "LOG",
+        "TO_NUMBER",
+        # text
+        "LOWER", "UPPER", "INITCAP", "LENGTH", "SUBSTRING", "LEFT", "RIGHT", "TRIM", "PAD", "REPLACE",
+        "TRANSLATE", "REVERSE", "CONCAT", "CONCAT_WS", "SPLIT_PART", "STR_POSITION", "STARTS_WITH",
+        "REGEXP_LIKE", "REGEXP_REPLACE", "MD5", "SHA2", "ENCODE",
+        # dates (wall-clock functions are refused separately)
+        "EXTRACT", "TIMESTAMP_TRUNC", "DATE_TRUNC", "TIME_TO_STR", "STR_TO_DATE", "STR_TO_TIME",
+        "DATE_FROM_PARTS", "TIMESTAMP_FROM_PARTS",
+        # unknown to sqlglot, spelled as in Postgres
+        "octet_length", "make_date", "every",
+    }
+)  # fmt: skip
 
 
 @dataclass
@@ -118,6 +159,8 @@ def _validate(sql: str, policy: Policy, checks: _Checks) -> ValidationResult:
     _check_relations(tree, policy, checks)
     _check_star(tree, checks)
     _check_volatile(tree, checks)
+    if checks.dialect == POSTGRES:
+        _check_functions(tree, checks)
     if checks.codes:
         raise _Reject
     qualified = _qualify(tree, policy, checks)
@@ -168,6 +211,9 @@ def _parse(sql: str, checks: _Checks) -> exp.Expression:
     if not isinstance(tree, (exp.Select, exp.SetOperation)):
         checks.add("NOT_SELECT", f"{type(tree).__name__} statement; only SELECT or WITH ... SELECT is allowed")
         raise _Reject
+    if checks.dialect == POSTGRES and any(node.args.get("locks") for node in tree.find_all(exp.Select)):
+        checks.add("NOT_SELECT", "SELECT ... FOR UPDATE/SHARE takes row locks; it is not allowed")
+        raise _Reject
     # A SELECT may still embed a write (e.g. a data-modifying CTE).
     for node in tree.walk():
         if isinstance(node, (exp.DML, exp.DDL, exp.Command, exp.Into)) or type(node).__name__ in {
@@ -209,13 +255,41 @@ def _check_relations(tree: exp.Expression, policy: Policy, checks: _Checks) -> N
             if isinstance(node, exp.Table) and isinstance(source, Scope):
                 cte_refs.add(id(node))
     allowed = set(policy.models)
+    home = _home_schema(policy, checks.dialect)
+    # Postgres resolves an unqualified name through search_path, so the schema is required.
+    qualified_only = checks.dialect == POSTGRES
     for table in tree.find_all(exp.Table):
         if id(table) in cte_refs:
             continue
         name = table.name.lower()
         schema = table.db.lower()
-        if table.catalog or (schema and schema != MARTS_SCHEMA) or name not in allowed:
+        if table.catalog or (schema and schema != home) or (qualified_only and not schema) or name not in allowed:
             checks.add("TABLE_NOT_ALLOWED", f"relation {table.sql(dialect=checks.dialect)} is not an allowlisted model")
+
+
+def _home_schema(policy: Policy, dialect: str) -> str:
+    """The one schema a role's queries may read: its serving schema on Postgres, else the marts."""
+    if dialect == POSTGRES:
+        return f"{SERVING_PREFIX}{policy.role}".lower()
+    return MARTS_SCHEMA
+
+
+def _function_name(node: exp.Func) -> str:
+    if isinstance(node, (exp.Anonymous, exp.AnonymousAggFunc)):
+        return node.name.lower()
+    return node.sql_name()
+
+
+def _check_functions(tree: exp.Expression, checks: _Checks) -> None:
+    """Postgres: every function call is unqualified and on POSTGRES_FUNCTIONS."""
+    for node in tree.find_all(exp.Func):
+        name = _function_name(node)
+        parent = node.parent
+        if isinstance(parent, exp.Dot) and parent.expression is node:
+            qualifier = parent.this.sql(dialect=checks.dialect)[:80]
+            checks.add("FUNCTION_NOT_ALLOWED", f"schema-qualified function {qualifier}.{name} is not allowed")
+        elif name not in POSTGRES_FUNCTIONS:
+            checks.add("FUNCTION_NOT_ALLOWED", f"function {name} is not on the allowlist")
 
 
 def _looks_like_file(name: str) -> bool:
@@ -248,12 +322,13 @@ def _check_volatile(tree: exp.Expression, checks: _Checks) -> None:
 
 
 def _qualify(tree: exp.Expression, policy: Policy, checks: _Checks) -> exp.Expression:
-    schema = {MARTS_SCHEMA: policy.schema}
+    home = _home_schema(policy, checks.dialect)
+    schema = {home: policy.schema}
     try:
         return qualify(
             tree.copy(),
             dialect=checks.dialect,
-            db=MARTS_SCHEMA,
+            db=home,
             schema=schema,
             quote_identifiers=False,
             identify=False,

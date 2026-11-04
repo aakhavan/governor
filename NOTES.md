@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-C4 is done. PostgresAdapter, registered as get_adapter("postgres"), takes the DSN from GOVERNOR_PG_DSN and optional allowed_roles. Each call opens its own connection, sets the transaction read-only, sets statement_timeout from timeout_s, and may SET LOCAL ROLE after checking allowed_roles. dry_run (EXPLAIN) and run (DECLARE plus FETCH, capped at row_cap) send the user SQL as one prepared statement, so a second command cannot change the role or the timeout. QueryCanceled becomes QueryTimeout; other database errors become QueryError. testbed/sql/roles.sql, applied by testbed/apply_roles.py, creates governor_ask, governor_analyst, governor_finance_admin, and governor_build. governor_ask is read-only with statement_timeout 10s and belongs to the reader roles WITH INHERIT FALSE, SET TRUE. governor_build has USAGE and CREATE on dev_governor only. Schema private is admin-only. Conformance tests need GOVERNOR_PG_DSN and GOVERNOR_PG_ADMIN_DSN. as_of remains 2026-10-22T14:11:26+00:00.
+C5 is in place. governor.core.serving apply rebuilds serve_analyst and serve_finance_admin in one transaction: a salted SHA-256 view and a masked view per source table, the salt stored only in private.pii_salt, and each reader role granted only its own schema. The Postgres validator requires serve_<role>.<model> and an allowlist of read-only functions, so set_config and query_to_xml are refused. The Postgres adapter clamps statement_timeout to 10 seconds. Shop policy and access files under knowledge/ are still unwritten. Acceptance passed, including the live serving checks. The testbed pytest module skips unless both DSNs are set, and the acceptance script stops Docker before pytest, so those tests did not run in the green pytest.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,68 +20,6 @@ C4 is done. PostgresAdapter, registered as get_adapter("postgres"), takes the DS
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## C3 result
-*Postgres test bed with the Olist loader and a synthetic sample, 02 Nov 2026 22:36.*
-
-Implementer `claude-tc-sonnet`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/C3`.
-
-| check | ok | detail |
-|---|---|---|
-| testbed/docker-compose.yml exists | yes | missing |
-| testbed/load_olist.py exists | yes | missing |
-| testbed/README.md exists | yes | missing |
-| .gitignore keeps testbed/data/ out of git | yes |  |
-| psycopg is a dependency | yes |  |
-| README marks the licence check as TODO or states the licence | yes |  |
-| sample olist_customers_dataset.csv exists | yes | missing |
-| sample olist_customers_dataset.csv header is exact | yes | ['customer_id', 'customer_unique_id', 'customer_zip_code_prefix', 'customer_city', 'customer_state'] |
-| sample olist_customers_dataset.csv has 1-30 rows | yes | 6 rows |
-| sample olist_geolocation_dataset.csv exists | yes | missing |
-| sample olist_geolocation_dataset.csv header is exact | yes | ['geolocation_zip_code_prefix', 'geolocation_lat', 'geolocation_lng', 'geolocation_city', 'geolocation_state'] |
-| sample olist_geolocation_dataset.csv has 1-30 rows | yes | 5 rows |
-| sample olist_order_items_dataset.csv exists | yes | missing |
-| sample olist_order_items_dataset.csv header is exact | yes | ['order_id', 'order_item_id', 'product_id', 'seller_id', 'shipping_limit_date', 'price', 'freight_value'] |
-| sample olist_order_items_dataset.csv has 1-30 rows | yes | 6 rows |
-| sample olist_order_payments_dataset.csv exists | yes | missing |
-| sample olist_order_payments_dataset.csv header is exact | yes | ['order_id', 'payment_sequential', 'payment_type', 'payment_installments', 'payment_value'] |
-| sample olist_order_payments_dataset.csv has 1-30 rows | yes | 6 rows |
-| sample olist_order_reviews_dataset.csv exists | yes | missing |
-| sample olist_order_reviews_dataset.csv header is exact | yes | ['review_id', 'order_id', 'review_score', 'review_comment_title', 'review_comment_message', 'review_creation_date', 'rev |
-| sample olist_order_reviews_dataset.csv has 1-30 rows | yes | 4 rows |
-| sample olist_orders_dataset.csv exists | yes | missing |
-| sample olist_orders_dataset.csv header is exact | yes | ['order_id', 'customer_id', 'order_status', 'order_purchase_timestamp', 'order_approved_at', 'order_delivered_carrier_da |
-| sample olist_orders_dataset.csv has 1-30 rows | yes | 5 rows |
-| sample olist_products_dataset.csv exists | yes | missing |
-| sample olist_products_dataset.csv header is exact | yes | ['product_id', 'product_category_name', 'product_name_lenght', 'product_description_lenght', 'product_photos_qty', 'prod |
-| sample olist_products_dataset.csv has 1-30 rows | yes | 3 rows |
-| sample olist_sellers_dataset.csv exists | yes | missing |
-| sample olist_sellers_dataset.csv header is exact | yes | ['seller_id', 'seller_zip_code_prefix', 'seller_city', 'seller_state'] |
-| sample olist_sellers_dataset.csv has 1-30 rows | yes | 2 rows |
-| sample product_category_name_translation.csv exists | yes | missing |
-| sample product_category_name_translation.csv header is exact | yes | ['product_category_name', 'product_category_name_english'] |
-| sample product_category_name_translation.csv has 1-30 rows | yes | 2 rows |
-| edge: one customer_unique_id with two customer_ids | yes |  |
-| edge: a canceled order | yes |  |
-| edge: an order delivered after its estimated date | yes |  |
-| edge: an order with two reviews | yes |  |
-| edge: an order with two payments | yes |  |
-| every order's customer exists in the customers sample | yes | [] |
-| Docker is running | yes | 29.9.2 |
-| testbed/docker-compose.yml exists | yes | missing |
-| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
-| sample loads into raw with the right row counts | yes | 9 tables |
-| a second load gives the same counts (idempotent) | yes | 9 tables |
-| a wrong header is refused and the file is named | yes | Olist source check failed: |   olist_orders_dataset.csv: header differs (missing columns ['order_status'], unexpected co |
-| pytest tests/testbed | yes | 2 passed, 1 skipped in 0.46s |
-| required tests present | yes | 2 found |
-
-Review: C3 matches its prompt. Postgres 16 listens on host port 55432 (database shop, user governor_admin, default password governor_local, named volume, healthcheck). The loader checks the nine published headers, including product_name_lenght, and COPY-loads each CSV into raw as text plus _loaded_at, with truncate and load in one transaction per table. The sample is synthetic and includes every design edge case. testbed/data/ is gitignored. The README licence note is a marked TODO. Acceptance loaded the sample twice with the same counts.
-
-For Amir: The live load checks compare the loader JSON to CSV counts and do not query raw themselves. In this loader that JSON is SELECT count(*) after COPY, both loads matched, and a failed COPY would not print the line, so the rows were loaded. The licence acceptance check is the substring licen; the README marks a TODO and the dataset licence is still unknown. Schemas other than raw, and the roles, belong to C4.
-
-## Additions for C4
-C4 adds the Postgres adapter and roles. Leave the loader as it is. Compose: Postgres 16, host 55432, database shop, admin governor_admin, password default governor_local. A fresh database is empty until python testbed/load_olist.py --source testbed/sample (GOVERNOR_PG_DSN or --dsn). Only schema raw is created. Tables are raw.<csv stem>, source columns text, plus _loaded_at timestamptz NOT NULL DEFAULT now(). COPY CSV stores blanks as NULL. Zip prefixes stay text (01000). Keep spellings product_name_lenght and product_description_lenght. Truncate plus COPY is one transaction per table; headers are checked before any connection. psycopg[binary] is locked at 3.3.6. roles.sql, apply_roles.py, dev_governor, and private do not exist yet. Adapter DSN is GOVERNOR_PG_DSN; the acceptance admin DSN is GOVERNOR_PG_ADMIN_DSN. Conformance skips if unset; point its known column at a table the test creates, because list_columns drops information_schema and pg_catalog. Sample: uniq-0001 is cust-0001 and cust-0002; ord-0002 is canceled; ord-0003 is late; ord-0001 has two reviews and two payments. Do not commit testbed/data/. The README licence line is still a TODO. as_of remains 2026-10-22T14:11:26+00:00.
 
 ## C4 result
 *Postgres adapter and database roles, 04 Nov 2026 11:02.*
@@ -124,3 +62,44 @@ For Amir: accept_c4 does not send a two-statement query, and it stops Docker bef
 
 ## Additions for C5
 C5 grants belong on governor_analyst and governor_finance_admin, not on governor_ask. governor_ask is a member of both WITH INHERIT FALSE, SET TRUE, so those grants apply only after SET ROLE. Pass role= to PostgresAdapter.run and dry_run; get_adapter("postgres", allowed_roles=[...]) raises QueryError before connecting if the role is not listed. list_columns takes no role and runs as the login, so a governor_ask connection will not see serve_* columns. Schema private already exists and is revoked from all four roles and PUBLIC; store the salt in private.pii_salt and do not put it in a view definition. dev_governor is the only schema where governor_build has CREATE. raw is not granted to ask, build, or the readers. Adapter DSN is GOVERNOR_PG_DSN (the acceptance ask login); admin DDL uses GOVERNOR_PG_ADMIN_DSN. Password env vars are GOVERNOR_ASK_PASSWORD and GOVERNOR_BUILD_PASSWORD, with defaults governor_ask_local and governor_build_local. run() is JSON-safe unless native=True, which the executor already passes. Conformance tests skip unless both DSNs are set, and accept_c4 stops Docker before pytest. as_of remains 2026-10-22T14:11:26+00:00.
+
+## C5 implementer notes
+`governor.core.serving apply` runs in one admin transaction: salt into private.pii_salt (one row), drop every view in serve_analyst / serve_finance_admin, recreate one per source table, revoke from PUBLIC and the other governor roles, grant USAGE + SELECT to the owning reader role only. Analyst views read the salt with a scalar subquery (view owner's rights), so the value is never in a definition. `--access` defaults to knowledge/access.yaml (mask_value, finance_admin grants). Validator, postgres dialect only: relations must be `serve_<role>.<model>` (unqualified refused), every function must be on `POSTGRES_FUNCTIONS` and unqualified (`FUNCTION_NOT_ALLOWED`), `FOR UPDATE/SHARE` refused. Postgres adapter caps statement_timeout at 10 s (`MAX_TIMEOUT_S`). Open: tests/testbed/test_testbed.py::test_load_sample_idempotent loads with GOVERNOR_PG_DSN, which since C4 is the ask login, so it fails when both DSNs are set; tests/testbed/test_serving.py did not run against a live database here (accept_c5 stops Docker before pytest).
+
+## C5 result
+*Serving schemas and the validator in the Postgres dialect, 04 Nov 2026 12:43.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 2 fix loop(s); branch `factory/C5`.
+
+| check | ok | detail |
+|---|---|---|
+| src/governor/core/serving.py exists | yes | missing |
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw | yes | 9 tables |
+| roles applied | yes | roles applied |
+| serving apply succeeds | yes | {"finance_grants": ["olist_customers_dataset.customer_city"], "pii_columns": ["olist_customers_dataset.customer_city", " |
+| serving apply is idempotent | yes | {"finance_grants": ["olist_customers_dataset.customer_city"], "pii_columns": ["olist_customers_dataset.customer_city", " |
+| serving checks run | yes |  |
+| one view per table per role (18 views) | yes | 18 |
+| the salt never appears in a view definition | yes |  |
+| analyst sees PII as 64-hex digests | yes |  |
+| analyst view contains no raw PII values | yes |  |
+| COUNT(DISTINCT) on hashed PII equals the raw distinct count | yes |  |
+| non-PII columns pass through unchanged | yes |  |
+| analyst is denied the finance schema | yes |  |
+| analyst is denied private (salt) | yes |  |
+| analyst is denied raw | yes |  |
+| finance sees ungranted PII masked | yes |  |
+| finance sees the granted column unmasked | yes |  |
+| finance is denied the analyst schema | yes |  |
+| pytest tests | yes | 309 passed, 19 skipped in 94.28s (0:01:34) |
+| required tests present | yes | 5 found |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: The green pytest skipped all six tests in tests/testbed/test_serving.py, including test_postgres_timeout_clamped, because accept_c5 stops Docker and that module skips without the DSNs. Serving itself was checked live by accept_c5. The 10s cap is in PostgresAdapter._session and was not executed during that pytest. QueryTimeout still names the caller's timeout_s, so a 3600s request cancelled at 10s is reported as 3600s.
+
+## Additions for C6
+Serving is `python -m governor.core.serving apply --source <schema> --policy <file> [--access <file>]` using GOVERNOR_PG_ADMIN_DSN and GOVERNOR_PII_SALT. It writes one view per source table in serve_analyst and serve_finance_admin. Analyst PII is encode(sha256(convert_to((SELECT salt FROM private.pii_salt) || cast(value as text), 'UTF8')), 'hex'). Finance PII is the access mask unless finance_admin grants table.column. The salt row is replaced on each apply and is not in the view definition. Database roles are governor_analyst and governor_finance_admin (USAGE and SELECT on their own schema only). governor_ask does not inherit those grants; it still needs SET ROLE. In the postgres dialect the validator allows only unqualified functions in POSTGRES_FUNCTIONS and rejects anything else as FUNCTION_NOT_ALLOWED. That code is not in the graph POLICY_RULES, so a bad function is repaired rather than refused immediately. PostgresAdapter clamps statement_timeout to 10s (MAX_TIMEOUT_S). knowledge/ was not changed; shop policy and access are still unwritten. tests/testbed/test_testbed.py::test_load_sample_idempotent loads through GOVERNOR_PG_DSN, the ask login, so a full pytest with both DSNs set can fail that older test.

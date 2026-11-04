@@ -103,5 +103,5 @@ def probe():
 
 
 guarded("catalogue", probe)
-pytest_check("tests/core/test_catalogue.py")
+pytest_check("tests/core/test_catalogue.py", required=["test_kpi_source_tier_validated"])
 finish("C6")
