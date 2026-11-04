@@ -13,6 +13,8 @@ docker compose -f testbed/docker-compose.yml down -v     # also delete the data
 DSN for the admin user: `postgresql://governor_admin:governor_local@localhost:55432/shop`
 (export it as `GOVERNOR_PG_DSN`; code reads connection settings from env only).
 
+The host port is `${GOVERNOR_PG_PORT:-55432}`; set `GOVERNOR_PG_PORT` to move the stack. Acceptance runs its own stack (compose project `governor_accept`) on port 55433 with its own DSNs, so it never collides with this dev test bed.
+
 ## Real Olist dataset
 
 Download "Brazilian E-Commerce Public Dataset by Olist" manually from its Kaggle page and unzip the 9 CSVs into `testbed/data/` (git-ignored, never committed).

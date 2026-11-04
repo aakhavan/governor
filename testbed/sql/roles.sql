@@ -57,6 +57,10 @@ DO $$
 BEGIN
     IF EXISTS (SELECT FROM pg_namespace WHERE nspname = 'raw') THEN
         REVOKE ALL ON SCHEMA raw FROM PUBLIC;
+        -- build reads bronze: USAGE and SELECT only (no CREATE), also on tables created later.
+        GRANT USAGE ON SCHEMA raw TO governor_build;
+        GRANT SELECT ON ALL TABLES IN SCHEMA raw TO governor_build;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA raw GRANT SELECT ON TABLES TO governor_build;
     END IF;
 END
 $$;

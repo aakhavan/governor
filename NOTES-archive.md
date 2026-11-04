@@ -712,3 +712,44 @@ C5 grants belong on governor_analyst and governor_finance_admin, not on governor
 ## C5 implementer notes
 `governor.core.serving apply` runs in one admin transaction: salt into private.pii_salt (one row), drop every view in serve_analyst / serve_finance_admin, recreate one per source table, revoke from PUBLIC and the other governor roles, grant USAGE + SELECT to the owning reader role only. Analyst views read the salt with a scalar subquery (view owner's rights), so the value is never in a definition. `--access` defaults to knowledge/access.yaml (mask_value, finance_admin grants). Validator, postgres dialect only: relations must be `serve_<role>.<model>` (unqualified refused), every function must be on `POSTGRES_FUNCTIONS` and unqualified (`FUNCTION_NOT_ALLOWED`), `FOR UPDATE/SHARE` refused. Postgres adapter caps statement_timeout at 10 s (`MAX_TIMEOUT_S`). Open: tests/testbed/test_testbed.py::test_load_sample_idempotent loads with GOVERNOR_PG_DSN, which since C4 is the ask login, so it fails when both DSNs are set; tests/testbed/test_serving.py did not run against a live database here (accept_c5 stops Docker before pytest).
 
+## Relocks
+- 04 Nov 2026 17:30: capstone batch 2 (D1-D5), agreed 4 Nov (changed: plan.yaml, plan/accept/_build.py, plan/accept/_testbed.py, plan/accept/accept_d1.py, plan/accept/accept_d2.py, plan/accept/accept_d3.py, plan/accept/accept_d4.py, plan/accept/accept_d5.py, plan/prompts/D1.md, plan/prompts/D2.md, plan/prompts/D3.md, plan/prompts/D4.md, plan/prompts/D5.md)
+
+## C5 result
+*Serving schemas and the validator in the Postgres dialect, 04 Nov 2026 12:43.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 2 fix loop(s); branch `factory/C5`.
+
+| check | ok | detail |
+|---|---|---|
+| src/governor/core/serving.py exists | yes | missing |
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw | yes | 9 tables |
+| roles applied | yes | roles applied |
+| serving apply succeeds | yes | {"finance_grants": ["olist_customers_dataset.customer_city"], "pii_columns": ["olist_customers_dataset.customer_city", " |
+| serving apply is idempotent | yes | {"finance_grants": ["olist_customers_dataset.customer_city"], "pii_columns": ["olist_customers_dataset.customer_city", " |
+| serving checks run | yes |  |
+| one view per table per role (18 views) | yes | 18 |
+| the salt never appears in a view definition | yes |  |
+| analyst sees PII as 64-hex digests | yes |  |
+| analyst view contains no raw PII values | yes |  |
+| COUNT(DISTINCT) on hashed PII equals the raw distinct count | yes |  |
+| non-PII columns pass through unchanged | yes |  |
+| analyst is denied the finance schema | yes |  |
+| analyst is denied private (salt) | yes |  |
+| analyst is denied raw | yes |  |
+| finance sees ungranted PII masked | yes |  |
+| finance sees the granted column unmasked | yes |  |
+| finance is denied the analyst schema | yes |  |
+| pytest tests | yes | 309 passed, 19 skipped in 94.28s (0:01:34) |
+| required tests present | yes | 5 found |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: The green pytest skipped all six tests in tests/testbed/test_serving.py, including test_postgres_timeout_clamped, because accept_c5 stops Docker and that module skips without the DSNs. Serving itself was checked live by accept_c5. The 10s cap is in PostgresAdapter._session and was not executed during that pytest. QueryTimeout still names the caller's timeout_s, so a 3600s request cancelled at 10s is reported as 3600s.
+
+## Additions for C6
+Serving is `python -m governor.core.serving apply --source <schema> --policy <file> [--access <file>]` using GOVERNOR_PG_ADMIN_DSN and GOVERNOR_PII_SALT. It writes one view per source table in serve_analyst and serve_finance_admin. Analyst PII is encode(sha256(convert_to((SELECT salt FROM private.pii_salt) || cast(value as text), 'UTF8')), 'hex'). Finance PII is the access mask unless finance_admin grants table.column. The salt row is replaced on each apply and is not in the view definition. Database roles are governor_analyst and governor_finance_admin (USAGE and SELECT on their own schema only). governor_ask does not inherit those grants; it still needs SET ROLE. In the postgres dialect the validator allows only unqualified functions in POSTGRES_FUNCTIONS and rejects anything else as FUNCTION_NOT_ALLOWED. That code is not in the graph POLICY_RULES, so a bad function is repaired rather than refused immediately. PostgresAdapter clamps statement_timeout to 10s (MAX_TIMEOUT_S). knowledge/ was not changed; shop policy and access are still unwritten. tests/testbed/test_testbed.py::test_load_sample_idempotent loads through GOVERNOR_PG_DSN, the ask login, so a full pytest with both DSNs set can fail that older test.
+

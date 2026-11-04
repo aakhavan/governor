@@ -22,6 +22,7 @@ dependencies = [           # G1 adds the foundation deps; later steps add theirs
     "streamlit",
     "mcp>=1.10,<2",
     "psycopg[binary]",
+    "dbt-postgres",
 ]
 
 [dependency-groups]

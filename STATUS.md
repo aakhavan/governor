@@ -1,6 +1,6 @@
 # STATUS: governor
 
-Updated 04 Nov 2026 17:26. Run `20261104-172619`.
+Updated 04 Nov 2026 17:41. Run `20261104-173103`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
@@ -24,7 +24,12 @@ Updated 04 Nov 2026 17:26. Run `20261104-172619`.
 | C4 | Postgres adapter and database roles | design | yes | done | 2/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-04T11:02:50 |
 | C5 | Serving schemas and the validator in the Postgres dialect | design | yes | done | 2/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T12:43:54 |
 | C6 | KPI catalogue, layer blueprint and approved-decisions formats | design | yes | done | 2/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T17:26:20 |
+| D1 | Test-bed isolation, build role reads raw, target dbt workspace | mechanical | - | passed | 2/2 |  | claude-tc-sonnet | cursor-grok: pass | 2026-11-04T17:41:14 |
+| D2 | Profile the raw schema | design | - | pending | 0/2 |  | - | - | - |
+| D3 | Design proposal, validation, report and the design gate | design | - | pending | 0/2 |  | - | - | - |
+| D4 | Silver writer, dbt build in the dev schema, repair and escalation | design | yes | pending | 0/2 |  | - | - | - |
+| D5 | Gold from catalogue templates, blueprint checks, gap report | design | yes | pending | 0/2 |  | - | - | - |
 
-Cost so far (reported + notional): $56.27 of $80.00 run budget; 76 agent call(s).
+Cost so far (reported + notional): $56.75 of $150.00 run budget; 80 agent call(s).
 
-Next: all steps done.
+Next: D1 is passed: `factory resume`.
