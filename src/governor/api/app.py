@@ -2,6 +2,7 @@
 
     GET  /health                           no auth: {status, as_of, version}
     POST /v1/ask                           {question, thread_id?} -> AskResult
+    POST /v1/ask/certified                 {question, thread_id?} -> CertifiedAnswer (batch2b section 14)
     POST /v1/threads/{thread_id}/resume    {answer} -> AskResult
     GET  /v1/traces?outcome=&limit=        the caller's traces, newest first
     GET  /v1/traces/{trace_id}             one of the caller's traces
@@ -31,7 +32,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from governor.ask import service
+from governor.ask import certified, service
 from governor.ask.policy import roles
 
 log = logging.getLogger(__name__)
@@ -123,6 +124,10 @@ def create_app(tokens: str | None = None, llm: Any = "env", **graph_options: Any
     llm_kind = (os.environ.get(LLM_ENV) or "openrouter") if llm == "env" else ("openrouter" if llm is None else "fake")
     if llm == "env":
         llm = make_llm(os.environ.get(LLM_ENV))
+        # The certified path reads its own script key ({"certified": [...]}) from the same GOVERNOR_LLM file.
+        certified_llm = certified.make_llm(os.environ.get(LLM_ENV))
+    else:
+        certified_llm = llm
     service.configure(llm, llm_kind=llm_kind.split(":", 1)[0], **graph_options)
     encoded = [(role, token.encode("utf-8")) for role, token in pairs]
 
@@ -153,6 +158,10 @@ def create_app(tokens: str | None = None, llm: Any = "env", **graph_options: Any
         status = {"not_found": 404, "thread_exists": 409, "not_waiting": 409}.get(exc.code, 400)
         return _error(status, str(exc), exc.code)
 
+    @app.exception_handler(certified.CertifiedError)
+    async def _certified_error(_: Request, exc: certified.CertifiedError) -> JSONResponse:
+        return _error(503, "the certified registry is not available", "registry_unavailable")
+
     @app.exception_handler(RequestValidationError)
     async def _invalid(_: Request, exc: RequestValidationError) -> JSONResponse:
         # Name the fields only: pydantic's own message would echo the input.
@@ -177,6 +186,10 @@ def create_app(tokens: str | None = None, llm: Any = "env", **graph_options: Any
     @app.post("/v1/ask", response_model=service.AskResult)
     def ask(body: AskBody, role: str = Depends(caller_role)) -> service.AskResult:
         return service.ask(body.question, role, thread_id=body.thread_id)
+
+    @app.post("/v1/ask/certified", response_model=certified.CertifiedAnswer)
+    def ask_certified(body: AskBody, role: str = Depends(caller_role)) -> certified.CertifiedAnswer:
+        return certified.answer(body.question, role, certified_llm, certified.default_adapter())
 
     @app.post("/v1/threads/{thread_id}/resume", response_model=service.AskResult)
     def resume(

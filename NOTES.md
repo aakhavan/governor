@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-Mapping pairs are the model-facing shape; design.json, the report and downstream code keep the mapping dict. Build stages, publish and certify append events of counts, names, codes, status, cost and seconds, and a failing notifier does not stop a run. publish commits models, tests and governor/ on governor/build-<id8> as author governor, leaves main at the scaffold when it creates the repo, writes governor/pr.md, and pushes only when origin exists. certify refuses until that commit is on a clean main, then runs dbt build --target prod as governor_deploy into analytics, writes analytics.governor_certified and analytics.governor_gaps as admin, and applies serving views for the shop policy. The deploy password is an env_var in profiles.yml. On the sample, eight KPIs certify and conversion_rate and gross_margin land in the gaps table.
+Certified answers are a separate ask path. answer() reads serve_<role>.governor_certified and governor_gaps as governor_ask with the reader role set, then makes one structured call using certified_prompts/certified.md. Code builds a single read-only SELECT from that KPI's serving view and value column, and the validator allowlist is the certified models. Python fills every number from the result row and cites the KPI id, owner, source tier and reference, certifier and date. Outcomes are answer, not_available for a catalogue KPI that is declined or not certified (quoting the gap), unanswerable, and refused for person-level requests before the KPI query. POST /v1/ask/certified uses the same body and bearer auth as /v1/ask. The frozen prompts in src/governor/ask/prompts/ are unchanged, and ask does not import governor.build. On the sample, GMV for 2026-01 is 455, and conversion_rate and gross_margin are gaps.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,51 +20,6 @@ Mapping pairs are the model-facing shape; design.json, the report and downstream
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## D5 result
-*Gold from catalogue templates, blueprint checks, gap report, 04 Nov 2026 23:03.*
-
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/D5`.
-
-| check | ok | detail |
-|---|---|---|
-| sample design and silver fixtures exist | yes |  |
-| Docker is running | yes | 29.9.2 |
-| testbed/docker-compose.yml exists | yes | missing |
-| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
-| sample loads into raw | yes | 9 tables |
-| roles applied | yes | roles applied |
-| build init lists the 9 raw tables | yes |  |
-| run pauses at the design gate | yes | {"thread_id": "fbe9ed5e-9b10-4ba6-bb95-7aad45d73a6e", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
-| approve builds silver and gold | yes | {"thread_id": "fbe9ed5e-9b10-4ba6-bb95-7aad45d73a6e", "status": "built", "report": "C:\\Users\\amir0\\AppData\\Local\\Te |
-| all eight buildable KPIs built | yes | ['gmv', 'net_revenue', 'aov', 'on_time_delivery_rate', 'avg_review_score', 'repeat_purchase_rate', 'cohort_retention', ' |
-| gaps list conversion_rate and gross_margin | yes |  |
-| target has governor/gaps.md | yes |  |
-| target has governor/build.json | yes |  |
-| gold yml carries owner, source tier and template hash | yes |  |
-| gmv equals the independent computation | yes | got {'2026-01': 455.0} want {'2026-01': 455.0} |
-| net_revenue equals the independent computation | yes | got {'2026-01': 325.5} want {'2026-01': 325.5} |
-| aov equals the independent computation | yes | got {'2026-01': 100.25} want {'2026-01': 100.25} |
-| on_time_delivery_rate equals the independent computation | yes | got {'2026-01': 0.6666666666666666} want {'2026-01': 0.6666666666666666} |
-| avg_review_score equals the independent computation | yes | got {'2026-01': 3.3333333333333335} want {'2026-01': 3.3333333333333335} |
-| repeat_purchase_rate equals the independent computation | yes | got [['0.3333333333333333']] want 0.3333333333333333 |
-| blueprint check is clean on the built project | yes | [] |
-| blueprint check catches a cast in gold (L9) and a changed template (L8) | yes | [{"rule": "L8", "severity": "high", "target": "kpi_gmv", "problem": "rendered_sha256 does not match the model file"}, {" |
-| pytest tests/build | yes | 122 passed, 11 skipped in 22.12s |
-
-Review: cursor-grok: pass | claude-tc-fable: pass
-
-For Amir: The acceptance line "blueprint check is clean" fails only when a high finding is present, so a lone L9 would still pass that line. The unit test requires an empty finding list, and the generated project is empty. cohort_retention and historical_clv are built with rows; the step asked for an independent value check only for the five order-level KPIs and the repeat purchase rate.
-
-## D6 notes (implementer)
-- Mapping pairs: `models.ProposalReply`/`KpiDecisionReply` is the schema the model sees (`mapping_pairs`); `design.propose` calls `.to_proposal()` before validation. A reply that still sends a `mapping` dict is accepted as pairs. The previous proposal is shown back as pairs (`proposal_as_reply`).
-- Events: `events.emit` keeps scalars and flat lists only (strings cut at 300 chars). `design_gate` is emitted in the report node, because the gate node runs again on resume. Tests set `GOVERNOR_STATE_DIR` to tmp (conftest autouse).
-- Publish records the published commit in `.git/governor_published.json` (outside the tree, so certify sees a clean tree). The tree is left on the build branch. It pushes `main` too when the remote has none. `build.json` gains `approved_by` for pr.md.
-- Certify: `value_columns` = numeric columns of the deployed table minus the grain column and `months_since_first`. Registry and gaps tables are dropped and recreated as the admin in one transaction. Serving salt: `GOVERNOR_PII_SALT`, else the stored `private.pii_salt`, else a new random one (never printed). `workspace.deploy_env()` supplies the test-bed default deploy password when the env is unset.
-- Acceptance D6: 30/30; pytest tests/build 139 passed, 12 skipped.
-
-## Additions for the next plan
-D6 opens the PR on the target after approve. approve already runs silver and gold and returns status built, escalated or blueprint_failed, plus kpis_built (ids), gaps (declined ids), tests_passed, repairs, blueprint findings, and build pointing at <target>/governor/build.json. That file has models, silver/gold/total test counts, KPI row counts, full gap objects, findings and cost. Gold files are models/marts/<domain>/kpi_<id>.sql (tables via the marts materialization) and _<domain>.yml (owner, source_tier, source_ref, template_sha256, rendered_sha256, not_null on month or cohort_month). L8 re-renders from governor/design.json; do not add a model that writes gold SQL. High rules stop the build. L5 is medium and L9 is low, so they are recorded and do not stop it. A failing staging model escalates with zero repairs; only intermediate SQL is repaired. On the sample the gaps are conversion_rate and gross_margin. cohort_retention and historical_clv are built and non-empty; their values were not checked against an independent computation.
 
 ## D6 result
 *Mapping pairs, events, pull request and certification, 05 Nov 2026 12:41.*
@@ -110,3 +65,52 @@ For Amir: A second certify fails: DROP TABLE on the registry has no CASCADE, and
 
 ## Additions for D7
 D7 reads serve_<role>.governor_certified and serve_<role>.governor_gaps (serving applied with source analytics; schemas serve_analyst and serve_finance_admin). Certified columns: kpi_id, model, label, definition, grain, value_columns (text[] of numeric columns except the grain column month or cohort_month, and except months_since_first), owner, source_tier, source_ref, template_sha256, rendered_sha256, certified_by, certified_at, git_commit. Gap columns: kpi_id, missing (text[]), typical_sources (text[]), next_step. Sample: eight certified KPIs (gmv, net_revenue, aov, on_time_delivery_rate, avg_review_score, repeat_purchase_rate, cohort_retention, historical_clv) and gaps conversion_rate, gross_margin. Gold tables are analytics.kpi_<id>, owned by governor_deploy. Do not import governor.build. design.json still stores mapping as a dict. The certify commit sha is recorded only in the target's .git/governor_published.json.
+
+## D7 notes (implementer)
+- `governor.ask.certified`: the registry, gaps and column types (information_schema, as the reader role) are read through `PostgresAdapter(allowed_roles=READER_ROLES)`. The validator policy is built in code: allowlist = the certified models, schema = their serving-view columns, limits from `knowledge/shop/access.yaml`. It calls `validator._validate` directly because `validate()` takes its allowlist from access.yaml and meta.duckdb.
+- **Validator bug (outside D7 paths, for Amir):** in sqlglot 30.24, `exp.And`/`exp.Or` subclass `exp.Func`, so `_check_functions` rejects every Postgres query that has `AND` or `OR` ("function AND is not on the allowlist"). That affects the main ask path on Postgres too. The fix is one line: skip `exp.Connector` in `_check_functions`, or add `AND`/`OR` to `POSTGRES_FUNCTIONS`. Meanwhile the certified builder uses no AND: month and cohort filter as `TO_CHAR(grain, 'YYYY-MM') = 'YYYY-MM'`, year as `EXTRACT(YEAR FROM grain) = YYYY`, and several filters combine as one row comparison `(a, b) = (x, y)`.
+- Reply rules: grain month takes month, year or all; cohort_month takes cohort, year or all; total takes all only. pick value needs a single row (a month, a cohort or a total). A KPI with `months_since_first` must be given it. max returns the period with its value. sum uses SUM/COUNT of the column. If the reply's value_column is null and the KPI has only one value column, that column is used.
+- not_available covers a gap row, or a catalogue KPI (knowledge/kpis.yaml) that is neither certified nor in the gaps. Any other id is unanswerable. The API returns 503 `registry_unavailable` when the registry cannot be read. The certified path takes its FakeLLM from the `certified` key of the same `GOVERNOR_LLM` script.
+- Acceptance D7: 27/27; pytest tests/ask 147 passed, 2 skipped (the live tests skip because the acceptance run tears the test bed down before pytest).
+
+## D7 result
+*Certified answers in ask, 05 Nov 2026 13:05.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/D7`.
+
+| check | ok | detail |
+|---|---|---|
+| certified.py exists | yes | missing |
+| certified prompt lives outside the frozen prompts | yes |  |
+| frozen ask prompts unchanged | yes |  |
+| ask never imports build | yes |  |
+| API exposes /v1/ask/certified | yes |  |
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw | yes | 9 tables |
+| roles applied | yes | roles applied |
+| sample design and silver fixtures exist | yes |  |
+| build init lists the 9 raw tables | yes |  |
+| sample run pauses at the design gate | yes | {"thread_id": "114cbd9b-bff4-4eb0-8e37-c46e36ba415a", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
+| sample build completes | yes | {"thread_id": "114cbd9b-bff4-4eb0-8e37-c46e36ba415a", "status": "built", "report": "C:\\Users\\amir0\\AppData\\Local\\Te |
+| publish creates a branch and commit | yes | {"status": "published", "branch": "governor/build-114cbd9b", "commit": "45ca28a35070e62e1f262fff34be90467db427c5", "pr_u |
+| reviewer merges the pull request branch locally | yes |  create mode 100644 tests/int_order_lines__primary_key.sql |  create mode 100644 tests/stg_order_items__primary_key.sql  |
+| certify deploys to analytics | yes | {"status": "certified", "kpis": ["gmv", "net_revenue", "aov", "on_time_delivery_rate", "avg_review_score", "repeat_purch |
+| answers GMV from the certified table | yes | {"outcome": "answer", "text": "Gross merchandise value (gmv) in 2026-01 was 455. Source: certified KPI gmv (Gross mercha |
+| answer cites the KPI and its certifier | yes | {"kpi_id": "gmv", "label": "Gross merchandise value", "model": "kpi_gmv", "owner": "Amir Akhavan (analytics)", "source_t |
+| answer text shows the number filled by code | yes | Gross merchandise value (gmv) in 2026-01 was 455. Source: certified KPI gmv (Gross merchandise value), owner Amir Akhava |
+| finance role gets the same certified answer | yes | {"outcome": "answer", "text": "Gross merchandise value (gmv) in 2026-01 was 455. Source: certified KPI gmv (Gross mercha |
+| declined KPI is not_available and quotes its gap | yes | {"outcome": "not_available", "text": "conversion_rate is not available: this build is missing site sessions with a conve |
+| person-level request refused | yes | {"outcome": "refused", "text": "Requests about individual people or records are refused; certified KPIs are aggregates o |
+| out-of-scope question unanswerable | yes | {"outcome": "unanswerable", "text": "No certified KPI covers this question.", "value": null, "kpi_id": null, "sql": null |
+| a reply naming an uncertified relation never runs | yes | {"outcome": "unanswerable", "text": "No certified KPI covers this question.", "value": null, "kpi_id": null, "sql": null |
+| a reply naming a non-value column never runs | yes | {"outcome": "unanswerable", "text": "The certified KPI gmv cannot answer this: 'customer_id' is not a value column of gm |
+| pytest tests/ask | yes | 147 passed, 2 skipped in 51.32s |
+
+Review: D7 matches section 14. Code builds one SELECT on the chosen KPI's serving view from registry-checked names. The model supplies only those names. The validator allowlist is the certified models, so an unknown relation, a bad column, a bad period or a free-SQL reply never runs. Numbers come from the result row. The citation names the KPI, owner, source and certifier. Person-level replies are refused with sql null before that query. The prompt is outside the frozen ask prompts, and ask does not import governor.build. Live GMV was 455.
+
+For Amir: Acceptance feeds a scripted reply, so this step shows the code path. A live model routing or refusing is D8. A reply that marks a person-level question as answer still runs only an aggregate SELECT of a certified value column. The two skipped pytest tests are the live GMV tests; they skip when GOVERNOR_PG_DSN is unset. The acceptance CLI already ran that path against Postgres. Existence checks report detail missing even when they pass; that is the shared helper, and the boolean is the result.
+
+## Additions for D8a
+D8 calls governor.ask.certified.answer. Do not edit src/governor/ask/prompts/ or import governor.build. Prompt: src/governor/ask/certified_prompts/certified.md. Fake key certified is a list of replies in order. Reply: kpi_id, value_column, period {kind month|year|all|cohort, value}, months_since_first, pick value|max|sum, category answer|not_available|out_of_scope|person_level. Code builds SQL from the KPI view and value column. person_level is refused with sql null before the KPI query; the registry is read first. Unknown names, bad columns, bad periods and out_of_scope are unanswerable and do not run. A catalogue or gap KPI that is not certified is not_available and quotes the gap. Cohort KPIs need months_since_first. value is the float from the result cell. citation: kpi_id, label, model, owner, source_tier, source_ref, certified_by, certified_at, git_commit. CLI: python -m governor.ask.certified QUESTION --role analyst|finance_admin --llm fake:SCRIPT|openrouter. POST /v1/ask/certified uses the /v1/ask token and body; thread_id is ignored. Dates use paths.as_of(). Sample gmv for 2026-01 is 455; gaps are conversion_rate and gross_margin.
