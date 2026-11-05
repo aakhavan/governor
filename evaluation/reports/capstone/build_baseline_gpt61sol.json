@@ -1,0 +1,504 @@
+{
+  "system": "baseline",
+  "gold_file": "evaluation\\build_gold\\olist_gold.yaml",
+  "gold_sha256": "30c7ad804f363f8c31809aa88785fe7831ce6663db21ed393243b40348379467",
+  "gold_dataset": "olist (99,441 orders)",
+  "llm": "openrouter",
+  "models": {
+    "plan": "openai/gpt-6.1-sol",
+    "write": "openai/gpt-5-mini"
+  },
+  "approval": null,
+  "max_cost_usd": 3.0,
+  "stopped_by_budget": false,
+  "runs_requested": 3,
+  "runs": [
+    {
+      "run": 1,
+      "system": "baseline",
+      "target": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_build_eval_tfeqzzbl\\baseline-01\\project",
+      "approved_by": null,
+      "valid_design_first_try": null,
+      "validation_repairs": null,
+      "dbt_repairs": 0,
+      "escalated": false,
+      "tests_passed": 88,
+      "tests_failed": 0,
+      "blueprint_high": 59,
+      "kpi_decisions_correct": 10,
+      "files": [
+        "models/staging/stg_customers.sql",
+        "models/staging/stg_geolocation.sql",
+        "models/staging/stg_order_items.sql",
+        "models/staging/stg_order_payments.sql",
+        "models/staging/stg_order_reviews.sql",
+        "models/staging/stg_orders.sql",
+        "models/staging/stg_products.sql",
+        "models/staging/stg_sellers.sql",
+        "models/staging/stg_category_translation.sql",
+        "models/intermediate/int_orders.sql",
+        "models/intermediate/int_order_lines.sql",
+        "models/intermediate/int_order_reviews.sql",
+        "models/intermediate/int_customer_cohorts.sql",
+        "models/intermediate/int_cohort_retention_cells.sql",
+        "models/intermediate/int_customer_lifetime_revenue.sql",
+        "models/marts/kpi_gmv.sql",
+        "models/marts/kpi_net_revenue.sql",
+        "models/marts/kpi_aov.sql",
+        "models/marts/kpi_on_time_delivery_rate.sql",
+        "models/marts/kpi_avg_review_score.sql",
+        "models/marts/kpi_repeat_purchase_rate.sql",
+        "models/marts/kpi_cohort_retention.sql",
+        "models/marts/kpi_historical_clv.sql",
+        "models/staging/schema.yml",
+        "models/intermediate/schema.yml",
+        "models/marts/schema.yml",
+        "tests/assert_kpi_rate_bounds.sql"
+      ],
+      "refused_files": [
+        "models/sources.yml"
+      ],
+      "status": "built",
+      "kpi_decisions_total": 10,
+      "gold_passed": 11,
+      "gold_total": 11,
+      "gold": [
+        {
+          "id": "gmv_total",
+          "table": "kpi_gmv",
+          "expected": 15735527.03,
+          "tol": 0.01,
+          "value": 15735527.03,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "gmv_2017_11",
+          "table": "kpi_gmv",
+          "expected": 1172191.68,
+          "tol": 0.01,
+          "value": 1172191.68,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "net_revenue_total",
+          "table": "kpi_net_revenue",
+          "expected": 13221498.11,
+          "tol": 0.01,
+          "value": 13221498.11,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "net_revenue_2017_11",
+          "table": "kpi_net_revenue",
+          "expected": 987765.37,
+          "tol": 0.01,
+          "value": 987765.37,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "aov_2017_11",
+          "table": "kpi_aov",
+          "expected": 135.2732,
+          "tol": 0.0005,
+          "value": 135.2731626465436,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "on_time_2017_11",
+          "table": "kpi_on_time_delivery_rate",
+          "expected": 0.87596,
+          "tol": 1e-05,
+          "value": 0.8759604829857299,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "review_2017_11",
+          "table": "kpi_avg_review_score",
+          "expected": 3.9107,
+          "tol": 1e-05,
+          "value": 3.9106951871657754,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "repeat_rate",
+          "table": "kpi_repeat_purchase_rate",
+          "expected": 0.030403,
+          "tol": 1e-06,
+          "value": 0.030403200336877566,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "customers",
+          "table": "kpi_repeat_purchase_rate",
+          "expected": 94990.0,
+          "tol": 0.0,
+          "value": 94990.0,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "retention_2017_01_m1",
+          "table": "kpi_cohort_retention",
+          "expected": 0.0039894,
+          "tol": 1e-07,
+          "value": 0.003989361702127659,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "clv365_2017_01",
+          "table": "kpi_historical_clv",
+          "expected": 151.1793,
+          "tol": 0.0005,
+          "value": 151.17932180851065,
+          "passed": true,
+          "reason": ""
+        }
+      ],
+      "llm_calls": 1,
+      "cost_usd": 0.090843,
+      "seconds": 155.9
+    },
+    {
+      "run": 2,
+      "system": "baseline",
+      "target": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_build_eval_tfeqzzbl\\baseline-02\\project",
+      "approved_by": null,
+      "valid_design_first_try": null,
+      "validation_repairs": null,
+      "dbt_repairs": 0,
+      "escalated": false,
+      "tests_passed": 89,
+      "tests_failed": 0,
+      "blueprint_high": 60,
+      "kpi_decisions_correct": 10,
+      "files": [
+        "models/staging/stg_customers.sql",
+        "models/staging/stg_geolocation.sql",
+        "models/staging/stg_order_items.sql",
+        "models/staging/stg_order_payments.sql",
+        "models/staging/stg_order_reviews.sql",
+        "models/staging/stg_orders.sql",
+        "models/staging/stg_products.sql",
+        "models/staging/stg_sellers.sql",
+        "models/staging/stg_category_translation.sql",
+        "models/intermediate/int_orders.sql",
+        "models/intermediate/int_order_lines.sql",
+        "models/intermediate/int_order_reviews.sql",
+        "models/intermediate/int_customer_cohorts.sql",
+        "models/intermediate/int_customer_months.sql",
+        "models/intermediate/int_cohort_retention.sql",
+        "models/intermediate/int_customer_value.sql",
+        "models/marts/kpi_gmv.sql",
+        "models/marts/kpi_net_revenue.sql",
+        "models/marts/kpi_aov.sql",
+        "models/marts/kpi_on_time_delivery_rate.sql",
+        "models/marts/kpi_avg_review_score.sql",
+        "models/marts/kpi_repeat_purchase_rate.sql",
+        "models/marts/kpi_cohort_retention.sql",
+        "models/marts/kpi_historical_clv.sql",
+        "models/staging/schema.yml",
+        "models/intermediate/schema.yml",
+        "models/marts/schema.yml"
+      ],
+      "refused_files": [
+        "models/sources.yml"
+      ],
+      "status": "built",
+      "kpi_decisions_total": 10,
+      "gold_passed": 11,
+      "gold_total": 11,
+      "gold": [
+        {
+          "id": "gmv_total",
+          "table": "kpi_gmv",
+          "expected": 15735527.03,
+          "tol": 0.01,
+          "value": 15735527.03,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "gmv_2017_11",
+          "table": "kpi_gmv",
+          "expected": 1172191.68,
+          "tol": 0.01,
+          "value": 1172191.68,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "net_revenue_total",
+          "table": "kpi_net_revenue",
+          "expected": 13221498.11,
+          "tol": 0.01,
+          "value": 13221498.11,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "net_revenue_2017_11",
+          "table": "kpi_net_revenue",
+          "expected": 987765.37,
+          "tol": 0.01,
+          "value": 987765.37,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "aov_2017_11",
+          "table": "kpi_aov",
+          "expected": 135.2732,
+          "tol": 0.0005,
+          "value": 135.2731626465436,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "on_time_2017_11",
+          "table": "kpi_on_time_delivery_rate",
+          "expected": 0.87596,
+          "tol": 1e-05,
+          "value": 0.8759604829857299,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "review_2017_11",
+          "table": "kpi_avg_review_score",
+          "expected": 3.9107,
+          "tol": 1e-05,
+          "value": 3.9106951871657754,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "repeat_rate",
+          "table": "kpi_repeat_purchase_rate",
+          "expected": 0.030403,
+          "tol": 1e-06,
+          "value": 0.030403200336877566,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "customers",
+          "table": "kpi_repeat_purchase_rate",
+          "expected": 94990.0,
+          "tol": 0.0,
+          "value": 94990.0,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "retention_2017_01_m1",
+          "table": "kpi_cohort_retention",
+          "expected": 0.0039894,
+          "tol": 1e-07,
+          "value": 0.003989361702127659,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "clv365_2017_01",
+          "table": "kpi_historical_clv",
+          "expected": 151.1793,
+          "tol": 0.0005,
+          "value": 151.17932180851065,
+          "passed": true,
+          "reason": ""
+        }
+      ],
+      "llm_calls": 1,
+      "cost_usd": 0.074159,
+      "seconds": 154.16
+    },
+    {
+      "run": 3,
+      "system": "baseline",
+      "target": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_build_eval_tfeqzzbl\\baseline-03\\project",
+      "approved_by": null,
+      "valid_design_first_try": null,
+      "validation_repairs": null,
+      "dbt_repairs": 0,
+      "escalated": false,
+      "tests_passed": 56,
+      "tests_failed": 0,
+      "blueprint_high": 60,
+      "kpi_decisions_correct": 10,
+      "files": [
+        "models/staging/stg_customers.sql",
+        "models/staging/stg_geolocation.sql",
+        "models/staging/stg_order_items.sql",
+        "models/staging/stg_order_payments.sql",
+        "models/staging/stg_order_reviews.sql",
+        "models/staging/stg_orders.sql",
+        "models/staging/stg_products.sql",
+        "models/staging/stg_sellers.sql",
+        "models/staging/stg_product_category_translation.sql",
+        "models/intermediate/int_orders.sql",
+        "models/intermediate/int_order_lines.sql",
+        "models/intermediate/int_order_reviews.sql",
+        "models/intermediate/int_customer_cohorts.sql",
+        "models/intermediate/int_customer_lifetime_values.sql",
+        "models/intermediate/int_cohort_retention.sql",
+        "models/marts/kpi_gmv.sql",
+        "models/marts/kpi_net_revenue.sql",
+        "models/marts/kpi_aov.sql",
+        "models/marts/kpi_on_time_delivery_rate.sql",
+        "models/marts/kpi_avg_review_score.sql",
+        "models/marts/kpi_repeat_purchase_rate.sql",
+        "models/marts/kpi_cohort_retention.sql",
+        "models/marts/kpi_historical_clv.sql",
+        "models/staging/schema.yml",
+        "models/intermediate/schema.yml",
+        "models/marts/schema.yml"
+      ],
+      "refused_files": [
+        "models/sources.yml"
+      ],
+      "status": "built",
+      "kpi_decisions_total": 10,
+      "gold_passed": 11,
+      "gold_total": 11,
+      "gold": [
+        {
+          "id": "gmv_total",
+          "table": "kpi_gmv",
+          "expected": 15735527.03,
+          "tol": 0.01,
+          "value": 15735527.03,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "gmv_2017_11",
+          "table": "kpi_gmv",
+          "expected": 1172191.68,
+          "tol": 0.01,
+          "value": 1172191.68,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "net_revenue_total",
+          "table": "kpi_net_revenue",
+          "expected": 13221498.11,
+          "tol": 0.01,
+          "value": 13221498.11,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "net_revenue_2017_11",
+          "table": "kpi_net_revenue",
+          "expected": 987765.37,
+          "tol": 0.01,
+          "value": 987765.37,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "aov_2017_11",
+          "table": "kpi_aov",
+          "expected": 135.2732,
+          "tol": 0.0005,
+          "value": 135.2731626465436,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "on_time_2017_11",
+          "table": "kpi_on_time_delivery_rate",
+          "expected": 0.87596,
+          "tol": 1e-05,
+          "value": 0.8759604829857299,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "review_2017_11",
+          "table": "kpi_avg_review_score",
+          "expected": 3.9107,
+          "tol": 1e-05,
+          "value": 3.9106951871657754,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "repeat_rate",
+          "table": "kpi_repeat_purchase_rate",
+          "expected": 0.030403,
+          "tol": 1e-06,
+          "value": 0.030403200336877566,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "customers",
+          "table": "kpi_repeat_purchase_rate",
+          "expected": 94990.0,
+          "tol": 0.0,
+          "value": 94990.0,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "retention_2017_01_m1",
+          "table": "kpi_cohort_retention",
+          "expected": 0.0039894,
+          "tol": 1e-07,
+          "value": 0.003989361702127659,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "clv365_2017_01",
+          "table": "kpi_historical_clv",
+          "expected": 151.1793,
+          "tol": 0.0005,
+          "value": 151.17932180851065,
+          "passed": true,
+          "reason": ""
+        }
+      ],
+      "llm_calls": 1,
+      "cost_usd": 0.071139,
+      "seconds": 147.66
+    }
+  ],
+  "summary": {
+    "runs": 3,
+    "statuses": {
+      "built": 3
+    },
+    "built_rate": 1.0,
+    "valid_design_first_try_rate": null,
+    "escalated_rate": 0.0,
+    "gold_all_passed_rate": 1.0,
+    "kpi_decisions_all_correct_rate": 1.0,
+    "mean": {
+      "validation_repairs": null,
+      "dbt_repairs": 0.0,
+      "tests_passed": 77.666667,
+      "tests_failed": 0.0,
+      "blueprint_high": 59.666667,
+      "kpi_decisions_correct": 10.0,
+      "gold_passed": 11.0,
+      "cost_usd": 0.078714,
+      "seconds": 152.573333
+    },
+    "total_cost_usd": 0.236141,
+    "cost_unknown_runs": 0
+  },
+  "total_cost_usd": 0.236141,
+  "work": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_build_eval_tfeqzzbl"
+}

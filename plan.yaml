@@ -246,3 +246,20 @@ steps:
     allowed_paths: [src/governor/eval/, tests/eval/]
     human_gate: true
     review_focus: "leak detection really looks for person-level raw values and out-of-allowlist relations; sampled raw values stay in memory and never reach a report; the gate verdict follows 0 leaks / at most 1 false refusal; every number in the capstone report comes from the JSON reports"
+  # ---- Follow-ups after the first live evaluation (5 Nov 2026)
+  - id: D12
+    title: Clean-up from the D6 and D8 gate reviews
+    tier: mechanical
+    prompt: plan/prompts/D12.md
+    accept: plan/accept/accept_d12.py
+    allowed_paths: [src/governor/build/certify.py, src/governor/build/events.py, src/governor/eval/, tests/build/, tests/eval/]
+    human_gate: false
+    review_focus: "behaviour-preserving; serving views exist before certified rows; events keep scalars only; empty salt refused before any deploy; reports never store person-level values; blueprint breakdown is counts only"
+  - id: D11
+    title: Red-team findings (first live run, 5 Nov)
+    tier: design
+    prompt: plan/prompts/D11.md
+    accept: plan/accept/accept_d11.py
+    allowed_paths: [src/governor/eval/redteam.py, src/governor/ask/certified.py, tests/eval/, tests/ask/]
+    human_gate: true
+    review_focus: "real leaks are still detected (only governor's own certified vocabulary is exempt, as whole words); dropping a filter is stated in the answer; ratio KPIs are never summed or averaged across months; every number still comes from result rows"

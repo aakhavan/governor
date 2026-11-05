@@ -1,0 +1,412 @@
+{
+  "system": "agent",
+  "gold_file": "evaluation\\build_gold\\olist_gold.yaml",
+  "gold_sha256": "30c7ad804f363f8c31809aa88785fe7831ce6663db21ed393243b40348379467",
+  "gold_dataset": "olist (99,441 orders)",
+  "llm": "openrouter",
+  "models": {
+    "plan": "openai/gpt-6.1-sol",
+    "write": "openai/gpt-5-mini"
+  },
+  "approval": "eval-harness",
+  "max_cost_usd": 3.0,
+  "stopped_by_budget": false,
+  "runs_requested": 3,
+  "runs": [
+    {
+      "run": 1,
+      "system": "agent",
+      "target": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_build_eval_5ocn879d\\agent-01\\project",
+      "status": "built",
+      "thread_id": "7948406a-dc7e-4dec-b523-a8c31318170e",
+      "approved_by": "eval-harness",
+      "valid_design_first_try": true,
+      "validation_repairs": 0,
+      "dbt_repairs": 0,
+      "escalated": false,
+      "tests_passed": 18,
+      "tests_failed": 0,
+      "blueprint_high": 0,
+      "kpi_decisions_correct": 10,
+      "kpi_decisions_total": 10,
+      "gold_passed": 11,
+      "gold_total": 11,
+      "gold": [
+        {
+          "id": "gmv_total",
+          "table": "kpi_gmv",
+          "expected": 15735527.03,
+          "tol": 0.01,
+          "value": 15735527.03,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "gmv_2017_11",
+          "table": "kpi_gmv",
+          "expected": 1172191.68,
+          "tol": 0.01,
+          "value": 1172191.68,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "net_revenue_total",
+          "table": "kpi_net_revenue",
+          "expected": 13221498.11,
+          "tol": 0.01,
+          "value": 13221498.11,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "net_revenue_2017_11",
+          "table": "kpi_net_revenue",
+          "expected": 987765.37,
+          "tol": 0.01,
+          "value": 987765.37,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "aov_2017_11",
+          "table": "kpi_aov",
+          "expected": 135.2732,
+          "tol": 0.0005,
+          "value": 135.2731626465436,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "on_time_2017_11",
+          "table": "kpi_on_time_delivery_rate",
+          "expected": 0.87596,
+          "tol": 1e-05,
+          "value": 0.8759604829857299,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "review_2017_11",
+          "table": "kpi_avg_review_score",
+          "expected": 3.9107,
+          "tol": 1e-05,
+          "value": 3.9106951871657754,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "repeat_rate",
+          "table": "kpi_repeat_purchase_rate",
+          "expected": 0.030403,
+          "tol": 1e-06,
+          "value": 0.030403200336877566,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "customers",
+          "table": "kpi_repeat_purchase_rate",
+          "expected": 94990.0,
+          "tol": 0.0,
+          "value": 94990.0,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "retention_2017_01_m1",
+          "table": "kpi_cohort_retention",
+          "expected": 0.0039894,
+          "tol": 1e-07,
+          "value": 0.003989361702127659,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "clv365_2017_01",
+          "table": "kpi_historical_clv",
+          "expected": 151.1793,
+          "tol": 0.0005,
+          "value": 151.17932180851065,
+          "passed": true,
+          "reason": ""
+        }
+      ],
+      "llm_calls": 4,
+      "cost_usd": 0.070096,
+      "seconds": 151.01
+    },
+    {
+      "run": 2,
+      "system": "agent",
+      "target": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_build_eval_5ocn879d\\agent-02\\project",
+      "status": "built",
+      "thread_id": "eb26554c-2551-4a33-8c7a-232e78757d35",
+      "approved_by": "eval-harness",
+      "valid_design_first_try": true,
+      "validation_repairs": 0,
+      "dbt_repairs": 0,
+      "escalated": false,
+      "tests_passed": 18,
+      "tests_failed": 0,
+      "blueprint_high": 0,
+      "kpi_decisions_correct": 10,
+      "kpi_decisions_total": 10,
+      "gold_passed": 11,
+      "gold_total": 11,
+      "gold": [
+        {
+          "id": "gmv_total",
+          "table": "kpi_gmv",
+          "expected": 15735527.03,
+          "tol": 0.01,
+          "value": 15735527.03,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "gmv_2017_11",
+          "table": "kpi_gmv",
+          "expected": 1172191.68,
+          "tol": 0.01,
+          "value": 1172191.68,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "net_revenue_total",
+          "table": "kpi_net_revenue",
+          "expected": 13221498.11,
+          "tol": 0.01,
+          "value": 13221498.11,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "net_revenue_2017_11",
+          "table": "kpi_net_revenue",
+          "expected": 987765.37,
+          "tol": 0.01,
+          "value": 987765.37,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "aov_2017_11",
+          "table": "kpi_aov",
+          "expected": 135.2732,
+          "tol": 0.0005,
+          "value": 135.2731626465436,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "on_time_2017_11",
+          "table": "kpi_on_time_delivery_rate",
+          "expected": 0.87596,
+          "tol": 1e-05,
+          "value": 0.8759604829857299,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "review_2017_11",
+          "table": "kpi_avg_review_score",
+          "expected": 3.9107,
+          "tol": 1e-05,
+          "value": 3.9106951871657754,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "repeat_rate",
+          "table": "kpi_repeat_purchase_rate",
+          "expected": 0.030403,
+          "tol": 1e-06,
+          "value": 0.030403200336877566,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "customers",
+          "table": "kpi_repeat_purchase_rate",
+          "expected": 94990.0,
+          "tol": 0.0,
+          "value": 94990.0,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "retention_2017_01_m1",
+          "table": "kpi_cohort_retention",
+          "expected": 0.0039894,
+          "tol": 1e-07,
+          "value": 0.003989361702127659,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "clv365_2017_01",
+          "table": "kpi_historical_clv",
+          "expected": 151.1793,
+          "tol": 0.0005,
+          "value": 151.17932180851065,
+          "passed": true,
+          "reason": ""
+        }
+      ],
+      "llm_calls": 4,
+      "cost_usd": 0.053743,
+      "seconds": 150.8
+    },
+    {
+      "run": 3,
+      "system": "agent",
+      "target": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_build_eval_5ocn879d\\agent-03\\project",
+      "status": "built",
+      "thread_id": "d5e66216-df5b-4a91-b433-6aae0b893262",
+      "approved_by": "eval-harness",
+      "valid_design_first_try": true,
+      "validation_repairs": 0,
+      "dbt_repairs": 0,
+      "escalated": false,
+      "tests_passed": 18,
+      "tests_failed": 0,
+      "blueprint_high": 0,
+      "kpi_decisions_correct": 10,
+      "kpi_decisions_total": 10,
+      "gold_passed": 11,
+      "gold_total": 11,
+      "gold": [
+        {
+          "id": "gmv_total",
+          "table": "kpi_gmv",
+          "expected": 15735527.03,
+          "tol": 0.01,
+          "value": 15735527.03,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "gmv_2017_11",
+          "table": "kpi_gmv",
+          "expected": 1172191.68,
+          "tol": 0.01,
+          "value": 1172191.68,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "net_revenue_total",
+          "table": "kpi_net_revenue",
+          "expected": 13221498.11,
+          "tol": 0.01,
+          "value": 13221498.11,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "net_revenue_2017_11",
+          "table": "kpi_net_revenue",
+          "expected": 987765.37,
+          "tol": 0.01,
+          "value": 987765.37,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "aov_2017_11",
+          "table": "kpi_aov",
+          "expected": 135.2732,
+          "tol": 0.0005,
+          "value": 135.2731626465436,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "on_time_2017_11",
+          "table": "kpi_on_time_delivery_rate",
+          "expected": 0.87596,
+          "tol": 1e-05,
+          "value": 0.8759604829857299,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "review_2017_11",
+          "table": "kpi_avg_review_score",
+          "expected": 3.9107,
+          "tol": 1e-05,
+          "value": 3.9106951871657754,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "repeat_rate",
+          "table": "kpi_repeat_purchase_rate",
+          "expected": 0.030403,
+          "tol": 1e-06,
+          "value": 0.030403200336877566,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "customers",
+          "table": "kpi_repeat_purchase_rate",
+          "expected": 94990.0,
+          "tol": 0.0,
+          "value": 94990.0,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "retention_2017_01_m1",
+          "table": "kpi_cohort_retention",
+          "expected": 0.0039894,
+          "tol": 1e-07,
+          "value": 0.003989361702127659,
+          "passed": true,
+          "reason": ""
+        },
+        {
+          "id": "clv365_2017_01",
+          "table": "kpi_historical_clv",
+          "expected": 151.1793,
+          "tol": 0.0005,
+          "value": 151.17932180851065,
+          "passed": true,
+          "reason": ""
+        }
+      ],
+      "llm_calls": 4,
+      "cost_usd": 0.053818,
+      "seconds": 150.52
+    }
+  ],
+  "summary": {
+    "runs": 3,
+    "statuses": {
+      "built": 3
+    },
+    "built_rate": 1.0,
+    "valid_design_first_try_rate": 1.0,
+    "escalated_rate": 0.0,
+    "gold_all_passed_rate": 1.0,
+    "kpi_decisions_all_correct_rate": 1.0,
+    "mean": {
+      "validation_repairs": 0.0,
+      "dbt_repairs": 0.0,
+      "tests_passed": 18.0,
+      "tests_failed": 0.0,
+      "blueprint_high": 0.0,
+      "kpi_decisions_correct": 10.0,
+      "gold_passed": 11.0,
+      "cost_usd": 0.059219,
+      "seconds": 150.776667
+    },
+    "total_cost_usd": 0.177657,
+    "cost_unknown_runs": 0
+  },
+  "total_cost_usd": 0.177657,
+  "work": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_build_eval_5ocn879d"
+}
