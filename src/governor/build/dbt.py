@@ -38,7 +38,8 @@ def _read_results(target: Path) -> list[dict]:
     return [{"unique_id": r.get("unique_id"), "status": r.get("status"), "message": r.get("message")} for r in raw]
 
 
-def run_dbt(target: Path, args: list[str], timeout_s: int = 600) -> DbtResult:
+def run_dbt(target: Path, args: list[str], timeout_s: int = 600, env: dict[str, str] | None = None) -> DbtResult:
+    """``env``: the full environment for dbt (certify passes the deploy login); default the caller's."""
     target = Path(target)
     stale = target / "target" / "run_results.json"
     if stale.is_file():
@@ -52,7 +53,7 @@ def run_dbt(target: Path, args: list[str], timeout_s: int = 600) -> DbtResult:
     ]
     try:
         proc = subprocess.run(
-            command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s
+            command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s, env=env
         )
     except subprocess.TimeoutExpired as e:
         out = e.stdout if isinstance(e.stdout, str) else (e.stdout or b"").decode("utf-8", "replace")

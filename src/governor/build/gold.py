@@ -503,8 +503,8 @@ def model_cost(calls: list[dict]) -> dict:
 
 def summarise(target: str | Path, design: Proposal | dict, *, status: str, silver_state: dict, gold_state: dict | None,
               findings: list[dict], calls: list[dict], sql_repairs: int, rows: dict[str, int] | None = None,
-              thread_id: str | None = None) -> dict:
-    """Write ``governor/build.json`` and return it."""
+              thread_id: str | None = None, approved_by: str | None = None) -> dict:
+    """Write ``governor/build.json`` and return it (``approved_by``: who approved the design, for the PR)."""
     prop = _proposal(design)
     gold_state = gold_state or {}
     built = status == BUILT
@@ -513,6 +513,7 @@ def summarise(target: str | Path, design: Proposal | dict, *, status: str, silve
     summary = {
         "status": status,
         "thread_id": thread_id,
+        "approved_by": approved_by,
         "models": {"silver": list(silver_state.get("models") or []), "gold": list(gold_state.get("models") or [])},
         "tests_passed": {"silver": int(silver_state.get("tests_passed") or 0),
                          "gold": int(gold_state.get("tests_passed") or 0)},

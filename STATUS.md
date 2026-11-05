@@ -1,6 +1,6 @@
 # STATUS: governor
 
-Updated 04 Nov 2026 23:03. Run `20261104-230357`.
+Updated 05 Nov 2026 12:41. Run `20261105-124128`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
@@ -29,7 +29,11 @@ Updated 04 Nov 2026 23:03. Run `20261104-230357`.
 | D3 | Design proposal, validation, report and the design gate | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-04T18:34:10 |
 | D4 | Silver writer, dbt build in the dev schema, repair and escalation | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T21:54:31 |
 | D5 | Gold from catalogue templates, blueprint checks, gap report | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T23:03:58 |
+| D6 | Mapping pairs, events, pull request and certification | design | yes | approved | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-05T12:41:28 |
+| D7 | Certified answers in ask | design | - | pending | 0/2 |  | - | - | - |
+| D8a | Build evaluation harness (agent vs one-shot baseline) | design | - | pending | 0/2 |  | - | - | - |
+| D8b | Certified-answer evaluation, red team and the capstone report | design | yes | pending | 0/2 |  | - | - | - |
 
-Cost so far (reported + notional): $72.17 of $150.00 run budget; 90 agent call(s).
+Cost so far (reported + notional): $75.79 of $150.00 run budget; 93 agent call(s).
 
-Next: all steps done.
+Next: D6 is approved: `factory resume`.

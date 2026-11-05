@@ -21,7 +21,7 @@ from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
 from governor.build.llm import BuildLLM
-from governor.build.models import Finding, Profile, Proposal
+from governor.build.models import Finding, Profile, Proposal, ProposalReply, proposal_as_reply
 from governor.core.catalogue import ApprovedDecisions, Blueprint, CatalogueError, KpiCatalogue, render
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
@@ -99,7 +99,7 @@ def build_prompt(profile, catalogue, blueprint, approved, findings=None, *, prev
         extra.append("## Reviewer's note (the design was rejected)\n\n" + note.strip())
     if previous is not None:
         prev = previous.to_json_dict() if isinstance(previous, Proposal) else previous
-        extra.append("## Your previous proposal\n\n" + _dump(prev))
+        extra.append("## Your previous proposal\n\n" + _dump(proposal_as_reply(prev)))
     parts = {
         "{{profile}}": _dump(profile_for_prompt(profile)),
         "{{blueprint}}": _dump(blueprint_for_prompt(blueprint)),
@@ -115,9 +115,12 @@ def build_prompt(profile, catalogue, blueprint, approved, findings=None, *, prev
 def propose(profile, catalogue: KpiCatalogue, blueprint: Blueprint, approved, llm: BuildLLM,
             findings: list[Finding] | None = None, *, previous: Proposal | dict | None = None,
             note: str | None = None) -> Proposal:
-    """One structured call to the plan model. Raises ``LLMOutputError`` when the reply is not a proposal."""
+    """One structured call to the plan model. Raises ``LLMOutputError`` when the reply is not a proposal.
+
+    The model answers in :class:`ProposalReply` (each KPI mapping as ``mapping_pairs``, batch2b section 11); the
+    pairs become the ``mapping`` dict here, before validation."""
     prompt = build_prompt(profile, catalogue, blueprint, approved, findings, previous=previous, note=note)
-    return llm.structured("propose", prompt, Proposal, role="plan")
+    return llm.structured("propose", prompt, ProposalReply, role="plan").to_proposal()
 
 
 # --------------------------------------------------------------------------- validation

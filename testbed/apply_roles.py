@@ -2,8 +2,9 @@
 
     python testbed/apply_roles.py --dsn <admin dsn>
 
-Passwords: GOVERNOR_ASK_PASSWORD and GOVERNOR_BUILD_PASSWORD, with the test-bed
-defaults governor_ask_local and governor_build_local (laptop only). The psql
+Passwords: GOVERNOR_ASK_PASSWORD, GOVERNOR_BUILD_PASSWORD and GOVERNOR_DEPLOY_PASSWORD,
+with the test-bed defaults governor_ask_local, governor_build_local and
+governor_deploy_local (laptop only). The psql
 variables :'ask_password' and :'build_password' in roles.sql are replaced by
 quoted literals and the script runs in one transaction. Idempotent.
 """
@@ -20,6 +21,7 @@ ROLES_SQL = Path(__file__).resolve().parent / "sql" / "roles.sql"
 PASSWORDS = {
     "ask_password": ("GOVERNOR_ASK_PASSWORD", "governor_ask_local"),
     "build_password": ("GOVERNOR_BUILD_PASSWORD", "governor_build_local"),
+    "deploy_password": ("GOVERNOR_DEPLOY_PASSWORD", "governor_deploy_local"),
 }
 _VARIABLE = re.compile(r":'([A-Za-z_][A-Za-z0-9_]*)'")
 

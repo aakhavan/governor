@@ -3,9 +3,10 @@ validation findings (section 6)."""
 
 from __future__ import annotations
 
-from typing import Literal
+import json
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 InferredType = Literal["integer", "numeric", "timestamp", "date", "boolean", "text"]
 
@@ -108,6 +109,59 @@ class Proposal(_Model):
             for key in [key for key, v in k.items() if v is None or (key == "mapping" and k["decision"] == "decline" and not v)]:
                 del k[key]
         return doc
+
+
+# --------------------------------------------------------------------------- the schema the model sees (batch2b section 11)
+# Free-form objects come back empty under json_schema structured output, so the model answers each KPI mapping as a
+# list of {name, value} pairs. ``ProposalReply.to_proposal`` turns the pairs into the ``mapping`` dict before
+# validation; design.json and everything downstream keep the dict.
+
+
+class MappingPair(_Model):
+    name: str
+    value: str
+
+
+class KpiDecisionReply(_Model):
+    id: str
+    decision: Literal["build", "decline"]
+    domain: str | None = None
+    mapping_pairs: list[MappingPair] = Field(default_factory=list)
+    reason: str | None = None
+    gap: Gap | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_mapping_dict(cls, data: Any) -> Any:
+        # A scripted (fake) reply or a model that ignores the schema may still send the dict; take it as pairs.
+        if isinstance(data, dict) and isinstance(data.get("mapping"), dict):
+            data = dict(data)
+            pairs = [{"name": str(k), "value": str(v)} for k, v in data.pop("mapping").items()]
+            data["mapping_pairs"] = list(data.get("mapping_pairs") or []) + pairs
+        return data
+
+    def to_decision(self) -> KpiDecision:
+        return KpiDecision(id=self.id, decision=self.decision, domain=self.domain,
+                           mapping={p.name: p.value for p in self.mapping_pairs}, reason=self.reason, gap=self.gap)
+
+
+class ProposalReply(_Model):
+    silver_models: list[SilverModel] = Field(default_factory=list)
+    kpis: list[KpiDecisionReply] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+
+    def to_proposal(self) -> Proposal:
+        return Proposal(silver_models=self.silver_models, kpis=[k.to_decision() for k in self.kpis],
+                        assumptions=self.assumptions)
+
+
+def proposal_as_reply(proposal: dict) -> dict:
+    """A proposal in the shape the model answers in (mapping as pairs), for showing a previous proposal back."""
+    doc = json.loads(json.dumps(proposal))
+    for k in doc.get("kpis") or []:
+        if isinstance(k.get("mapping"), dict):
+            k["mapping_pairs"] = [{"name": n, "value": v} for n, v in k.pop("mapping").items()]
+    return doc
 
 
 class Finding(_Model):

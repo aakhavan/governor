@@ -932,3 +932,47 @@ Extend the same StateGraph. record_decisions currently goes to END and sets stat
 - Column check: names only (case-insensitive) against `information_schema.columns` in `dev_governor`, as the build login.
 - For Amir: stale `stg_*`/`int_*` files from an earlier design are not deleted from the target. The offline CLI cycle in `test_graph.py` now ends `escalated` (its approve script has no intermediate SQL). The live pytest cases in `test_silver.py` skip without `GOVERNOR_BUILD_PASSWORD`; acceptance covers the live path.
 
+## Relocks
+- 05 Nov 2026 11:46: capstone batch 2b (D6-D8b), agreed 5 Nov (changed: plan.yaml, plan/accept/_build2.py, plan/accept/_frozen2.py, plan/accept/accept_d6.py, plan/accept/accept_d7.py, plan/accept/accept_d8a.py, plan/accept/accept_d8b.py, plan/prompts/D6.md, plan/prompts/D7.md, plan/prompts/D8a.md, plan/prompts/D8b.md)
+- 05 Nov 2026 11:57: D6: testbed/apply_roles.py allowed (deploy role password) (changed: plan.yaml)
+
+## D4 result
+*Silver writer, dbt build in the dev schema, repair and escalation, 04 Nov 2026 21:54.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/D4`.
+
+| check | ok | detail |
+|---|---|---|
+| sample design and silver fixtures exist | yes | tests/fixtures/build/ |
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw | yes | 9 tables |
+| roles applied | yes | roles applied |
+| build init lists the 9 raw tables | yes |  |
+| run pauses at the design gate | yes | {"thread_id": "7c556dce-bf99-4cbc-b038-a14c66ada5ff", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
+| approve builds silver | yes | {"thread_id": "7c556dce-bf99-4cbc-b038-a14c66ada5ff", "status": "silver_built", "report": "C:\\Users\\amir0\\AppData\\Lo |
+| tests ran and passed | yes | 11 |
+| the scripted bad draft was repaired | yes | 1 |
+| every silver model exists in dev_governor | yes | [] |
+| nothing written outside dev_governor | yes | [] |
+| silver yml tags PII columns | yes |  |
+| silver yml has unique and not_null key tests | yes |  |
+| composite keys have singular tests | yes |  |
+| a model that cannot be repaired ends escalated | yes | {"thread_id": "9fd8b17c-fc24-4565-8de1-9e03ca00db18", "status": "escalated", "report": "C:\\Users\\amir0\\AppData\\Local |
+| pytest tests/build | yes | 88 passed, 10 skipped in 14.46s |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: The live run is the evidence: tests_passed 11 equals 4 single-column keys times unique and not_null, plus 3 composite singular tests, and int_order_lines exists only after the repair replaced i.price with i.item_price. The yml checks in accept_d4.py are substring searches. Section 8 still says status built; the step and the script use silver_built until D5. When several models run out of repairs together, only the first is named. A dbt failure tied to no model escalates with model null. Reused targets keep stale SQL files. approved_on is still date.today.
+
+## D5 notes (implementer)
+- `governor.build.gold`: `write_gold` (file = `catalogue.render` with relations as `{{ ref() }}`, written as LF bytes; `_<domain>.yml` with definition, meta kpi_id/owner/source_tier/source_ref/template_sha256/rendered_sha256, `not_null` on month/cohort_month), `check_project(target, catalogue, policy, blueprint=)` -> `BlueprintFinding{rule, severity, target, problem}` (severity from blueprint.md, its exceptions honoured), `write_gaps`, `dbt_build_gold`, `kpi_rows`, `summarise` (`governor/build.json`). Hashes are SHA-256 of LF-normalised text.
+- L7 checks the final SELECT's output columns, followed through renaming CTE columns, against policy PII plus silver columns tagged pii; PII used inside CTEs and aggregated away is allowed (repeat_purchase_rate reads customer_unique_id). `SELECT *` in gold is an L7 finding. L9 is a regex over gold SQL without comments and string literals.
+- Graph: `silver_done -> write_gold (models, gaps.md, check) -> dbt_build_gold -> summarise -> END`; a high finding skips dbt (`blueprint_failed`, build.json still written). A failing gold model escalates (no model repair). `approve` returns status, `kpis_built` (ids), `gaps` (ids), `tests_passed` (silver + gold), `repairs` (SQL repairs), `models`, `blueprint`, plus `escalated` when it applies. `build_graph(row_counter=)` for offline tests.
+- Design-gate guard: a failing (or check_sql-refused) staging model escalates at once with `{model, folder, error, fix}`; `repair_silver` only touches intermediate models. `silver.prune_stale` runs at the start of `write_silver` (and `write_gold`): removes .sql/.yml under staging, intermediate and marts, and `tests/*__primary_key.sql`, that the design does not produce; empty mart folders go too. Stale tables in `dev_governor` are not dropped.
+- Mart folder = `mart_folder(domain)` (lower case, `[a-z0-9_]`).
+
+## Additions for D5
+On silver_built, continue to write_gold; leave escalated at END. Section 8's approve status built is the post-gold name; D4 returns silver_built plus models, tests_passed, and repairs. State.repairs is the design-loop count. SQL repairs are state.sql_repairs and silver.repairs, with per-model counts in silver.attempts (2 write, then 1 plan). calls uses operator.add; return only new usage dicts. Files: models/staging/_staging.yml, models/intermediate/_intermediate.yml, models/<folder>/<name>.sql, and tests/<model>__primary_key.sql for a composite key. PII is columns[].config.meta.pii (dbt 1.12). Single-column keys use data_tests [unique, not_null]. Composite keys do not get per-column unique tests; the singular test returns rows for a duplicate or a null key part. Model config.meta.primary_key lists the key. Silver models stay views; marts are tables via dbt_project.yml. The profile already targets dev_governor as governor_build. That schema is shared and not dropped, and a reused target keeps stale stg_/int_ files. The column check compares names only. design.json is the proposal at <target>/governor/design.json. The sample declines conversion_rate and gross_margin. Do not import governor.ask. Do not write knowledge/.
+

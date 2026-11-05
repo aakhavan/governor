@@ -23,6 +23,9 @@ BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'governor_build') THEN
         CREATE ROLE governor_build LOGIN;
     END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'governor_deploy') THEN
+        CREATE ROLE governor_deploy LOGIN;
+    END IF;
 END
 $$;
 
@@ -42,14 +45,24 @@ GRANT governor_finance_admin TO governor_ask WITH INHERIT FALSE, SET TRUE;
 -- build login (batch 2): CREATE only on dev_governor.
 ALTER ROLE governor_build WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD :'build_password';
 
+-- deploy login (batch 2b section 13): certify runs dbt build --target prod as this role.
+-- CREATE only on analytics; reads raw.
+ALTER ROLE governor_deploy WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD :'deploy_password';
+
 -- Schemas.
 CREATE SCHEMA IF NOT EXISTS dev_governor;
 REVOKE ALL ON SCHEMA dev_governor FROM PUBLIC;
 GRANT USAGE, CREATE ON SCHEMA dev_governor TO governor_build;
+REVOKE ALL ON SCHEMA dev_governor FROM governor_deploy;
+
+CREATE SCHEMA IF NOT EXISTS analytics;
+REVOKE ALL ON SCHEMA analytics FROM PUBLIC;
+REVOKE ALL ON SCHEMA analytics FROM governor_ask, governor_build, governor_analyst, governor_finance_admin;
+GRANT USAGE, CREATE ON SCHEMA analytics TO governor_deploy;
 
 CREATE SCHEMA IF NOT EXISTS private;
 REVOKE ALL ON SCHEMA private FROM PUBLIC;
-REVOKE ALL ON SCHEMA private FROM governor_ask, governor_build, governor_analyst, governor_finance_admin;
+REVOKE ALL ON SCHEMA private FROM governor_ask, governor_build, governor_deploy, governor_analyst, governor_finance_admin;
 
 -- Nobody but the admin creates objects in public or raw.
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -61,6 +74,9 @@ BEGIN
         GRANT USAGE ON SCHEMA raw TO governor_build;
         GRANT SELECT ON ALL TABLES IN SCHEMA raw TO governor_build;
         ALTER DEFAULT PRIVILEGES IN SCHEMA raw GRANT SELECT ON TABLES TO governor_build;
+        GRANT USAGE ON SCHEMA raw TO governor_deploy;
+        GRANT SELECT ON ALL TABLES IN SCHEMA raw TO governor_deploy;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA raw GRANT SELECT ON TABLES TO governor_deploy;
     END IF;
 END
 $$;

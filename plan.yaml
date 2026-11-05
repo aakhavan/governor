@@ -219,7 +219,7 @@ steps:
     tier: design
     prompt: plan/prompts/D6.md
     accept: plan/accept/accept_d6.py
-    allowed_paths: [src/governor/build/, tests/build/, tests/fixtures/build/, testbed/sql/roles.sql]
+    allowed_paths: [src/governor/build/, tests/build/, tests/fixtures/build/, testbed/sql/roles.sql, testbed/apply_roles.py]
     human_gate: true
     review_focus: "the model-facing schema uses mapping pairs while design.json keeps the dict; events never carry data values and a failing notifier never stops a build; publish never commits to main beyond the scaffold; certify refuses unless merged and deploys as governor_deploy into analytics only; no credential written to a file"
   - id: D7

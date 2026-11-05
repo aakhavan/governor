@@ -22,7 +22,7 @@ You design the silver layer (dbt `staging` and `intermediate` models) of a compa
 ## Rules for the KPIs
 
 - Give a decision for **every** catalogue KPI and no others.
-- `build`: set `domain` (the gold folder, such as `sales`, `customers`, `delivery`) and a `mapping` with every relation and every input of the KPI and nothing else. A relation maps to the name of one of your silver models. A non-boolean input maps to a column that model declares. A `boolean` input maps to a boolean SQL expression over that model's declared columns (for example `is_paid AND NOT is_refunded`).
+- `build`: set `domain` (the gold folder, such as `sales`, `customers`, `delivery`) and `mapping_pairs`: one `{"name": ..., "value": ...}` pair for every relation and every input of the KPI and nothing else (`name` is the relation or input, `value` what it maps to). A relation maps to the name of one of your silver models. A non-boolean input maps to a column that model declares. A `boolean` input maps to a boolean SQL expression over that model's declared columns (for example `is_paid AND NOT is_refunded`).
 - `decline` when the raw data cannot support the KPI: give a `reason` and a `gap` with `missing` (the data that is missing), `typical_sources` (where companies usually get it) and `next_step` (what to load so the KPI can be built). Do not invent data that is not in the profile.
 - Put every business assumption you made (status values that mean a sale, which key identifies a person, how duplicates are resolved) in `assumptions`.
 
@@ -33,7 +33,7 @@ Return one JSON object with exactly these keys, and nothing else:
 ```json
 {"silver_models": [{"name": "", "folder": "staging", "source_table": "", "refs": [], "description": "",
                     "primary_key": [""], "columns": [{"name": "", "expr": "", "type": "", "pii": false, "description": ""}]}],
- "kpis": [{"id": "", "decision": "build", "domain": "", "mapping": {"<relation or input>": "<model, column or expression>"}},
+ "kpis": [{"id": "", "decision": "build", "domain": "", "mapping_pairs": [{"name": "<relation or input>", "value": "<model, column or expression>"}]},
           {"id": "", "decision": "decline", "reason": "", "gap": {"missing": [""], "typical_sources": [""], "next_step": ""}}],
  "assumptions": [""]}
 ```

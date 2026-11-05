@@ -6,6 +6,8 @@
                                  [--policy <file>] [--profile <profile.json>]
     python -m governor.build approve <thread_id> --by <name> [--llm ...]   (builds silver and gold: built | escalated | blueprint_failed)
     python -m governor.build reject <thread_id> --note "<text>" [--llm ...]
+    python -m governor.build publish --target <dir> [--open-pr]         (batch2b section 13)
+    python -m governor.build certify --target <dir> --by <name>         (after the merge; deploys to analytics)
 """
 
 from __future__ import annotations
@@ -114,6 +116,28 @@ def _resume(args: argparse.Namespace) -> int:
     return 0
 
 
+def _publish(args: argparse.Namespace) -> int:
+    from governor.build.publish import publish
+
+    try:
+        out = publish(args.target, open_pr=args.open_pr)
+    except Exception as e:  # noqa: BLE001
+        return _fail("publish failed", e)
+    print(json.dumps(out))
+    return 0 if out.get("status") == "published" else 1
+
+
+def _certify(args: argparse.Namespace) -> int:
+    from governor.build.certify import certify
+
+    try:
+        out = certify(args.target, args.by)
+    except Exception as e:  # noqa: BLE001
+        return _fail("certify failed", e)
+    print(json.dumps(out))
+    return 0 if out.get("status") == "certified" else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="governor.build")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -144,6 +168,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--note", required=True)
     p.add_argument("--llm", default="openrouter", help=llm_help)
     p.set_defaults(func=_resume)
+    p = sub.add_parser("publish", help="commit a built project to a governor/build-* branch, write governor/pr.md, push")
+    p.add_argument("--target", required=True, type=Path)
+    p.add_argument("--open-pr", action="store_true", help="also run gh pr create")
+    p.set_defaults(func=_publish)
+    p = sub.add_parser("certify", help="after the merge: deploy to analytics as governor_deploy and register the KPIs")
+    p.add_argument("--target", required=True, type=Path)
+    p.add_argument("--by", required=True)
+    p.set_defaults(func=_certify)
     args = ap.parse_args(argv)
     return args.func(args)
 

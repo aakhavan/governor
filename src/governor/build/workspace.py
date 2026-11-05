@@ -27,6 +27,19 @@ governor:
       threads: 4
 """
 
+# Target prod (batch2b section 13): certify deploys to analytics as governor_deploy.
+_PROD = """\
+    prod:
+      type: postgres
+      host: "{{ env_var('GOVERNOR_PG_HOST', 'localhost') }}"
+      port: "{{ env_var('GOVERNOR_PG_PORT', '55432') | as_number }}"
+      dbname: "{{ env_var('GOVERNOR_PG_DB', 'shop') }}"
+      user: "{{ env_var('GOVERNOR_DEPLOY_USER', 'governor_deploy') }}"
+      password: "{{ env_var('GOVERNOR_DEPLOY_PASSWORD') }}"
+      schema: analytics
+      threads: 4
+"""
+
 
 def _project_yml(project_name: str) -> str:
     return yaml.safe_dump(
@@ -49,12 +62,17 @@ def _write_if_missing(path: Path, text: str) -> None:
 
 
 def init_target(target: Path, project_name: str) -> None:
-    """Create the layout; never overwrites an existing file."""
+    """Create the layout; never overwrites an existing file. A profiles.yml written before target ``prod`` existed
+    gets the ``prod`` output appended (its last block is ``outputs``)."""
     target = Path(target)
     for d in DIRS:
         (target / d).mkdir(parents=True, exist_ok=True)
     _write_if_missing(target / "dbt_project.yml", _project_yml(project_name))
-    _write_if_missing(target / "profiles" / "profiles.yml", _PROFILES)
+    profiles = target / "profiles" / "profiles.yml"
+    _write_if_missing(profiles, _PROFILES + _PROD)
+    text = profiles.read_text(encoding="utf-8")
+    if "\n    prod:" not in text:
+        profiles.write_text(text.rstrip("\n") + "\n" + _PROD, encoding="utf-8")
 
 
 def write_sources(target: Path, tables: dict[str, list[str]]) -> Path:
@@ -84,3 +102,11 @@ def build_dsn() -> str:
         user=os.environ.get("GOVERNOR_BUILD_USER") or "governor_build",
         password=os.environ.get("GOVERNOR_BUILD_PASSWORD") or "governor_build_local",
     )
+
+
+def deploy_env() -> dict[str, str]:
+    """Env for ``dbt --target prod``: the deploy login, with the test-bed password default (laptop only)."""
+    env = dict(os.environ)
+    env["GOVERNOR_DEPLOY_USER"] = os.environ.get("GOVERNOR_DEPLOY_USER") or "governor_deploy"
+    env["GOVERNOR_DEPLOY_PASSWORD"] = os.environ.get("GOVERNOR_DEPLOY_PASSWORD") or "governor_deploy_local"
+    return env

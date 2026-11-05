@@ -52,6 +52,7 @@ from langgraph.types import Command, interrupt
 
 from governor.build import design, gold, silver
 from governor.build.dbt import run_dbt
+from governor.build.events import emit
 from governor.build.llm import BuildLLM, LLMOutputError
 from governor.build.models import Finding, Proposal
 from governor.core import paths
@@ -204,12 +205,20 @@ def build_graph(
     catalogue = load_kpis(kpis_path)
     blueprint = load_blueprint(blueprint_path)
 
-    def profile(state: BuildState) -> dict:
-        if state.get("profile"):
-            return {}
-        return {"profile": profiler(state["policy"])}
+    def _tid(config: RunnableConfig) -> str:
+        return config["configurable"]["thread_id"]
 
-    def propose(state: BuildState) -> dict:
+    def _cost(calls: list[dict]) -> float | None:
+        costs = [c.get("cost_usd") for c in calls]
+        return round(sum(costs), 6) if calls and None not in costs else None
+
+    def profile(state: BuildState, config: RunnableConfig) -> dict:
+        prof = state.get("profile") or profiler(state["policy"])
+        emit("profiled", thread_id=_tid(config), tables=len(prof.get("tables") or []),
+             relationships=len(prof.get("relationships") or []), saved=bool(state.get("profile")))
+        return {} if state.get("profile") else {"profile": prof}
+
+    def propose(state: BuildState, config: RunnableConfig) -> dict:
         findings = [Finding.model_validate(f) for f in state.get("findings") or []]
         note = state.get("note")
         previous = state.get("proposal") if (findings or note) else None
@@ -220,16 +229,24 @@ def build_graph(
             proposal = design.propose(state["profile"], catalogue, blueprint, approved, llm, findings or None,
                                       previous=previous, note=note)
             update |= {"proposal": proposal.to_json_dict(), "findings": []}
+            counts = {"silver_models": len(proposal.silver_models),
+                      "kpis_build": sum(k.decision == "build" for k in proposal.kpis),
+                      "kpis_decline": sum(k.decision == "decline" for k in proposal.kpis)}
         except LLMOutputError as exc:
             update |= {"proposal": None, "findings": [Finding(code="PROPOSAL_UNPARSEABLE", subject="proposal",
                                                               problem=str(exc)[:2000]).model_dump()]}
+            counts = {"parsed": False}
         update["calls"] = list(llm.calls[before:])
+        emit("proposed", thread_id=_tid(config), repair=update["repairs"], note=bool(note), **counts,
+             cost_usd=_cost(update["calls"]))
         return update
 
-    def validate(state: BuildState) -> dict:
+    def validate(state: BuildState, config: RunnableConfig) -> dict:
         if state.get("proposal") is None:
+            emit("validated", thread_id=_tid(config), codes=["PROPOSAL_UNPARSEABLE"], findings=1)
             return {}  # the PROPOSAL_UNPARSEABLE finding from propose stands
         found = design.validate(state["proposal"], state["profile"], catalogue, _policy(state.get("policy")))
+        emit("validated", thread_id=_tid(config), codes=sorted({f.code for f in found}), findings=len(found))
         return {"findings": [f.model_dump() for f in found]}
 
     def after_validate(state: BuildState) -> str:
@@ -248,8 +265,11 @@ def build_graph(
             # design.json is the proposal that would be approved; an invalid one is never written there
             design_file = out / "design.json"
             design_file.write_text(json.dumps(state["proposal"], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        return {"status": INVALID if findings else AWAITING, "report": str(report),
-                "design": str(design_file) if design_file else None}
+        status = INVALID if findings else AWAITING
+        # emitted here, not in design_gate: that node runs again from its start when the thread resumes
+        emit("design_gate", thread_id=thread_id, status=status, report="governor/design.md",
+             codes=sorted({f["code"] for f in findings}), cost_usd=_cost(list(state.get("calls") or [])))
+        return {"status": status, "report": str(report), "design": str(design_file) if design_file else None}
 
     def after_report(state: BuildState) -> str:
         return END if state.get("status") == INVALID else "design_gate"
@@ -259,10 +279,14 @@ def build_graph(
                               "report": state.get("report")})
         action = (decision or {}).get("action") if isinstance(decision, dict) else None
         if action == "approve":
+            emit("approved", thread_id=_tid(config), by=str(decision["by"]))
             return {"status": "approving", "approved_by": str(decision["by"])}
         if action == "reject":
             note = str(decision.get("note") or "").strip()
-            if state.get("rejections", 0) >= MAX_REJECTIONS:
+            final = state.get("rejections", 0) >= MAX_REJECTIONS
+            emit("rejected", thread_id=_tid(config), rejections=state.get("rejections", 0) + 1,
+                 status=REJECTED if final else "rejected")
+            if final:
                 return {"status": REJECTED, "note": note}
             return {"status": "rejected", "note": note, "rejections": state.get("rejections", 0) + 1,
                     "findings": [], "repairs": 0}
@@ -292,10 +316,14 @@ def build_graph(
                                      runner=dbt_runner, inspector=inspector)
         return _silver_update(st, len(llm.calls))
 
-    def repair_silver(state: BuildState) -> dict:
+    def repair_silver(state: BuildState, config: RunnableConfig) -> dict:
         before = len(llm.calls)
+        failing = sorted((state.get("silver") or {}).get("failures") or {})
         st = silver.repair_silver(state["target"], state["proposal"], llm, dict(state["silver"]))
-        return _silver_update(st, before)
+        update = _silver_update(st, before)
+        emit("repair", thread_id=_tid(config), models=failing, repairs=int(st.get("repairs") or 0),
+             cost_usd=_cost(update["calls"]))
+        return update
 
     def after_silver(state: BuildState) -> Any:
         st = dict(state["silver"])
@@ -306,10 +334,17 @@ def build_graph(
             return "repair_silver"
         return "silver_done"
 
-    def silver_done(state: BuildState) -> dict:
+    def silver_done(state: BuildState, config: RunnableConfig) -> dict:
         st = dict(state["silver"])
         silver.next_step(st)  # sets the escalation (model and last error) when a model is out of repairs
-        return {"silver": st, "status": st.get("status") or silver.ESCALATED}
+        status = st.get("status") or silver.ESCALATED
+        if status == silver.BUILT:
+            emit("silver_built", thread_id=_tid(config), models=len(st.get("models") or []),
+                 tests_passed=int(st.get("tests_passed") or 0), repairs=int(st.get("repairs") or 0))
+        else:
+            emit("escalated", thread_id=_tid(config), stage="silver",
+                 model=(st.get("escalated") or {}).get("model"), repairs=int(st.get("repairs") or 0))
+        return {"silver": st, "status": status}
 
     def after_silver_done(state: BuildState) -> str:
         return "write_gold" if state.get("status") == silver.BUILT else END
@@ -329,9 +364,12 @@ def build_graph(
     def after_write_gold(state: BuildState) -> str:
         return "summarise" if state.get("status") == gold.BLUEPRINT_FAILED else "dbt_build_gold"
 
-    def dbt_build_gold(state: BuildState) -> dict:
+    def dbt_build_gold(state: BuildState, config: RunnableConfig) -> dict:
         res = gold.dbt_build_gold(state["target"], state["proposal"], runner=dbt_runner)
         st = {**dict(state.get("gold") or {}), **res}
+        if res["status"] == gold.BUILT:
+            emit("gold_built", thread_id=_tid(config), models=len(res.get("models") or []),
+                 tests_passed=int(res.get("tests_passed") or 0))
         if res["status"] == gold.BUILT:
             try:
                 st["rows"] = row_counter(res["models"])
@@ -346,7 +384,17 @@ def build_graph(
                                  silver_state=dict(state.get("silver") or {}), gold_state=st,
                                  findings=list(state.get("blueprint") or []), calls=list(state.get("calls") or []),
                                  sql_repairs=int(state.get("sql_repairs") or 0), rows=st.get("rows"),
-                                 thread_id=config["configurable"]["thread_id"])
+                                 thread_id=config["configurable"]["thread_id"],
+                                 approved_by=state.get("approved_by"))
+        status = state["status"]
+        info = {"thread_id": _tid(config), "status": status, "kpis_built": len(summary["kpis_built"]),
+                "gaps": [g["id"] for g in summary["gaps"]], "tests_passed": summary["tests_passed"]["total"],
+                "cost_usd": summary["cost"]["cost_usd"]}
+        if status == BUILT:
+            emit("built", **info)
+        else:
+            emit("escalated", stage="gold", model=(st.get("escalated") or {}).get("model"),
+                 blueprint_findings=len(state.get("blueprint") or []), **info)
         return {"summary": summary}
 
     g = StateGraph(BuildState)
@@ -442,6 +490,7 @@ def start(target: str | Path, project_name: str, llm: BuildLLM, *, policy: str |
                              "policy": str(policy) if policy else "", "repairs": 0, "rejections": 0, "calls": []}
     if profile is not None:
         state["profile"] = profile
+    emit("run_started", thread_id=thread_id, project=project_name, saved_profile=profile is not None)
     with open_checkpointer(checkpoints) as saver:
         graph = build_graph(llm, saver, **graph_kwargs)
         graph.invoke(state, config)

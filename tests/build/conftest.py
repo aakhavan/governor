@@ -38,6 +38,13 @@ def sample_profile() -> dict:
                                    "relationships": []}).to_json_dict()
 
 
+@pytest.fixture(autouse=True)
+def _state_dir(tmp_path, monkeypatch):
+    """Build events and checkpoints go to a temp folder, never the repo's artifacts."""
+    monkeypatch.setenv("GOVERNOR_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("GOVERNOR_BUILD_NOTIFIERS", raising=False)
+
+
 @pytest.fixture(scope="session")
 def profile_dict() -> dict:
     return sample_profile()
