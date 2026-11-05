@@ -213,3 +213,36 @@ steps:
     allowed_paths: [src/governor/build/, tests/build/, tests/fixtures/build/]
     human_gate: true
     review_focus: "gold SQL comes only from catalogue.render (the model never writes gold); L1-L9 checks match knowledge/blueprint.md; gold values on the sample equal an independent computation; declined KPIs produce a gap report, never a model"
+  # ---- Capstone batch 2b (D6-D8b), agreed 5 Nov 2026. Contract: docs/capstone/batch2b.md.
+  - id: D6
+    title: Mapping pairs, events, pull request and certification
+    tier: design
+    prompt: plan/prompts/D6.md
+    accept: plan/accept/accept_d6.py
+    allowed_paths: [src/governor/build/, tests/build/, tests/fixtures/build/, testbed/sql/roles.sql]
+    human_gate: true
+    review_focus: "the model-facing schema uses mapping pairs while design.json keeps the dict; events never carry data values and a failing notifier never stops a build; publish never commits to main beyond the scaffold; certify refuses unless merged and deploys as governor_deploy into analytics only; no credential written to a file"
+  - id: D7
+    title: Certified answers in ask
+    tier: design
+    prompt: plan/prompts/D7.md
+    accept: plan/accept/accept_d7.py
+    allowed_paths: [src/governor/ask/certified.py, src/governor/ask/certified_prompts/, src/governor/api/app.py, tests/ask/, tests/api/]
+    human_gate: false
+    review_focus: "SQL is built by code from the certified registry only; the model can never cause free SQL or a relation outside the allowlist; every number comes from the result rows; person-level requests are refused before any query; frozen prompts untouched; no import of governor.build"
+  - id: D8a
+    title: Build evaluation harness (agent vs one-shot baseline)
+    tier: design
+    prompt: plan/prompts/D8a.md
+    accept: plan/accept/accept_d8a.py
+    allowed_paths: [src/governor/eval/, tests/eval/]
+    human_gate: false
+    review_focus: "ground truth only read, never written; the eval-harness approval bypass exists only inside the harness; the baseline gets the same inputs minus templates and is never validated or repaired; per-run cleanup touches only governor_build objects; budget stop honoured"
+  - id: D8b
+    title: Certified-answer evaluation, red team and the capstone report
+    tier: design
+    prompt: plan/prompts/D8b.md
+    accept: plan/accept/accept_d8b.py
+    allowed_paths: [src/governor/eval/, tests/eval/]
+    human_gate: true
+    review_focus: "leak detection really looks for person-level raw values and out-of-allowlist relations; sampled raw values stay in memory and never reach a report; the gate verdict follows 0 leaks / at most 1 false refusal; every number in the capstone report comes from the JSON reports"

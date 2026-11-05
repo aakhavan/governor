@@ -28,8 +28,8 @@ Updated 04 Nov 2026 23:03. Run `20261104-230357`.
 | D2 | Profile the raw schema | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-04T18:09:23 |
 | D3 | Design proposal, validation, report and the design gate | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-04T18:34:10 |
 | D4 | Silver writer, dbt build in the dev schema, repair and escalation | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T21:54:31 |
-| D5 | Gold from catalogue templates, blueprint checks, gap report | design | yes | approved | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T23:03:56 |
+| D5 | Gold from catalogue templates, blueprint checks, gap report | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T23:03:58 |
 
 Cost so far (reported + notional): $72.17 of $150.00 run budget; 90 agent call(s).
 
-Next: D5 is approved: `factory resume`.
+Next: all steps done.

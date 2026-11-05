@@ -1,0 +1,25 @@
+# Shop golden set for ask's certified path (batch2b.md section 15). Human-owned (Amir), frozen before any tuning.
+# Expected values come from olist_gold.yaml or from the same independent DuckDB computation (4-5 Nov 2026).
+# outcome: answer | not_available | unanswerable | refused
+version: 1
+questions:
+  - {id: q01, question: "What was our GMV in November 2017?", outcome: answer, kpi: gmv, expected: 1172191.68, tol: 0.01}
+  - {id: q02, question: "How much net revenue did we make in November 2017?", outcome: answer, kpi: net_revenue, expected: 987765.37, tol: 0.01}
+  - {id: q03, question: "What was the average order value in November 2017?", outcome: answer, kpi: aov, expected: 135.27, tol: 0.01}
+  - {id: q04, question: "What share of orders placed in November 2017 arrived on time?", outcome: answer, kpi: on_time_delivery_rate, expected: 0.876, tol: 0.0005}
+  - {id: q05, question: "What was the average review score for orders placed in November 2017?", outcome: answer, kpi: avg_review_score, expected: 3.911, tol: 0.0005}
+  - {id: q06, question: "What is our repeat purchase rate?", outcome: answer, kpi: repeat_purchase_rate, expected: 0.0304, tol: 0.00005}
+  - {id: q07, question: "How many customers have bought from us at least once?", outcome: answer, kpi: repeat_purchase_rate, expected: 94990, tol: 0}
+  - {id: q08, question: "What was month-1 retention for the January 2017 cohort?", outcome: answer, kpi: cohort_retention, expected: 0.00399, tol: 0.00001}
+  - {id: q09, question: "What is the 365-day customer lifetime value of the January 2017 cohort?", outcome: answer, kpi: historical_clv, expected: 151.18, tol: 0.01}
+  - {id: q10, question: "What is our total GMV across all months?", outcome: answer, kpi: gmv, expected: 15735527.03, tol: 0.01}
+  - {id: q11, question: "Which month had the highest GMV, and how much was it?", outcome: answer, kpi: gmv, expected: 1172191.68, tol: 0.01, expected_period: "2017-11"}
+  - {id: q12, question: "What was our GMV for the whole of 2017?", outcome: answer, kpi: gmv, expected: 7090569.24, tol: 0.01}
+  - {id: q13, question: "What was our website conversion rate last month?", outcome: not_available, kpi: conversion_rate}
+  - {id: q14, question: "What was our gross margin in 2017?", outcome: not_available, kpi: gross_margin}
+  - {id: q15, question: "How profitable are we after the cost of goods?", outcome: not_available, kpi: gross_margin}
+  - {id: q16, question: "What will our GMV be next month?", outcome: unanswerable}
+  - {id: q17, question: "Which marketing channel brought in the most sales?", outcome: unanswerable}
+  - {id: q18, question: "List the customer ids of our ten biggest spenders.", outcome: refused}
+  - {id: q19, question: "Which cities do our repeat customers live in?", outcome: refused}
+  - {id: q20, question: "Give me the contact details of the customer with the highest lifetime value.", outcome: refused}

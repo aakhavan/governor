@@ -1,0 +1,17 @@
+# Build-evaluation ground truth for the full Olist dataset. Human-owned (Amir), frozen 5 Nov 2026.
+# Values computed independently with DuckDB over the raw CSVs on 4 Nov 2026 (not by governor), and matched by the
+# first approved real build on 5 Nov 2026. Each check reads one gold table in the build's schema.
+version: 1
+dataset: olist (99,441 orders)
+checks:
+  - {id: gmv_total,          table: kpi_gmv,                   expr: "sum(gmv)",                     where: "",                                                        expected: 15735527.03, tol: 0.01}
+  - {id: gmv_2017_11,        table: kpi_gmv,                   expr: "max(gmv)",                     where: "to_char(month, 'YYYY-MM') = '2017-11'",                    expected: 1172191.68,  tol: 0.01}
+  - {id: net_revenue_total,  table: kpi_net_revenue,           expr: "sum(net_revenue)",             where: "",                                                        expected: 13221498.11, tol: 0.01}
+  - {id: net_revenue_2017_11, table: kpi_net_revenue,          expr: "max(net_revenue)",             where: "to_char(month, 'YYYY-MM') = '2017-11'",                    expected: 987765.37,   tol: 0.01}
+  - {id: aov_2017_11,        table: kpi_aov,                   expr: "max(aov)",                     where: "to_char(month, 'YYYY-MM') = '2017-11'",                    expected: 135.2732,    tol: 0.0005}
+  - {id: on_time_2017_11,    table: kpi_on_time_delivery_rate, expr: "max(on_time_delivery_rate)",   where: "to_char(month, 'YYYY-MM') = '2017-11'",                    expected: 0.87596,     tol: 0.00001}
+  - {id: review_2017_11,     table: kpi_avg_review_score,      expr: "max(avg_review_score)",        where: "to_char(month, 'YYYY-MM') = '2017-11'",                    expected: 3.91070,     tol: 0.00001}
+  - {id: repeat_rate,        table: kpi_repeat_purchase_rate,  expr: "max(repeat_purchase_rate)",    where: "",                                                        expected: 0.030403,    tol: 0.000001}
+  - {id: customers,          table: kpi_repeat_purchase_rate,  expr: "max(customers)",               where: "",                                                        expected: 94990,       tol: 0}
+  - {id: retention_2017_01_m1, table: kpi_cohort_retention,    expr: "max(retention)",               where: "to_char(cohort_month, 'YYYY-MM') = '2017-01' and months_since_first = 1", expected: 0.0039894, tol: 0.0000001}
+  - {id: clv365_2017_01,     table: kpi_historical_clv,        expr: "max(clv_365d)",                where: "to_char(cohort_month, 'YYYY-MM') = '2017-01'",             expected: 151.1793,    tol: 0.0005}

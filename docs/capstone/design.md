@@ -126,3 +126,5 @@ Every UI is a thin client of the FastAPI app. No business logic in Streamlit pag
 ## 11. Batch 2
 
 Build mode (D steps) is specified in `docs/capstone/batch2.md`, agreed on 4 Nov 2026.
+
+Batch 2b (D6-D8b: pull request, certification, certified answers, evaluation) is specified in `docs/capstone/batch2b.md`, agreed on 5 Nov 2026.

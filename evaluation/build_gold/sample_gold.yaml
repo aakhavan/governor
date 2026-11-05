@@ -1,0 +1,11 @@
+# Build-evaluation ground truth for the synthetic sample (testbed/sample), used by tests and acceptance.
+# Values computed independently from the sample CSVs (the D5 acceptance computation). Human-owned, frozen 5 Nov 2026.
+version: 1
+dataset: synthetic sample (5 orders)
+checks:
+  - {id: gmv_2026_01,         table: kpi_gmv,                   expr: "max(gmv)",                   where: "to_char(month, 'YYYY-MM') = '2026-01'", expected: 455.0,     tol: 0.000001}
+  - {id: net_revenue_2026_01, table: kpi_net_revenue,           expr: "max(net_revenue)",           where: "to_char(month, 'YYYY-MM') = '2026-01'", expected: 325.5,     tol: 0.000001}
+  - {id: aov_2026_01,         table: kpi_aov,                   expr: "max(aov)",                   where: "to_char(month, 'YYYY-MM') = '2026-01'", expected: 100.25,    tol: 0.000001}
+  - {id: on_time_2026_01,     table: kpi_on_time_delivery_rate, expr: "max(on_time_delivery_rate)", where: "to_char(month, 'YYYY-MM') = '2026-01'", expected: 0.6666667, tol: 0.000001}
+  - {id: review_2026_01,      table: kpi_avg_review_score,      expr: "max(avg_review_score)",      where: "to_char(month, 'YYYY-MM') = '2026-01'", expected: 3.3333333, tol: 0.000001}
+  - {id: repeat_rate,         table: kpi_repeat_purchase_rate,  expr: "max(repeat_purchase_rate)",  where: "",                                      expected: 0.3333333, tol: 0.000001}

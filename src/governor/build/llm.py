@@ -27,6 +27,8 @@ from governor.core.config import CHAT_MODEL
 
 PLAN_MODEL_ENV = "GOVERNOR_BUILD_PLAN_MODEL"
 WRITE_MODEL_ENV = "GOVERNOR_BUILD_WRITE_MODEL"
+STRUCTURED_METHOD_ENV = "GOVERNOR_BUILD_STRUCTURED_METHOD"
+MAX_TOKENS_ENV = "GOVERNOR_BUILD_MAX_TOKENS"
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -79,11 +81,17 @@ class OpenRouterLLM(BuildLLM):
         if role not in self._clients:
             from governor.core.llm import get_chat_model
 
-            self._clients[role] = get_chat_model(model=self.models[role], temperature=0.0, timeout=300, max_retries=2)
+            client = get_chat_model(model=self.models[role], temperature=0.0, timeout=300, max_retries=2)
+            # A full design proposal for a real schema runs past the shared 4,096-token cap (first Olist run, 5 Nov 2026).
+            client.max_tokens = int(os.environ.get(MAX_TOKENS_ENV) or 32000)
+            self._clients[role] = client
         return self._clients[role]
 
     def structured(self, kind: str, prompt: str, schema: type[T], role: str = "plan") -> T:
-        runnable = self._client(role).with_structured_output(schema, method="function_calling", include_raw=True)
+        # json_schema (response_format) works across providers; newer Claude models refuse the forced tool call that
+        # function_calling needs (probe on 5 Nov 2026). Override with GOVERNOR_BUILD_STRUCTURED_METHOD=function_calling.
+        method = os.environ.get(STRUCTURED_METHOD_ENV) or "json_schema"
+        runnable = self._client(role).with_structured_output(schema, method=method, include_raw=True)
         out = runnable.invoke(prompt)
         self.calls.append(_usage(out.get("raw"), self.models[role], kind))
         if out.get("parsed") is None:
