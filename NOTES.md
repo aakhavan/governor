@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-Certified answers are a separate ask path. answer() reads serve_<role>.governor_certified and governor_gaps as governor_ask with the reader role set, then makes one structured call using certified_prompts/certified.md. Code builds a single read-only SELECT from that KPI's serving view and value column, and the validator allowlist is the certified models. Python fills every number from the result row and cites the KPI id, owner, source tier and reference, certifier and date. Outcomes are answer, not_available for a catalogue KPI that is declined or not certified (quoting the gap), unanswerable, and refused for person-level requests before the KPI query. POST /v1/ask/certified uses the same body and bearer auth as /v1/ask. The frozen prompts in src/governor/ask/prompts/ are unchanged, and ask does not import governor.build. On the sample, GMV for 2026-01 is 455, and conversion_rate and gross_margin are gaps.
+The build harness is governor.eval.build_eval. Each run starts from an empty dbt project and drops only dev_governor relations owned by the build login (governor_build by default), with no cascade. The agent runs the full build graph and is approved programmatically as eval-harness only inside this harness. The baseline is one plan-model call with the same profile, blueprint and KPI definitions and no template SQL; its files are written and built once with dbt build and are not repaired. Gold checks are read from the frozen gold file (table, expr, where, expected, tol) and scored on dev_governor; a missing table or column fails that check. The report has per-run status, design and dbt repairs, tests, high blueprint findings, KPI decisions (decline conversion_rate and gross_margin, build the other eight), gold passes, cost and seconds, plus means, pass rates, the gold sha256 and the models used. --max-cost-usd stops further runs. On the sample, two agent runs built and passed 6 of 6 checks; a one-KPI baseline scored 1 of 6 and was not repaired.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,58 +20,6 @@ Certified answers are a separate ask path. answer() reads serve_<role>.governor_
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## D6 result
-*Mapping pairs, events, pull request and certification, 05 Nov 2026 12:41.*
-
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/D6`.
-
-| check | ok | detail |
-|---|---|---|
-| build models import | yes |  |
-| src/governor/build/events.py exists | yes | missing |
-| src/governor/build/publish.py exists | yes | missing |
-| src/governor/build/certify.py exists | yes | missing |
-| roles.sql defines governor_deploy | yes |  |
-| Docker is running | yes | 29.9.2 |
-| testbed/docker-compose.yml exists | yes | missing |
-| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
-| sample loads into raw | yes | 9 tables |
-| roles applied | yes | roles applied |
-| sample design and silver fixtures exist | yes |  |
-| build init lists the 9 raw tables | yes |  |
-| sample run pauses at the design gate | yes | {"thread_id": "1f027efe-c1ba-48f9-ba6c-a9e39f03eacc", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
-| sample build completes | yes | {"thread_id": "1f027efe-c1ba-48f9-ba6c-a9e39f03eacc", "status": "built", "report": "C:\\Users\\amir0\\AppData\\Local\\Te |
-| events log has the build stages | yes | ['run_started', 'profiled', 'proposed', 'validated', 'design_gate', 'approved', 'repair', 'silver_built', 'gold_built',  |
-| events carry no data values | yes | [] |
-| publish creates a governor/build-* branch | yes | {"status": "published", "branch": "governor/build-1f027efe", "commit": "318fc9ec7a274365fac180cf68ec25ab435efb39", "pr_u |
-| commit by governor with a summary message | yes | governor|governor: build 1f027efe (8 KPIs, 2 gaps) |
-| branch contains models, tests and governor files | yes |  |
-| main holds only the scaffold | yes |  |
-| pr.md has KPIs, gaps, tests and a reviewer checklist | yes |  |
-| publish pushes the branch when origin exists | yes | {"status": "published", "branch": "governor/build-1f027efe", "commit": "d8385c7982b45066c82590f2a6aedac6cac0fdec", "pr_u |
-| certify refuses before the merge | yes | {"status": "not_merged", "reason": "the working tree is on 'governor/build-1f027efe', not main", "commit": "318fc9ec7a27 |
-| reviewer merges the pull request branch locally | yes |  create mode 100644 tests/int_order_lines__primary_key.sql |  create mode 100644 tests/stg_order_items__primary_key.sql  |
-| certify deploys after the merge | yes | {"status": "certified", "kpis": ["gmv", "net_revenue", "aov", "on_time_delivery_rate", "avg_review_score", "repeat_purch |
-| registry lists the 8 certified KPIs, certified by amir | yes | ['aov', 'avg_review_score', 'cohort_retention', 'gmv', 'historical_clv', 'net_revenue', 'on_time_delivery_rate', 'repeat |
-| gaps table lists the declined KPIs | yes | [['conversion_rate'], ['gross_margin']] |
-| serving views exist for the gold tables | yes | [['8']] |
-| governor_deploy owns nothing outside analytics | yes | [] |
-| pytest tests/build | yes | 139 passed, 12 skipped in 33.88s |
-
-Review: cursor-grok: pass | claude-tc-fable: pass
-
-For Amir: A second certify fails: DROP TABLE on the registry has no CASCADE, and the serving views depend on those tables. On a clone that already has commits, the prod output appended to profiles.yml is not in the branch commit, so the clean-tree check blocks certify until someone commits that file. The published sha lives only in .git/governor_published.json, so a squash merge or another clone cannot certify. The acceptance data-value scan looks only for cust-0001 and ord-0001.
-
-## Additions for D7
-D7 reads serve_<role>.governor_certified and serve_<role>.governor_gaps (serving applied with source analytics; schemas serve_analyst and serve_finance_admin). Certified columns: kpi_id, model, label, definition, grain, value_columns (text[] of numeric columns except the grain column month or cohort_month, and except months_since_first), owner, source_tier, source_ref, template_sha256, rendered_sha256, certified_by, certified_at, git_commit. Gap columns: kpi_id, missing (text[]), typical_sources (text[]), next_step. Sample: eight certified KPIs (gmv, net_revenue, aov, on_time_delivery_rate, avg_review_score, repeat_purchase_rate, cohort_retention, historical_clv) and gaps conversion_rate, gross_margin. Gold tables are analytics.kpi_<id>, owned by governor_deploy. Do not import governor.build. design.json still stores mapping as a dict. The certify commit sha is recorded only in the target's .git/governor_published.json.
-
-## D7 notes (implementer)
-- `governor.ask.certified`: the registry, gaps and column types (information_schema, as the reader role) are read through `PostgresAdapter(allowed_roles=READER_ROLES)`. The validator policy is built in code: allowlist = the certified models, schema = their serving-view columns, limits from `knowledge/shop/access.yaml`. It calls `validator._validate` directly because `validate()` takes its allowlist from access.yaml and meta.duckdb.
-- **Validator bug (outside D7 paths, for Amir):** in sqlglot 30.24, `exp.And`/`exp.Or` subclass `exp.Func`, so `_check_functions` rejects every Postgres query that has `AND` or `OR` ("function AND is not on the allowlist"). That affects the main ask path on Postgres too. The fix is one line: skip `exp.Connector` in `_check_functions`, or add `AND`/`OR` to `POSTGRES_FUNCTIONS`. Meanwhile the certified builder uses no AND: month and cohort filter as `TO_CHAR(grain, 'YYYY-MM') = 'YYYY-MM'`, year as `EXTRACT(YEAR FROM grain) = YYYY`, and several filters combine as one row comparison `(a, b) = (x, y)`.
-- Reply rules: grain month takes month, year or all; cohort_month takes cohort, year or all; total takes all only. pick value needs a single row (a month, a cohort or a total). A KPI with `months_since_first` must be given it. max returns the period with its value. sum uses SUM/COUNT of the column. If the reply's value_column is null and the KPI has only one value column, that column is used.
-- not_available covers a gap row, or a catalogue KPI (knowledge/kpis.yaml) that is neither certified nor in the gaps. Any other id is unanswerable. The API returns 503 `registry_unavailable` when the registry cannot be read. The certified path takes its FakeLLM from the `certified` key of the same `GOVERNOR_LLM` script.
-- Acceptance D7: 27/27; pytest tests/ask 147 passed, 2 skipped (the live tests skip because the acceptance run tears the test bed down before pytest).
 
 ## D7 result
 *Certified answers in ask, 05 Nov 2026 13:05.*
@@ -114,3 +62,40 @@ For Amir: Acceptance feeds a scripted reply, so this step shows the code path. A
 
 ## Additions for D8a
 D8 calls governor.ask.certified.answer. Do not edit src/governor/ask/prompts/ or import governor.build. Prompt: src/governor/ask/certified_prompts/certified.md. Fake key certified is a list of replies in order. Reply: kpi_id, value_column, period {kind month|year|all|cohort, value}, months_since_first, pick value|max|sum, category answer|not_available|out_of_scope|person_level. Code builds SQL from the KPI view and value column. person_level is refused with sql null before the KPI query; the registry is read first. Unknown names, bad columns, bad periods and out_of_scope are unanswerable and do not run. A catalogue or gap KPI that is not certified is not_available and quotes the gap. Cohort KPIs need months_since_first. value is the float from the result cell. citation: kpi_id, label, model, owner, source_tier, source_ref, certified_by, certified_at, git_commit. CLI: python -m governor.ask.certified QUESTION --role analyst|finance_admin --llm fake:SCRIPT|openrouter. POST /v1/ask/certified uses the /v1/ask token and body; thread_id is ignored. Dates use paths.as_of(). Sample gmv for 2026-01 is 455; gaps are conversion_rate and gross_margin.
+
+## D8a notes (implementer)
+- `governor.eval.build_eval` (CLI `python -m governor.eval.build_eval`). Each run gets a fresh target under `--work` (a new temp folder by default) with `models/sources.yml`. Before the run it drops the dev_governor relations owned by the build login (current_user). It drops views first, then tables, with no CASCADE, and retries until nothing more can be dropped. Checkpoints go per run under the work folder.
+- Agent: `graph.start`, then `graph.approve(tid, "eval-harness")`. `valid_design_first_try` means the gate was reached with 0 design repairs. `validation_repairs` is the design-loop count and `dbt_repairs` is `sql_repairs`. `tests_failed` is 0 when the build succeeds; otherwise it comes from the last run_results.json.
+- Baseline: one `structured("baseline", ...)` call on the plan role with the `BaselineReply {files:[{path, content}]}` schema. Paths must be under `models/` or `tests/`, with no `..`, no drive and no `sources.yml`; anything else is refused and listed. The run makes one `dbt build`. Status is built or failed, or invalid_output when the reply does not parse. For scoring only, the harness runs the blueprint check (`blueprint_high`); the baseline is never repaired. Its KPI decision counts as "build" when `kpi_<id>.sql` was written.
+- Expected decisions are hard-coded (`EXPECTED_DECLINE = conversion_rate, gross_margin`; every other catalogue KPI should be built). The gold file does not carry them.
+- `--max-cost-usd` is checked before each run, so the run that crosses the budget still finishes. A run with unknown cost (None) counts as 0 toward the budget and is counted in `summary.cost_unknown_runs`.
+
+## D8a result
+*Build evaluation harness (agent vs one-shot baseline), 05 Nov 2026 13:24.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/D8a`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth frozen and unchanged | yes | capstone ground truth unchanged |
+| baseline prompt exists | yes |  |
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw | yes | 9 tables |
+| roles applied | yes | roles applied |
+| agent report written | yes | {"out": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_accept_vvlbbin3\\agent_report.json", "system": "agent", "runs" |
+| two agent runs recorded | yes | 2 |
+| every agent run built and passed 6/6 gold checks | yes | [{"run": 1, "system": "agent", "target": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_build_eval_bd1rbrnm\\agent-01 |
+| agent approvals recorded as eval-harness | yes |  |
+| report has a summary and the gold file hash | yes |  |
+| partial baseline scores exactly the one KPI it built | yes | {"out": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_accept_vvlbbin3\\baseline_report.json", "system": "baseline",  |
+| baseline was never repaired | yes | [{"run": 1, "system": "baseline", "target": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_build_eval_0v48x7sr\\basel |
+| pytest tests/eval | yes | 120 passed in 5.63s |
+
+Review: The harness reads the frozen gold file and never writes it. Agent approval as eval-harness happens only in run_agent, and only when the build graph is waiting at the design gate. The baseline receives the same profile, blueprint and KPI definitions with template SQL removed, is built once, and is not repaired. Cleanup drops only dev_governor relations owned by the build login. The budget flag stops further runs once recorded cost reaches the cap. Acceptance scored the agent 6/6 and a one-KPI baseline 1/6.
+
+For Amir: Acceptance scored sample_gold.yaml (6 checks), not olist_gold.yaml (11). The olist file was not executed and its hash is unchanged. A budget cap stops the next run after recorded spend reaches it, so the run that crosses the cap still finishes. Baseline blueprint_high is a static file check after the reply and does not start a repair.
+
+## Additions for D8b
+Capstone report reads this JSON and does not recompute it. Root: system, gold_file, gold_sha256, gold_dataset, llm, models, approval, max_cost_usd, stopped_by_budget, runs_requested, runs, summary, total_cost_usd, work. approval is eval-harness for the agent and null for the baseline. A run has status, approved_by, valid_design_first_try, validation_repairs, dbt_repairs, escalated, tests_passed, tests_failed, blueprint_high, kpi_decisions_correct, kpi_decisions_total, gold_passed, gold_total, gold (id, table, passed, value, expected, tol, reason), cost_usd, seconds. Baseline design fields are null. Unparseable baseline output is status invalid_output. A crashed run is status error with gold reason run_failed. summary rates: built, valid_design_first_try, escalated, gold_all_passed, kpi_decisions_all_correct; mean covers the numeric run fields; cost_unknown_runs counts missing costs. Decision key is fixed: decline conversion_rate and gross_margin, build the other eight catalogue KPIs. sample_gold.yaml has 6 checks; olist_gold.yaml has 11. Do not write those files or FROZEN_CAPSTONE.sha256. --max-cost-usd stops starting another run once spend has reached the cap; the run that crosses it is kept. Baseline fake script key is baseline; each item is a JSON string {"files":[{"path","content"}]}. Written paths must sit under models/ or tests/ and must not replace sources.yml.

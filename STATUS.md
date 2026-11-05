@@ -1,6 +1,6 @@
 # STATUS: governor
 
-Updated 05 Nov 2026 13:05. Run `20261105-124128`.
+Updated 05 Nov 2026 13:24. Run `20261105-124128`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
@@ -30,10 +30,10 @@ Updated 05 Nov 2026 13:05. Run `20261105-124128`.
 | D4 | Silver writer, dbt build in the dev schema, repair and escalation | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T21:54:31 |
 | D5 | Gold from catalogue templates, blueprint checks, gap report | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-04T23:03:58 |
 | D6 | Mapping pairs, events, pull request and certification | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-05T12:41:29 |
-| D7 | Certified answers in ask | design | - | passed | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-05T13:05:52 |
-| D8a | Build evaluation harness (agent vs one-shot baseline) | design | - | pending | 0/2 |  | - | - | - |
+| D7 | Certified answers in ask | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-05T13:05:52 |
+| D8a | Build evaluation harness (agent vs one-shot baseline) | design | - | passed | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-05T13:24:00 |
 | D8b | Certified-answer evaluation, red team and the capstone report | design | yes | pending | 0/2 |  | - | - | - |
 
-Cost so far (reported + notional): $78.28 of $150.00 run budget; 96 agent call(s).
+Cost so far (reported + notional): $80.04 of $150.00 run budget; 98 agent call(s).
 
-Next: D7 is passed: `factory resume`.
+Next: D8a is passed: `factory resume`.

@@ -1021,3 +1021,55 @@ For Amir: The acceptance line "blueprint check is clean" fails only when a high 
 ## Additions for the next plan
 D6 opens the PR on the target after approve. approve already runs silver and gold and returns status built, escalated or blueprint_failed, plus kpis_built (ids), gaps (declined ids), tests_passed, repairs, blueprint findings, and build pointing at <target>/governor/build.json. That file has models, silver/gold/total test counts, KPI row counts, full gap objects, findings and cost. Gold files are models/marts/<domain>/kpi_<id>.sql (tables via the marts materialization) and _<domain>.yml (owner, source_tier, source_ref, template_sha256, rendered_sha256, not_null on month or cohort_month). L8 re-renders from governor/design.json; do not add a model that writes gold SQL. High rules stop the build. L5 is medium and L9 is low, so they are recorded and do not stop it. A failing staging model escalates with zero repairs; only intermediate SQL is repaired. On the sample the gaps are conversion_rate and gross_margin. cohort_retention and historical_clv are built and non-empty; their values were not checked against an independent computation.
 
+## D6 result
+*Mapping pairs, events, pull request and certification, 05 Nov 2026 12:41.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/D6`.
+
+| check | ok | detail |
+|---|---|---|
+| build models import | yes |  |
+| src/governor/build/events.py exists | yes | missing |
+| src/governor/build/publish.py exists | yes | missing |
+| src/governor/build/certify.py exists | yes | missing |
+| roles.sql defines governor_deploy | yes |  |
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw | yes | 9 tables |
+| roles applied | yes | roles applied |
+| sample design and silver fixtures exist | yes |  |
+| build init lists the 9 raw tables | yes |  |
+| sample run pauses at the design gate | yes | {"thread_id": "1f027efe-c1ba-48f9-ba6c-a9e39f03eacc", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
+| sample build completes | yes | {"thread_id": "1f027efe-c1ba-48f9-ba6c-a9e39f03eacc", "status": "built", "report": "C:\\Users\\amir0\\AppData\\Local\\Te |
+| events log has the build stages | yes | ['run_started', 'profiled', 'proposed', 'validated', 'design_gate', 'approved', 'repair', 'silver_built', 'gold_built',  |
+| events carry no data values | yes | [] |
+| publish creates a governor/build-* branch | yes | {"status": "published", "branch": "governor/build-1f027efe", "commit": "318fc9ec7a274365fac180cf68ec25ab435efb39", "pr_u |
+| commit by governor with a summary message | yes | governor|governor: build 1f027efe (8 KPIs, 2 gaps) |
+| branch contains models, tests and governor files | yes |  |
+| main holds only the scaffold | yes |  |
+| pr.md has KPIs, gaps, tests and a reviewer checklist | yes |  |
+| publish pushes the branch when origin exists | yes | {"status": "published", "branch": "governor/build-1f027efe", "commit": "d8385c7982b45066c82590f2a6aedac6cac0fdec", "pr_u |
+| certify refuses before the merge | yes | {"status": "not_merged", "reason": "the working tree is on 'governor/build-1f027efe', not main", "commit": "318fc9ec7a27 |
+| reviewer merges the pull request branch locally | yes |  create mode 100644 tests/int_order_lines__primary_key.sql |  create mode 100644 tests/stg_order_items__primary_key.sql  |
+| certify deploys after the merge | yes | {"status": "certified", "kpis": ["gmv", "net_revenue", "aov", "on_time_delivery_rate", "avg_review_score", "repeat_purch |
+| registry lists the 8 certified KPIs, certified by amir | yes | ['aov', 'avg_review_score', 'cohort_retention', 'gmv', 'historical_clv', 'net_revenue', 'on_time_delivery_rate', 'repeat |
+| gaps table lists the declined KPIs | yes | [['conversion_rate'], ['gross_margin']] |
+| serving views exist for the gold tables | yes | [['8']] |
+| governor_deploy owns nothing outside analytics | yes | [] |
+| pytest tests/build | yes | 139 passed, 12 skipped in 33.88s |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: A second certify fails: DROP TABLE on the registry has no CASCADE, and the serving views depend on those tables. On a clone that already has commits, the prod output appended to profiles.yml is not in the branch commit, so the clean-tree check blocks certify until someone commits that file. The published sha lives only in .git/governor_published.json, so a squash merge or another clone cannot certify. The acceptance data-value scan looks only for cust-0001 and ord-0001.
+
+## Additions for D7
+D7 reads serve_<role>.governor_certified and serve_<role>.governor_gaps (serving applied with source analytics; schemas serve_analyst and serve_finance_admin). Certified columns: kpi_id, model, label, definition, grain, value_columns (text[] of numeric columns except the grain column month or cohort_month, and except months_since_first), owner, source_tier, source_ref, template_sha256, rendered_sha256, certified_by, certified_at, git_commit. Gap columns: kpi_id, missing (text[]), typical_sources (text[]), next_step. Sample: eight certified KPIs (gmv, net_revenue, aov, on_time_delivery_rate, avg_review_score, repeat_purchase_rate, cohort_retention, historical_clv) and gaps conversion_rate, gross_margin. Gold tables are analytics.kpi_<id>, owned by governor_deploy. Do not import governor.build. design.json still stores mapping as a dict. The certify commit sha is recorded only in the target's .git/governor_published.json.
+
+## D7 notes (implementer)
+- `governor.ask.certified`: the registry, gaps and column types (information_schema, as the reader role) are read through `PostgresAdapter(allowed_roles=READER_ROLES)`. The validator policy is built in code: allowlist = the certified models, schema = their serving-view columns, limits from `knowledge/shop/access.yaml`. It calls `validator._validate` directly because `validate()` takes its allowlist from access.yaml and meta.duckdb.
+- **Validator bug (outside D7 paths, for Amir):** in sqlglot 30.24, `exp.And`/`exp.Or` subclass `exp.Func`, so `_check_functions` rejects every Postgres query that has `AND` or `OR` ("function AND is not on the allowlist"). That affects the main ask path on Postgres too. The fix is one line: skip `exp.Connector` in `_check_functions`, or add `AND`/`OR` to `POSTGRES_FUNCTIONS`. Meanwhile the certified builder uses no AND: month and cohort filter as `TO_CHAR(grain, 'YYYY-MM') = 'YYYY-MM'`, year as `EXTRACT(YEAR FROM grain) = YYYY`, and several filters combine as one row comparison `(a, b) = (x, y)`.
+- Reply rules: grain month takes month, year or all; cohort_month takes cohort, year or all; total takes all only. pick value needs a single row (a month, a cohort or a total). A KPI with `months_since_first` must be given it. max returns the period with its value. sum uses SUM/COUNT of the column. If the reply's value_column is null and the KPI has only one value column, that column is used.
+- not_available covers a gap row, or a catalogue KPI (knowledge/kpis.yaml) that is neither certified nor in the gaps. Any other id is unanswerable. The API returns 503 `registry_unavailable` when the registry cannot be read. The certified path takes its FakeLLM from the `certified` key of the same `GOVERNOR_LLM` script.
+- Acceptance D7: 27/27; pytest tests/ask 147 passed, 2 skipped (the live tests skip because the acceptance run tears the test bed down before pytest).
+
