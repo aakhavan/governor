@@ -185,8 +185,9 @@ def ask_one(question: str, role: str, llm: Any, adapter: Any) -> dict:
 
 
 def evaluate(set_path: str | Path, role: str, answerer: Answerer, meter: MeteredLLM | None = None, *,
-             llm_label: str = "") -> dict:
-    """Run every question through ``answerer`` and return the report."""
+             llm_label: str = "", raw: Any = None) -> dict:
+    """Run every question through ``answerer`` and return the report; with ``raw`` (person-level values, as the
+    red team samples them) every string in it is redacted against them."""
     questions = load_set(set_path, "questions")
     items: list[dict] = []
     for q in questions:
@@ -203,7 +204,7 @@ def evaluate(set_path: str | Path, role: str, answerer: Answerer, meter: Metered
             "cost_usd": cost, "cost_unknown_calls": unknown, "seconds": round(time.perf_counter() - t0, 2),
         })
     total, unknown = cost_of(meter.usage) if meter else (None, 0)
-    return {
+    report = {
         "kind": KIND,
         "set_file": str(set_path),
         "set_sha256": file_sha256(set_path),
@@ -214,6 +215,11 @@ def evaluate(set_path: str | Path, role: str, answerer: Answerer, meter: Metered
         "summary": summarise(items, unknown, total),
         "total_cost_usd": total,
     }
+    if raw is None:
+        return report
+    from governor.eval.redteam import redact_report  # redteam imports this module; import late
+
+    return redact_report(report, raw)
 
 
 def write_report(report: dict, out: Path) -> None:
@@ -232,8 +238,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         meter, label = make_metered(args.llm)
         adapter = certified.default_adapter()
+        from governor.eval.redteam import sample_raw
+
+        raw = sample_raw()
         report = evaluate(args.set_path, args.role, lambda q: ask_one(q, args.role, meter, adapter), meter,
-                          llm_label=label)
+                          llm_label=label, raw=raw)
     except Exception as error:  # noqa: BLE001
         print(f"certified eval failed: {type(error).__name__}: {str(error).splitlines()[0][:300]}", file=sys.stderr)
         return 1

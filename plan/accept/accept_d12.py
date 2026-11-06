@@ -1,5 +1,12 @@
 """D12 acceptance: clean-up fixes from the D6 and D8 gate reviews, each with its named test."""
 import sys
+import os
+# Pin every test-bed setting to the (empty) acceptance port so live tests skip instead of running against
+# whatever database the calling shell points at (the dev test bed with real Olist data, 6 Nov 2026).
+for _k, _v in {"GOVERNOR_PG_PORT": "55433", "GOVERNOR_PG_HOST": "localhost"}.items():
+    os.environ[_k] = _v
+for _k in ("GOVERNOR_PG_DSN", "GOVERNOR_PG_ADMIN_DSN", "GOVERNOR_BUILD_DSN", "GOVERNOR_BUILD_PASSWORD", "GOVERNOR_DEPLOY_PASSWORD"):
+    os.environ.pop(_k, None)
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))

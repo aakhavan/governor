@@ -98,6 +98,40 @@ def test_certify_refuses_before_the_merge(built):
     assert cert.merge_check(target) == (out["commit"], None)
 
 
+def test_certify_registry_written_after_serving(built, monkeypatch):
+    target, _ = built
+    out = pub.publish(target)
+    git(target, "checkout", "main")
+    git(target, "merge", "--no-ff", "-m", "merge", out["branch"])
+    monkeypatch.setenv("GOVERNOR_PG_ADMIN_DSN", "postgresql://unused")
+    monkeypatch.delenv("GOVERNOR_PII_SALT", raising=False)
+    order = []
+    ok = cert.DbtResult(True, 0, [{"unique_id": "model.shop.kpi_gmv", "status": "success"}], "")
+    monkeypatch.setattr(cert, "prepare_registry", lambda dsn: order.append("prepare") or "env")
+    monkeypatch.setattr(cert, "write_registry",
+                        lambda *a, **kw: order.append("write") or ([{"kpi_id": "gmv"}], []))
+
+    def failing_serve(dsn):
+        order.append("serve")
+        raise RuntimeError("serving failed")
+
+    monkeypatch.setattr(cert, "serve", failing_serve)
+    with pytest.raises(RuntimeError, match="serving failed"):
+        cert.certify(target, "amir", dbt_runner=lambda *a, **kw: ok)
+    assert order == ["prepare", "serve"]  # nothing certified when serving fails
+    monkeypatch.setattr(cert, "serve", lambda dsn: order.append("serve") or {"views": 2})
+    order.clear()
+    assert cert.certify(target, "amir", dbt_runner=lambda *a, **kw: ok)["status"] == "certified"
+    assert order == ["prepare", "serve", "write"]
+
+
+def test_empty_salt_rejected_early(built, monkeypatch):
+    target, _ = built
+    monkeypatch.setenv("GOVERNOR_PII_SALT", "")
+    with pytest.raises(cert.CertifyError, match="GOVERNOR_PII_SALT"):
+        cert.certify(target, "amir", dbt_runner=_no_dbt)
+
+
 def _no_dbt(*a, **kw):
     raise AssertionError("dbt must not run before the merge")
 

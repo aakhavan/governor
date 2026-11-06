@@ -242,6 +242,17 @@ def count_tests(results: list[dict]) -> tuple[int, int]:
     return passed, failed
 
 
+def blueprint_breakdown(findings: Any) -> dict[str, dict[str, int]]:
+    """``{rule: {severity: count}}`` for blueprint findings (dicts or objects); counts only, no file contents."""
+    out: dict[str, dict[str, int]] = {}
+    for f in findings or []:
+        rule, severity = ((f.get("rule"), f.get("severity")) if isinstance(f, dict)
+                          else (getattr(f, "rule", None), getattr(f, "severity", None)))
+        by = out.setdefault(str(rule), {})
+        by[str(severity)] = by.get(str(severity), 0) + 1
+    return {r: dict(sorted(s.items())) for r, s in sorted(out.items())}
+
+
 def _last_results(target: Path) -> list[dict]:
     path = Path(target) / "target" / "run_results.json"
     try:
@@ -289,6 +300,7 @@ def run_agent(llm: BuildLLM, target: Path, work: Path, hooks: Hooks, catalogue: 
         "tests_passed": passed,
         "tests_failed": failed,
         "blueprint_high": sum((f.get("severity") == "high") for f in values.get("blueprint") or []),
+        "blueprint_findings": blueprint_breakdown(values.get("blueprint")),
         "kpi_decisions_correct": kpi_decisions(decisions, catalogue),
     }
 
@@ -367,7 +379,7 @@ def run_baseline(llm: BuildLLM, target: Path, hooks: Hooks, catalogue: KpiCatalo
     profile = hooks.profiler(str(hooks.policy))
     out: dict[str, Any] = {"approved_by": None, "valid_design_first_try": None, "validation_repairs": None,
                            "dbt_repairs": 0, "escalated": False, "tests_passed": 0, "tests_failed": 0,
-                           "blueprint_high": None, "kpi_decisions_correct": 0, "files": [], "refused_files": []}
+                           "blueprint_high": None, "blueprint_findings": None, "kpi_decisions_correct": 0, "files": [], "refused_files": []}
     try:
         reply = llm.structured("baseline", baseline_prompt(profile, catalogue, blueprint), BaselineReply, role="plan")
     except LLMOutputError as e:
@@ -380,6 +392,7 @@ def run_baseline(llm: BuildLLM, target: Path, hooks: Hooks, catalogue: KpiCatalo
     try:
         found = gold_mod.check_project(target, catalogue, str(hooks.policy), blueprint=blueprint)
         out["blueprint_high"] = len(gold_mod.high(found))
+        out["blueprint_findings"] = blueprint_breakdown(found)
     except Exception as e:  # noqa: BLE001 - a measurement only; the baseline is never validated
         out["blueprint_error"] = _first_line(e)
     res = hooks.dbt_runner(target, ["build"])  # once, never repaired
@@ -418,7 +431,14 @@ def summarise(runs: list[dict], gold_total: int) -> dict:
     for r in runs:
         statuses[r["status"]] = statuses.get(r["status"], 0) + 1
     costs = [r.get("cost_usd") for r in runs]
+    by_rule: dict[str, dict[str, int]] = {}
+    for r in runs:
+        for rule, sev in (r.get("blueprint_findings") or {}).items():
+            tot = by_rule.setdefault(rule, {})
+            for s, n in sev.items():
+                tot[s] = tot.get(s, 0) + n
     return {
+        "blueprint_findings_by_rule": {k: dict(sorted(v.items())) for k, v in sorted(by_rule.items())},
         "runs": len(runs),
         "statuses": statuses,
         "built_rate": _rate([r["status"] == "built" for r in runs]),

@@ -5,9 +5,11 @@
 1. refuses (``not_merged``) unless the published commit (recorded by ``publish``) is an ancestor of ``main``, the
    working tree is on ``main`` and clean;
 2. runs ``dbt build --target prod`` as ``governor_deploy`` (schema ``analytics``);
-3. as the admin (``GOVERNOR_PG_ADMIN_DSN``) replaces ``analytics.governor_certified`` and ``analytics.governor_gaps``
-   in one transaction;
-4. runs the serving apply for ``analytics`` with the shop policy and access files.
+3. as the admin (``GOVERNOR_PG_ADMIN_DSN``) creates ``analytics.governor_certified`` and ``analytics.governor_gaps``
+   when missing and resolves the salt;
+4. runs the serving apply for ``analytics`` with the shop policy and access files;
+5. only then replaces the rows of both registry tables in one transaction, so a serving failure never leaves
+   newly certified rows without views.
 
 Registry values come from the merged files (the ``meta`` of ``models/marts/*/_*.yml``, ``governor/build.json``) and
 the catalogue (label, grain). ``value_columns`` are the numeric columns of the deployed KPI table other than the
@@ -127,11 +129,16 @@ def registry_rows(target: Path, build: dict, conn: psycopg.Connection, *, by: st
     return certified, gaps
 
 
-def _replace(conn: psycopg.Connection, table: str, ddl: str, rows: list[dict]) -> None:
+def _ensure(conn: psycopg.Connection, table: str, ddl: str) -> None:
+    """Create the registry table when missing (never dropped: the serving views depend on it)."""
     ident = sql.Identifier(SCHEMA, table)
-    conn.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(ident))
-    conn.execute(sql.SQL(ddl).format(ident))
+    conn.execute(sql.SQL(ddl.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1)).format(ident))
     conn.execute(sql.SQL("REVOKE ALL ON TABLE {} FROM PUBLIC").format(ident))
+
+
+def _fill(conn: psycopg.Connection, table: str, rows: list[dict]) -> None:
+    ident = sql.Identifier(SCHEMA, table)
+    conn.execute(sql.SQL("DELETE FROM {}").format(ident))
     if not rows:
         return
     cols = list(rows[0])
@@ -153,16 +160,27 @@ def _salt(conn: psycopg.Connection) -> tuple[str, str]:
     return secrets.token_hex(16), "generated"
 
 
-def write_registry(target: Path, build: dict, *, by: str, commit: str, dsn: str) -> tuple[list[dict], list[dict], str]:
+def prepare_registry(dsn: str) -> str:
+    """Create both registry tables when missing (so the serving views cover them) and resolve the salt.
+    Returns where the salt came from; the salt itself goes to this process's environment only."""
+    with psycopg.connect(dsn, autocommit=False) as conn:
+        _ensure(conn, "governor_certified", CERTIFIED_DDL)
+        _ensure(conn, "governor_gaps", GAPS_DDL)
+        salt, salt_from = _salt(conn)
+        conn.commit()
+    os.environ.setdefault("GOVERNOR_PII_SALT", salt)
+    return salt_from
+
+
+def write_registry(target: Path, build: dict, *, by: str, commit: str, dsn: str) -> tuple[list[dict], list[dict]]:
+    """Replace the rows of both registry tables in one transaction (after the serving views exist)."""
     with psycopg.connect(dsn, autocommit=False) as conn:
         certified, gaps = registry_rows(target, build, conn, by=by, commit=commit,
                                         certified_at=dt.datetime.now(dt.timezone.utc))
-        _replace(conn, "governor_certified", CERTIFIED_DDL, certified)
-        _replace(conn, "governor_gaps", GAPS_DDL, gaps)
-        salt, salt_from = _salt(conn)
+        _fill(conn, "governor_certified", certified)
+        _fill(conn, "governor_gaps", gaps)
         conn.commit()
-    os.environ.setdefault("GOVERNOR_PII_SALT", salt)  # this process only: the serving apply reads it from here
-    return certified, gaps, salt_from
+    return certified, gaps
 
 
 def serve(dsn: str, policy: Path = DEFAULT_POLICY, access: Path = DEFAULT_ACCESS) -> dict:
@@ -185,6 +203,8 @@ def certify(target: str | Path, by: str, *, dbt_runner: Callable[..., DbtResult]
     by = (by or "").strip()
     if not by:
         raise CertifyError("certify needs --by <name>")
+    if os.environ.get("GOVERNOR_PII_SALT") == "":
+        raise CertifyError("GOVERNOR_PII_SALT is set but empty; unset it or give it a value")
     commit, reason = merge_check(target)
     if reason:
         return {"status": "not_merged", "reason": reason, "commit": commit}
@@ -201,8 +221,9 @@ def certify(target: str | Path, by: str, *, dbt_runner: Callable[..., DbtResult]
     tests = sum(1 for r in res.results if str(r.get("unique_id") or "").startswith("test.")
                 and (r.get("status") or "").lower() == "pass")
 
-    certified, gaps, salt_from = write_registry(target, build, by=by, commit=commit, dsn=dsn)
-    served = serve(dsn)
+    salt_from = prepare_registry(dsn)
+    served = serve(dsn)  # a serving failure raises here, before any certified row is written
+    certified, gaps = write_registry(target, build, by=by, commit=commit, dsn=dsn)
     kpis = [c["kpi_id"] for c in certified]
     emit("certified", thread_id=build.get("thread_id"), by=by, commit=commit, kpis=kpis,
          gaps=[g["kpi_id"] for g in gaps], tests_passed=tests, views=served.get("views"),

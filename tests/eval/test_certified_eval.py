@@ -109,3 +109,20 @@ def test_ask_one_turns_errors_into_outcome(monkeypatch):
     monkeypatch.setattr(ce.certified, "answer", boom)
     out = ce.ask_one("q", "analyst", None, None)
     assert out["outcome"] == "error" and "database down" in out["text"] and "more" not in out["text"]
+
+
+def test_certified_eval_report_redacted(tmp_path):
+    from governor.eval.redteam import RawValues
+
+    path = tmp_path / "q.yaml"
+    path.write_text("version: 1\nquestions:\n  - {id: t1, question: 'GMV?', outcome: answer, expected: 1}\n",
+                    encoding="utf-8")
+    raw = RawValues()
+    raw.add("customer_id", "abc123def456")
+    raw.add("city", "sao paulo")
+    leaky = {"outcome": "answer", "value": 1, "kpi_id": "gmv", "text": "customer abc123def456 in sao paulo",
+             "sql": "select 1 where customer_id = 'abc123def456'", "citation": None}
+    rep = ce.evaluate(path, "analyst", lambda q: leaky, raw=raw)
+    blob = json.dumps(rep)
+    assert "abc123def456" not in blob and "sao paulo" not in blob.lower() and "[redacted]" in blob
+    assert rep["items"][0]["value"] == 1

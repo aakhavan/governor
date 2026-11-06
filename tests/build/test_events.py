@@ -48,11 +48,6 @@ def test_unwritable_log_does_not_raise(monkeypatch, tmp_path):
     assert events.emit("built", thread_id="t")["kind"] == "built"
 
 
-def test_nested_values_are_flattened_to_text():
-    ev = events.emit("validated", thread_id="t", codes=["A", "B"], other={"k": "v" * 1000})
-    assert ev["codes"] == ["A", "B"] and isinstance(ev["other"], str) and len(ev["other"]) <= 300
-
-
 def test_graph_reports_its_stages_without_data_values(tmp_path, profile, good):
     llm = FakeBuildLLM({"propose": [json.dumps(good)]})
     out = graph.start(tmp_path / "target", "shop", llm, profile=profile, checkpoints=tmp_path / "cp.sqlite")
@@ -67,3 +62,11 @@ def test_graph_reports_its_stages_without_data_values(tmp_path, profile, good):
     assert "use payments" not in text  # the reviewer's note is not an event value
     for col in ("customer_unique_id", "order_id"):
         assert col not in text
+
+
+def test_events_drop_nested_values():
+    ev = events.emit("built", thread_id="t", n=3, names=["a", "b"], nested={"x": 1},
+                     rows=[{"id": "c1"}, {"id": "c2"}], mixed=["a", {"id": 1}])
+    assert ev["n"] == 3 and ev["names"] == ["a", "b"]
+    assert not {"nested", "rows", "mixed"} & set(ev)
+    assert "c1" not in events.events_path().read_text(encoding="utf-8")

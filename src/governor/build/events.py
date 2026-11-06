@@ -5,7 +5,7 @@ and calls each notifier named in ``GOVERNOR_BUILD_NOTIFIERS`` (comma-separated `
 event dict. A failing notifier, or a log file that cannot be written, is logged and never stops a build.
 
 Events carry counts, names, codes, status, cost and seconds; never data values. Callers pass only those. As a
-guard, values are kept only when they are scalars or flat lists of scalars, and strings are cut at 300 characters.
+guard, values are kept only when they are scalars or flat lists of scalars (nested values are dropped), and strings are cut at 300 characters.
 """
 
 from __future__ import annotations
@@ -42,9 +42,19 @@ def _scalar(v: Any) -> Any:
     return str(v)[:_MAX_TEXT]
 
 
+_DROP = object()
+
+
+def _is_scalar(v: Any) -> bool:
+    return v is None or isinstance(v, (str, bool, int, float))
+
+
 def _clean(v: Any) -> Any:
+    """Scalars and flat lists of scalars are kept; anything nested (dicts, lists of dicts) is dropped."""
     if isinstance(v, (list, tuple, set)):
-        return [_scalar(x) for x in v]
+        return [_scalar(x) for x in v] if all(_is_scalar(x) for x in v) else _DROP
+    if isinstance(v, dict):
+        return _DROP
     return _scalar(v)
 
 
@@ -69,7 +79,8 @@ def emit(kind: str, **data: Any) -> dict:
         log.warning("unknown build event kind %r", kind)
     event: dict[str, Any] = {"ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
                              "thread_id": _scalar(data.pop("thread_id", None)), "kind": kind}
-    event.update({k: _clean(v) for k, v in data.items()})
+    cleaned = {k: _clean(v) for k, v in data.items()}
+    event.update({k: v for k, v in cleaned.items() if v is not _DROP})
     try:
         path = events_path()
         path.parent.mkdir(parents=True, exist_ok=True)

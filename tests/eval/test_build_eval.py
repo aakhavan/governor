@@ -241,6 +241,24 @@ def test_a_broken_run_is_recorded_and_the_loop_goes_on(tmp_path, profile):
     assert rep["summary"]["statuses"] == {"error": 2}
 
 
+def test_build_eval_blueprint_breakdown():
+    found = [{"rule": "L2", "severity": "high"}, {"rule": "L2", "severity": "high"}, {"rule": "L5", "severity": "low"}]
+    assert be.blueprint_breakdown(found) == {"L2": {"high": 2}, "L5": {"low": 1}}
+    runs = [{"status": "built", "blueprint_findings": {"L2": {"high": 1}}},
+            {"status": "built", "blueprint_findings": {"L2": {"high": 2}, "L5": {"low": 1}}},
+            {"status": "error"}]
+    assert be.summarise(runs, 0)["blueprint_findings_by_rule"] == {"L2": {"high": 3}, "L5": {"low": 1}}
+
+
+def test_build_eval_valid_first_try_recorded(tmp_path, profile):
+    hooks, _, _ = _hooks(profile, set())
+    llm = FakeBuildLLM({"propose": [json.dumps(DESIGN)], "intermediate": GOOD_SILVER})
+    rep = be.evaluate("agent", 1, SAMPLE_GOLD, llm, work=tmp_path / "w", hooks=hooks)
+    run = rep["runs"][0]
+    assert run["valid_design_first_try"] is True and isinstance(run["blueprint_findings"], dict)
+    assert rep["summary"]["valid_design_first_try_rate"] == 1.0
+
+
 def test_cli_rejects_unknown_system(capsys):
     with pytest.raises(SystemExit):
         be.main(["--system", "other", "--gold", str(SAMPLE_GOLD), "--out", "x.json"])

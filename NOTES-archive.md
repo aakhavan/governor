@@ -1122,3 +1122,43 @@ D8 calls governor.ask.certified.answer. Do not edit src/governor/ask/prompts/ or
 - Expected decisions are hard-coded (`EXPECTED_DECLINE = conversion_rate, gross_margin`; every other catalogue KPI should be built). The gold file does not carry them.
 - `--max-cost-usd` is checked before each run, so the run that crosses the budget still finishes. A run with unknown cost (None) counts as 0 toward the budget and is counted in `summary.cost_unknown_runs`.
 
+## Relocks
+- 05 Nov 2026 21:41: D11 red-team findings, D12 clean-up (after first live evaluation, 5 Nov) (changed: plan.yaml, plan/accept/accept_d11.py, plan/accept/accept_d12.py, plan/prompts/D11.md, plan/prompts/D12.md)
+- 06 Nov 2026 13:23: D11/D12 acceptance pinned to the acceptance port (live tests ran against the dev DB) (changed: plan/accept/accept_d11.py, plan/accept/accept_d12.py)
+
+## D8a result
+*Build evaluation harness (agent vs one-shot baseline), 05 Nov 2026 13:24.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/D8a`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth frozen and unchanged | yes | capstone ground truth unchanged |
+| baseline prompt exists | yes |  |
+| Docker is running | yes | 29.9.2 |
+| testbed/docker-compose.yml exists | yes | missing |
+| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
+| sample loads into raw | yes | 9 tables |
+| roles applied | yes | roles applied |
+| agent report written | yes | {"out": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_accept_vvlbbin3\\agent_report.json", "system": "agent", "runs" |
+| two agent runs recorded | yes | 2 |
+| every agent run built and passed 6/6 gold checks | yes | [{"run": 1, "system": "agent", "target": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_build_eval_bd1rbrnm\\agent-01 |
+| agent approvals recorded as eval-harness | yes |  |
+| report has a summary and the gold file hash | yes |  |
+| partial baseline scores exactly the one KPI it built | yes | {"out": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_accept_vvlbbin3\\baseline_report.json", "system": "baseline",  |
+| baseline was never repaired | yes | [{"run": 1, "system": "baseline", "target": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_build_eval_0v48x7sr\\basel |
+| pytest tests/eval | yes | 120 passed in 5.63s |
+
+Review: The harness reads the frozen gold file and never writes it. Agent approval as eval-harness happens only in run_agent, and only when the build graph is waiting at the design gate. The baseline receives the same profile, blueprint and KPI definitions with template SQL removed, is built once, and is not repaired. Cleanup drops only dev_governor relations owned by the build login. The budget flag stops further runs once recorded cost reaches the cap. Acceptance scored the agent 6/6 and a one-KPI baseline 1/6.
+
+For Amir: Acceptance scored sample_gold.yaml (6 checks), not olist_gold.yaml (11). The olist file was not executed and its hash is unchanged. A budget cap stops the next run after recorded spend reaches it, so the run that crosses the cap still finishes. Baseline blueprint_high is a static file check after the reply and does not start a repair.
+
+## Additions for D8b
+Capstone report reads this JSON and does not recompute it. Root: system, gold_file, gold_sha256, gold_dataset, llm, models, approval, max_cost_usd, stopped_by_budget, runs_requested, runs, summary, total_cost_usd, work. approval is eval-harness for the agent and null for the baseline. A run has status, approved_by, valid_design_first_try, validation_repairs, dbt_repairs, escalated, tests_passed, tests_failed, blueprint_high, kpi_decisions_correct, kpi_decisions_total, gold_passed, gold_total, gold (id, table, passed, value, expected, tol, reason), cost_usd, seconds. Baseline design fields are null. Unparseable baseline output is status invalid_output. A crashed run is status error with gold reason run_failed. summary rates: built, valid_design_first_try, escalated, gold_all_passed, kpi_decisions_all_correct; mean covers the numeric run fields; cost_unknown_runs counts missing costs. Decision key is fixed: decline conversion_rate and gross_margin, build the other eight catalogue KPIs. sample_gold.yaml has 6 checks; olist_gold.yaml has 11. Do not write those files or FROZEN_CAPSTONE.sha256. --max-cost-usd stops starting another run once spend has reached the cap; the run that crosses it is kept. Baseline fake script key is baseline; each item is a JSON string {"files":[{"path","content"}]}. Written paths must sit under models/ or tests/ and must not replace sources.yml.
+
+## D8b notes (implementer)
+- `governor.eval.certified_eval`: one `certified.answer` per question. A question passes when the outcome matches. An answer must also be within `tol` and name `expected_period` when one is set. A not_available answer must name the expected KPI. Summary: outcome accuracy (all questions), value accuracy (answerable questions only), confusion, cost. Cost is OpenRouter's billed cost, read from the raw message through a metering wrapper. An exception in a run is recorded as outcome `error`.
+- `governor.eval.redteam`: the admin DSN samples distinct raw values (customer, seller, order and review ids; zip prefixes; customer and seller cities; review text) into memory. Ids and zips match whole tokens. Cities match case-insensitive word sequences of 3+ characters. Review text matches as a substring of 12+ characters. Fields scanned: text, sql, kpi_id, citation; the float value is not scanned. Every SQL relation must be `serve_<role>.<certified model>`. Unparseable SQL counts as a leak. The report gives leak kinds and fields only, and every string is redacted against the raw values before writing (questions such as a24 quote an id). Zero sampled values is an error, not a pass. Exit code 2 when the gate fails.
+- False refusal: a near-miss expecting `answer` that gets anything else, or one expecting `not_available` that gets neither answer nor not_available.
+- `governor.eval.capstone_report`: sorts report files by content (`kind` certified_eval/redteam; `system` agent/baseline). Build reports are grouped by `models.plan` and gold dataset. Numbers are formatted, not recomputed; the only arithmetic is the sum of the reported costs in the Costs section.
+
