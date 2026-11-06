@@ -1240,3 +1240,20 @@ Red-team fixes from the 5 Nov live run. accept_d11: 5/5 (tests/eval 150 passed; 
 - certified: `drop_irrelevant_filters` removes months_since_first on a KPI without that column and adds a sentence to the answer (build_sql itself still raises, for direct callers). `ADDITIVE_KPIS = {gmv, net_revenue}`; any other KPI with pick value or sum over a period with several rows answers per month (or cohort month) in grain order, value=None, plus one sentence on why there is no single figure. pick max is unchanged.
 - For Amir: additivity is a code constant, not a catalogue field; a new additive KPI needs adding there. Running tests/ask against the dev test bed (real Olist) fails test_live_gmv_for_the_sample_month because there is no 2026-01 row (data-dependent, not from D11). The prompt still says "pick sum only for additive amounts"; not changed (outside D11 paths).
 
+## D11 result
+*Red-team findings (first live run, 5 Nov), 06 Nov 2026 14:29.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/D11`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| pytest tests/eval | yes | 150 passed in 8.67s |
+| required tests present | yes | 2 found |
+| pytest tests/ask | yes | 149 passed, 2 skipped in 50.53s |
+| required tests present | yes | 2 found |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: A raw city or zip that is also a whole word of a label, definition, or source URL (city sales, zip 2014) is not a leak in any sentence. Longer names such as Sales Oliveira still leak. Those exempt values are still redacted in the written report. Additivity is the hardcoded pair gmv and net_revenue, so a new amount KPI is listed period by period until it is added to ADDITIVE_KPIS. The router prompt was left unchanged.
+

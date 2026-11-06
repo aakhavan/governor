@@ -23,6 +23,7 @@ dependencies = [           # G1 adds the foundation deps; later steps add theirs
     "mcp>=1.10,<2",
     "psycopg[binary]",
     "dbt-postgres",
+    "slack-bolt>=1.21",
 ]
 
 [dependency-groups]

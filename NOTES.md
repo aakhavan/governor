@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-D10 column descriptions are in the build. describe applies catalogue text for gold, a lineage and profile sentence for staging, and same-name inheritance for intermediate, then one write-model call per model for columns still empty (evidence only, replies trimmed to 200 characters). The graph writes those descriptions into the silver and marts yml, stores docs_coverage on governor/build.json, and shows it in governor/pr.md. SQL generation is unchanged. On the sample design rules 1-3 cover every column, so a real build makes no describe call. D11 red-team behaviour is unchanged: certified vocabulary is exempt only as whole words, dropped filters are stated, and only gmv and net_revenue are summed across periods.
+D9 is in src/governor/integrations/slack: a Socket Mode app with /governor, an approver allowlist, a design-gate card and a build notifier. slack-bolt 1.30.0. Tokens and settings come from the environment. Message state is GOVERNOR_STATE_DIR/slack_messages.json. Builds report to Slack when GOVERNOR_BUILD_NOTIFIERS includes governor.integrations.slack.notifier:notify. governor.build does not import Slack. tests/integrations has the seven offline Slack tests. Certify stays a terminal command.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,23 +20,6 @@ D10 column descriptions are in the build. describe applies catalogue text for go
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## D11 result
-*Red-team findings (first live run, 5 Nov), 06 Nov 2026 14:29.*
-
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/D11`.
-
-| check | ok | detail |
-|---|---|---|
-| capstone ground truth unchanged | yes | capstone ground truth unchanged |
-| pytest tests/eval | yes | 150 passed in 8.67s |
-| required tests present | yes | 2 found |
-| pytest tests/ask | yes | 149 passed, 2 skipped in 50.53s |
-| required tests present | yes | 2 found |
-
-Review: cursor-grok: pass | claude-tc-fable: pass
-
-For Amir: A raw city or zip that is also a whole word of a label, definition, or source URL (city sales, zip 2014) is not a leak in any sentence. Longer names such as Sales Oliveira still leak. Those exempt values are still redacted in the written report. Additivity is the hardcoded pair gmv and net_revenue, so a new amount KPI is listed period by period until it is added to ADDITIVE_KPIS. The router prompt was left unchanged.
 
 ## D10 result
 *Column descriptions from lineage, 06 Nov 2026 15:12.*
@@ -57,3 +40,29 @@ For Amir: The sample design never calls the write model for descriptions; rule 4
 
 ## Additions for D9
 docs.describe runs in graph write_silver before any SQL is written and stores state docs (model to column to description). silver.write_silver(docs=) and gold.write_gold(docs=) put those strings on column descriptions in _staging.yml, _intermediate.yml and models/marts/<domain>/_<domain>.yml. not_null stays on the grain only. governor/build.json docs_coverage is {columns, described, share}; render_pr adds one Column descriptions line pointing at the yml. Fake script key describe maps each model to a list of JSON objects of column to description, on the write role; a non-JSON reply leaves those columns empty. On the sample design rules 1-3 fill every column, so no describe call is made. Profile min and max must not be copied into any new payload. Do not change staging_sql or gold_sql.
+
+## D9 result
+*Slack app, 06 Nov 2026 16:47.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 2 fix loop(s); branch `factory/D9`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| slack-bolt is a dependency | yes |  |
+| src/governor/integrations/slack/app.py exists | yes | missing |
+| src/governor/integrations/slack/blocks.py exists | yes | missing |
+| src/governor/integrations/slack/notifier.py exists | yes | missing |
+| docs/slack.md exists | yes | missing |
+| governor.build never imports Slack | yes |  |
+| Slack modules import without tokens | yes |  |
+| pytest tests/integrations | yes | 7 passed in 5.33s |
+| required tests present | yes | 7 found |
+| pytest tests/build | yes | 146 passed, 12 skipped in 40.96s |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: Slack-started publish posts the PR URL from publish()'s return. A terminal publish only says a PR was opened, because the published event has pr: true and no pr_url. An approver missing from GOVERNOR_SLACK_NAMES is stored as their Slack user id. An escalation with no model name can omit the error, because silver_done emits before that checkpoint is written. design.md is uploaded whole, so mapping SQL is in the file; the card omits mappings. Tests use a fake Web API client and do not open Socket Mode.
+
+## Additions for the next plan
+D10 fills column descriptions. Keep them free of data values: the Slack card prints decline reasons and validation problems (after safe_text), and the notifier uploads governor/design.md, so new text in the proposal, findings or that report becomes a Slack payload. Do not import governor.integrations from governor.build. Progress events stay counts, names, codes, status and cost. The checklist keys are the existing event kinds. docs_coverage is not shown in Slack. Descriptions belong in the yml files and build.json, as section 16 says.
