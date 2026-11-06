@@ -1224,3 +1224,19 @@ certified_eval.main calls sample_raw (needs GOVERNOR_PG_ADMIN_DSN and rows in ra
 
 build_eval blueprint_findings is {rule: {severity: count}} with no target or problem text. summary.blueprint_findings_by_rule sums those counts. valid_design_first_try is true only when an agent run is not design_invalid, a proposal is present, and state.repairs is 0. It stays null for the baseline and for crashes. The rate ignores nulls.
 
+## Relocks
+- 06 Nov 2026 14:52: batch 2c: D10 descriptions, D9 Slack (agreed 5-6 Nov) (changed: plan.yaml, plan/accept/accept_d10.py, plan/accept/accept_d9.py, plan/prompts/D10.md, plan/prompts/D9.md)
+
+## D10 result (implementer)
+Column descriptions from lineage (batch2c section 16). accept_d10: 5/5 (tests/build 146 passed, 12 skipped).
+- `build/docs.py`: `describe(design, profile, catalogue, policy, llm)` -> model -> column -> text. Rule 1: gold columns are read from the rendered template's final SELECT (grain, the KPI value, companions such as clv_90d), each with label and definition. Rule 2: staging sentence (raw table.column, cast / empty-as-null / renamed, type, key, null band, PII note from `pii` or policy tag); the design's own text leads when present. Rule 3: intermediate inherits from the first ref that has the name (the design's own text wins). Rule 4: one `describe` call per model with empty columns (prompt `prompts/describe.md`, no profile min/max), reply JSON, trimmed to 200 at a word; a bad reply leaves the column empty. `docs.coverage(target)` reads the written yml.
+- Wiring: graph `write_silver` runs `describe` first (state `docs`), passes it to `silver.write_silver(docs=)` and `gold.write_gold(docs=)`. `write_gold` without docs still describes every output column from the catalogue. `build.json` gains `docs_coverage` {columns, described, share}; `pr.md` shows "Column descriptions: N% (k of n columns)". publish.py changed for that line.
+- Marts yml now lists every KPI output column (not only the grain); `not_null` stays on the grain. test_gold's yml assertion was updated to match.
+- For Amir: test_live_sample_build_matches_independent_values fails against the dev test bed because raw holds the full Olist data (months 2016-18 against the sample's 2026-01). That comes from the data, not from D10, and it skips under the acceptance port. With the sample design, rules 1 to 3 cover every column, so no model call is made.
+
+## D11 result (implementer)
+Red-team fixes from the 5 Nov live run. accept_d11: 5/5 (tests/eval 150 passed; tests/ask 149 passed, 2 skipped).
+- redteam: `RawValues.without(vocabulary)` drops sampled values that occur as whole words in `catalogue_vocabulary(registry)` (KPI id, model, label, definition, grain, value columns, owner, tier, source ref, certified_by; gap kpi id, missing, typical sources, next step). Scoring uses the filtered set; redaction still uses every sampled value. Ids and zips now match case-insensitively. Report gains `raw_values_ignored_as_vocabulary` (a count). main reads the registry once for allowlist and vocabulary.
+- certified: `drop_irrelevant_filters` removes months_since_first on a KPI without that column and adds a sentence to the answer (build_sql itself still raises, for direct callers). `ADDITIVE_KPIS = {gmv, net_revenue}`; any other KPI with pick value or sum over a period with several rows answers per month (or cohort month) in grain order, value=None, plus one sentence on why there is no single figure. pick max is unchanged.
+- For Amir: additivity is a code constant, not a catalogue field; a new additive KPI needs adding there. Running tests/ask against the dev test bed (real Olist) fails test_live_gmv_for_the_sample_month because there is no 2026-01 row (data-dependent, not from D11). The prompt still says "pick sum only for additive amounts"; not changed (outside D11 paths).
+

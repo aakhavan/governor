@@ -8,7 +8,8 @@ Two roles: ``plan`` (``GOVERNOR_BUILD_PLAN_MODEL``: the design proposal, the gap
 
     {"propose": ["<proposal json>", ...],
      "intermediate": {"<model>": ["<sql>", ...]},
-     "repair": {"<model>": ["<sql>", ...]}}
+     "repair": {"<model>": ["<sql>", ...]},
+     "describe": {"<model>": ["<json {column: description}>", ...]}}   # batch2c section 16
 
 Each list is consumed in order and its last reply repeats (the same pattern as ask's ``llm_testing`` module; build
 does not import ask).

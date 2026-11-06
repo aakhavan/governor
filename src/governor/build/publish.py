@@ -140,6 +140,15 @@ def _design(target: Path) -> dict:
         return {}
 
 
+def _docs_line(cov: dict | None) -> str:
+    """Column-description coverage (batch2c section 16): the reviewer reviews the descriptions with the code."""
+    if not isinstance(cov, dict):
+        return "- Column descriptions: (not recorded)"
+    share = float(cov.get("share") or 0.0)
+    return (f"- Column descriptions: {share:.0%} ({cov.get('described', 0)} of {cov.get('columns', 0)} columns; "
+            "review them in the yml files)")
+
+
 def render_pr(target: Path, build: dict, branch: str) -> str:
     target = Path(target)
     id8 = str(build.get("thread_id") or "")[:8]
@@ -158,7 +167,8 @@ def render_pr(target: Path, build: dict, branch: str) -> str:
              f"{len(kpis)} KPIs and {len(gaps)} gaps. Build thread `{build.get('thread_id')}`, branch `{branch}`.", "",
              f"- Design approved by: **{build.get('approved_by') or '(not recorded)'}**",
              f"- dbt tests passed: {tests.get('total', 0)} (silver {tests.get('silver', 0)}, gold {tests.get('gold', 0)})",
-             f"- SQL repairs: {build.get('repairs', 0)}", "",
+             f"- SQL repairs: {build.get('repairs', 0)}",
+             _docs_line(build.get("docs_coverage")), "",
              "## Silver models", ""]
     lines += [f"- `{name}` ({folders.get(name) or 'silver'})" for name in silver_models] or ["(none)"]
     lines += ["", "## KPIs", "", "| KPI | model | domain | owner | source tier | source |", "|---|---|---|---|---|---|"]

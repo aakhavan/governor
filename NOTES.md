@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-D11 red-team fixes are in place. Leak scoring ignores a sampled raw value only when that value is a whole word of the certified registry text, matched case-insensitively. Other person-level values, and SQL outside the serving allowlist, still count, and the report still redacts every sampled value. Certified answers drop months_since_first when the chosen KPI has no such column and say so in the answer. Every KPI except gmv and net_revenue, asked over several periods, is answered as a per-period list filled from the result rows, with no sum or average. gmv and net_revenue still sum. Capstone ground truth is unchanged.
+D10 column descriptions are in the build. describe applies catalogue text for gold, a lineage and profile sentence for staging, and same-name inheritance for intermediate, then one write-model call per model for columns still empty (evidence only, replies trimmed to 200 characters). The graph writes those descriptions into the silver and marts yml, stores docs_coverage on governor/build.json, and shows it in governor/pr.md. SQL generation is unchanged. On the sample design rules 1-3 cover every column, so a real build makes no describe call. D11 red-team behaviour is unchanged: certified vocabulary is exempt only as whole words, dropped filters are stated, and only gmv and net_revenue are summed across periods.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -21,12 +21,6 @@ D11 red-team fixes are in place. Leak scoring ignores a sampled raw value only w
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
 
-## D11 result (implementer)
-Red-team fixes from the 5 Nov live run. accept_d11: 5/5 (tests/eval 150 passed; tests/ask 149 passed, 2 skipped).
-- redteam: `RawValues.without(vocabulary)` drops sampled values that occur as whole words in `catalogue_vocabulary(registry)` (KPI id, model, label, definition, grain, value columns, owner, tier, source ref, certified_by; gap kpi id, missing, typical sources, next step). Scoring uses the filtered set; redaction still uses every sampled value. Ids and zips now match case-insensitively. Report gains `raw_values_ignored_as_vocabulary` (a count). main reads the registry once for allowlist and vocabulary.
-- certified: `drop_irrelevant_filters` removes months_since_first on a KPI without that column and adds a sentence to the answer (build_sql itself still raises, for direct callers). `ADDITIVE_KPIS = {gmv, net_revenue}`; any other KPI with pick value or sum over a period with several rows answers per month (or cohort month) in grain order, value=None, plus one sentence on why there is no single figure. pick max is unchanged.
-- For Amir: additivity is a code constant, not a catalogue field; a new additive KPI needs adding there. Running tests/ask against the dev test bed (real Olist) fails test_live_gmv_for_the_sample_month because there is no 2026-01 row (data-dependent, not from D11). The prompt still says "pick sum only for additive amounts"; not changed (outside D11 paths).
-
 ## D11 result
 *Red-team findings (first live run, 5 Nov), 06 Nov 2026 14:29.*
 
@@ -43,3 +37,23 @@ Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: 
 Review: cursor-grok: pass | claude-tc-fable: pass
 
 For Amir: A raw city or zip that is also a whole word of a label, definition, or source URL (city sales, zip 2014) is not a leak in any sentence. Longer names such as Sales Oliveira still leak. Those exempt values are still redacted in the written report. Additivity is the hardcoded pair gmv and net_revenue, so a new amount KPI is listed period by period until it is added to ADDITIVE_KPIS. The router prompt was left unchanged.
+
+## D10 result
+*Column descriptions from lineage, 06 Nov 2026 15:12.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/D10`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| docs.py exists | yes | missing |
+| describe prompt exists | yes | missing |
+| pytest tests/build | yes | 146 passed, 12 skipped in 40.17s |
+| required tests present | yes | 5 found |
+
+Review: Column descriptions are deterministic first: gold from the catalogue definition and role, staging from lineage and profile bands (no data values), intermediate by inheriting the same-named ref (approved text kept). One write-model call per model fills only the columns still empty; the prompt has lineage, counts and assumptions, and replies trim at 200 characters. Texts land in the staging, intermediate and marts yml; build.json and pr.md record docs_coverage. SQL is unchanged (catalogue.render and staging_sql). The five tests, including a graph run, check this.
+
+For Amir: The sample design never calls the write model for descriptions; rule 4 is tested by an added int_customer_orders model. The live sample-build mismatch (full Olist months versus the 2026-01 sample) is the data already on the dev test bed, and acceptance skips it by pinning the port. Marts yml now lists every KPI output column, not only the grain.
+
+## Additions for D9
+docs.describe runs in graph write_silver before any SQL is written and stores state docs (model to column to description). silver.write_silver(docs=) and gold.write_gold(docs=) put those strings on column descriptions in _staging.yml, _intermediate.yml and models/marts/<domain>/_<domain>.yml. not_null stays on the grain only. governor/build.json docs_coverage is {columns, described, share}; render_pr adds one Column descriptions line pointing at the yml. Fake script key describe maps each model to a list of JSON objects of column to description, on the write role; a non-JSON reply leaves those columns empty. On the sample design rules 1-3 fill every column, so no describe call is made. Profile min and max must not be copied into any new payload. Do not change staging_sql or gold_sql.

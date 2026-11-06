@@ -87,10 +87,13 @@ def test_write_gold_files_and_yml(tmp_path, good):
     assert meta["kpi_id"] == "gmv" and meta["owner"] == kpi.owner and meta["source_tier"] == "platform"
     assert meta["source_ref"] == kpi.source.ref and meta["template_sha256"] == gold.sha256(kpi.template_sql)
     assert meta["rendered_sha256"] == gold.sha256(sql) and entry["description"].startswith("Item price plus freight")
-    assert entry["columns"] == [{"name": "month", "description": "the month (grain)", "data_tests": ["not_null"]}]
+    # every output column described from the catalogue (batch2c section 16); not_null stays on the grain only
+    assert [c["name"] for c in entry["columns"]] == ["month", "gmv"]
+    assert entry["columns"][0]["data_tests"] == ["not_null"] and "data_tests" not in entry["columns"][1]
+    assert all(c["description"] for c in entry["columns"])
     cust = {m["name"]: m for m in yaml.safe_load((t / "models" / "marts" / "customers" / "_customers.yml")
                                                  .read_text(encoding="utf-8"))["models"]}
-    assert "columns" not in cust["kpi_repeat_purchase_rate"]  # grain total
+    assert not any("data_tests" in c for c in cust["kpi_repeat_purchase_rate"]["columns"])  # grain total: no not_null
     assert cust["kpi_cohort_retention"]["columns"][0]["name"] == "cohort_month"
 
 

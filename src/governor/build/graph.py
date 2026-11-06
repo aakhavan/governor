@@ -7,7 +7,7 @@
                         write_report -> design_gate (interrupt)
              reject + note (once) <------|  approve
              -> propose                  v
-                                    record_decisions -> write_silver --SQL refused--> repair_silver
+                                    record_decisions -> write_silver (column docs first) --SQL refused--> repair_silver
                                                              | ok                          ^   |
                                                        dbt_build_silver --fail-------------+   |
                                                              | ok          (write model <= 2, then plan model once;
@@ -50,7 +50,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from governor.build import design, gold, silver
+from governor.build import design, docs, gold, silver
 from governor.build.dbt import run_dbt
 from governor.build.events import emit
 from governor.build.llm import BuildLLM, LLMOutputError
@@ -92,6 +92,7 @@ class BuildState(TypedDict, total=False):
     approved_by: str
     approved_file: str
     silver: dict
+    docs: dict  # model -> column -> description (batch2c section 16)
     sql_repairs: int
     gold: dict
     blueprint: list[dict]
@@ -308,8 +309,9 @@ def build_graph(
 
     def write_silver(state: BuildState) -> dict:
         before = len(llm.calls)
-        st = silver.write_silver(state["target"], state["proposal"], llm)
-        return _silver_update(st, before)
+        described = docs.describe(state["proposal"], state.get("profile"), catalogue, _policy(state.get("policy")), llm)
+        st = silver.write_silver(state["target"], state["proposal"], llm, docs=described)
+        return {**_silver_update(st, before), "docs": described}
 
     def dbt_build_silver(state: BuildState) -> dict:
         st = silver.dbt_build_silver(state["target"], state["proposal"], dict(state["silver"]),
@@ -351,7 +353,7 @@ def build_graph(
 
     def write_gold(state: BuildState) -> dict:
         target, proposal = state["target"], state["proposal"]
-        files = gold.write_gold(target, proposal, catalogue)
+        files = gold.write_gold(target, proposal, catalogue, docs=state.get("docs"))
         gaps_file = gold.write_gaps(target, proposal)
         found = gold.check_project(target, catalogue, _policy(state.get("policy")), blueprint=blueprint)
         st = {"files": [Path(f).relative_to(target).as_posix() for f in files],

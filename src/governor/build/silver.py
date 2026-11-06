@@ -172,8 +172,8 @@ def repair_prompt(m: SilverModel, design: Proposal | dict, sql: str, error: str)
 # --------------------------------------------------------------------------- yml and tests
 
 
-def _column_yml(m: SilverModel, c) -> dict:
-    out: dict[str, Any] = {"name": c.name, "description": c.description or ""}
+def _column_yml(m: SilverModel, c, docs: dict[str, dict[str, str]] | None = None) -> dict:
+    out: dict[str, Any] = {"name": c.name, "description": ((docs or {}).get(m.name) or {}).get(c.name) or c.description or ""}
     if c.pii:
         out["config"] = {"meta": {"pii": True}}
     if len(m.primary_key) == 1 and m.primary_key[0] == c.name:
@@ -181,11 +181,12 @@ def _column_yml(m: SilverModel, c) -> dict:
     return out
 
 
-def models_yml(models: list[SilverModel]) -> str:
+def models_yml(models: list[SilverModel], docs: dict[str, dict[str, str]] | None = None) -> str:
+    """``docs``: model -> column -> description (``governor.build.docs.describe``); the design's text otherwise."""
     doc = {"version": 2, "models": [
         {"name": m.name, "description": m.description or "",
          "config": {"meta": {"primary_key": list(m.primary_key)}},
-         "columns": [_column_yml(m, c) for c in m.columns]} for m in models]}
+         "columns": [_column_yml(m, c, docs) for c in m.columns]} for m in models]}
     return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
 
 
@@ -283,8 +284,12 @@ def prune_stale(target: str | Path, design: Proposal | dict) -> list[Path]:
     return removed
 
 
-def write_silver(target: str | Path, design: Proposal | dict, llm: BuildLLM, state: dict | None = None) -> dict:
+def write_silver(target: str | Path, design: Proposal | dict, llm: BuildLLM, state: dict | None = None, *,
+                 docs: dict[str, dict[str, str]] | None = None) -> dict:
     """Write staging (code), intermediate (write model), the yml files and the composite-key tests.
+
+    ``docs`` (model -> column -> description, from ``governor.build.docs.describe``) fills the yml column
+    descriptions (batch2c section 16); without it the design's descriptions are written.
 
     Files from an earlier design that this one no longer contains are removed first (:func:`prune_stale`)."""
     target, prop = Path(target), _proposal(design)
@@ -295,7 +300,7 @@ def write_silver(target: str | Path, design: Proposal | dict, llm: BuildLLM, sta
         models = [m for m in prop.silver_models if m.folder == folder]
         d = target / "models" / folder
         d.mkdir(parents=True, exist_ok=True)
-        (d / yml).write_text(models_yml(models), encoding="utf-8")
+        (d / yml).write_text(models_yml(models, docs), encoding="utf-8")
     tests = target / "tests"
     tests.mkdir(parents=True, exist_ok=True)
     for m in prop.silver_models:

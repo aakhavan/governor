@@ -9,7 +9,8 @@
   finding has ``rule``, ``severity`` (from ``knowledge/blueprint.md``), ``target`` (the model) and ``problem``;
   the blueprint's named exceptions are honoured. High findings stop the build (``blueprint_failed``).
 - :func:`write_gaps`: ``governor/gaps.md`` from the declined KPIs.
-- :func:`dbt_build_gold`, :func:`summarise`: ``dbt build --select marts`` and ``governor/build.json``.
+- :func:`dbt_build_gold`, :func:`summarise`: ``dbt build --select marts`` and ``governor/build.json`` (with
+  ``docs_coverage``: columns, described, share of the generated yml columns; batch2c section 16).
 
 Hashes are SHA-256 of UTF-8 text with line endings normalised to ``\\n`` (a checkout with autocrlf keeps them).
 """
@@ -110,22 +111,36 @@ def gold_path(target: str | Path, k: KpiDecision) -> Path:
     return Path(target) / "models" / MARTS / silver.mart_folder(k.domain) / f"{model_name(k.id)}.sql"
 
 
-def _model_yml(kpi: Kpi, sql: str) -> dict:
+def _model_yml(kpi: Kpi, sql: str, columns: dict[str, str] | None = None) -> dict:
+    """``columns``: output column -> description (rule 1 of batch2c section 16); the grain column keeps ``not_null``."""
     meta = {"kpi_id": kpi.id, "owner": kpi.owner or "", "source_tier": kpi.source.tier if kpi.source else "",
             "source_ref": kpi.source.ref if kpi.source else "", "template_sha256": sha256(kpi.template_sql),
             "rendered_sha256": sha256(sql)}
     out: dict[str, Any] = {"name": model_name(kpi.id), "description": " ".join(kpi.definition.split()),
                            "config": {"meta": meta}}
     grain = GRAIN_COLUMN.get(kpi.grain)
-    if grain:
-        out["columns"] = [{"name": grain, "description": f"the {kpi.grain.replace('_', ' ')} (grain)",
-                           "data_tests": ["not_null"]}]
+    cols = dict(columns or {})
+    if grain and grain not in cols:
+        cols = {grain: f"the {kpi.grain.replace('_', ' ')} (grain)", **cols}
+    if cols:
+        out["columns"] = [{"name": name, "description": text, **({"data_tests": ["not_null"]} if name == grain else {})}
+                          for name, text in cols.items()]
     return out
 
 
-def write_gold(target: str | Path, design: Proposal | dict, catalogue: KpiCatalogue) -> list[Path]:
-    """Write the KPI models and their ``_<domain>.yml`` files; stale files of an earlier design are removed first."""
+def write_gold(target: str | Path, design: Proposal | dict, catalogue: KpiCatalogue, *,
+               docs: dict[str, dict[str, str]] | None = None) -> list[Path]:
+    """Write the KPI models and their ``_<domain>.yml`` files; stale files of an earlier design are removed first.
+
+    Every output column of a KPI model is described: from ``docs`` (``governor.build.docs.describe``) when given,
+    else from the catalogue definition (``docs.gold_docs``)."""
+    from governor.build import docs as column_docs
+
     target, prop = Path(target), _proposal(design)
+    described = column_docs.gold_docs(prop, catalogue)
+    for name, cols in (docs or {}).items():
+        if name in described:
+            described[name] = {c: (cols.get(c) or d) for c, d in described[name].items()}
     silver.prune_stale(target, prop)
     written: list[Path] = []
     by_domain: dict[str, list[dict]] = {}
@@ -133,7 +148,7 @@ def write_gold(target: str | Path, design: Proposal | dict, catalogue: KpiCatalo
         kpi = catalogue.get(k.id)
         sql = gold_sql(kpi, k.mapping)
         written.append(_write(gold_path(target, k), sql))
-        by_domain.setdefault(silver.mart_folder(k.domain), []).append(_model_yml(kpi, sql))
+        by_domain.setdefault(silver.mart_folder(k.domain), []).append(_model_yml(kpi, sql, described.get(model_name(k.id))))
     for domain, models in by_domain.items():
         doc = {"version": 2, "models": models}
         path = target / "models" / MARTS / domain / f"_{domain}.yml"
@@ -501,6 +516,13 @@ def model_cost(calls: list[dict]) -> dict:
             "by_model": by_model}
 
 
+def docs_coverage(target: str | Path) -> dict:
+    """Share of generated yml columns with a description (batch2c section 16)."""
+    from governor.build.docs import coverage
+
+    return coverage(target)
+
+
 def summarise(target: str | Path, design: Proposal | dict, *, status: str, silver_state: dict, gold_state: dict | None,
               findings: list[dict], calls: list[dict], sql_repairs: int, rows: dict[str, int] | None = None,
               thread_id: str | None = None, approved_by: str | None = None) -> dict:
@@ -522,6 +544,7 @@ def summarise(target: str | Path, design: Proposal | dict, *, status: str, silve
         "repairs": sql_repairs,
         "blueprint": findings,
         "cost": model_cost(calls),
+        "docs_coverage": docs_coverage(target),
     }
     summary["tests_passed"]["total"] = summary["tests_passed"]["silver"] + summary["tests_passed"]["gold"]
     if gold_state.get("escalated"):
@@ -531,4 +554,4 @@ def summarise(target: str | Path, design: Proposal | dict, *, status: str, silve
 
 
 __all__ = ["BLUEPRINT_FAILED", "BUILT", "ESCALATED", "BlueprintFinding", "Finding", "check_project", "dbt_build_gold",
-           "gaps", "gold_sql", "high", "kpi_rows", "model_cost", "sha256", "summarise", "write_gaps", "write_gold"]
+           "docs_coverage", "gaps", "gold_sql", "high", "kpi_rows", "model_cost", "sha256", "summarise", "write_gaps", "write_gold"]
