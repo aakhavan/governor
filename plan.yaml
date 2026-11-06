@@ -263,3 +263,20 @@ steps:
     allowed_paths: [src/governor/eval/redteam.py, src/governor/ask/certified.py, tests/eval/, tests/ask/]
     human_gate: true
     review_focus: "real leaks are still detected (only governor's own certified vocabulary is exempt, as whole words); dropping a filter is stated in the answer; ratio KPIs are never summed or averaged across months; every number still comes from result rows"
+  # ---- Batch 2c (D10, D9), agreed 5-6 Nov 2026. Contract: docs/capstone/batch2c.md. D13 Superset is a draft, not planned yet.
+  - id: D10
+    title: Column descriptions from lineage
+    tier: design
+    prompt: plan/prompts/D10.md
+    accept: plan/accept/accept_d10.py
+    allowed_paths: [src/governor/build/, tests/build/, tests/fixtures/build/]
+    human_gate: false
+    review_focus: "deterministic descriptions first; the model sees evidence only (lineage, counts, assumptions), never data values; descriptions land in the yml the reviewer sees; nothing changes in the SQL"
+  - id: D9
+    title: Slack app
+    tier: design
+    prompt: plan/prompts/D9.md
+    accept: plan/accept/accept_d9.py
+    allowed_paths: [src/governor/integrations/, tests/integrations/, docs/slack.md, pyproject.toml, uv.lock]
+    human_gate: true
+    review_focus: "Slack is a thin client: no build logic; only allowlisted users approve and the decision records the mapped name; command text parsed strictly; tokens from env only; no data values in any Slack payload; a notifier failure never breaks a build"
