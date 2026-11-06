@@ -174,6 +174,39 @@ def test_max_names_the_period():
     assert out.outcome == "answer" and out.value == 900.5 and "2026-03" in out.text and "900.50" in out.text
 
 
+def test_irrelevant_filter_ignored():
+    out, adapter = ask("GMV in January 2026, 3 months after first order?", reply("gmv", "gmv", msf=3),
+                       results=[[[dt.datetime(2026, 1, 1), Decimal("455.0")]]])
+    assert out.outcome == "answer" and out.value == 455.0
+    assert "months_since_first=3" in out.text and "ignored" in out.text and "months after" not in out.text
+    assert len(adapter.kpi_queries()) == 1 and "months_since_first" not in adapter.kpi_queries()[0]
+    # a KPI that has the column still needs it
+    out, adapter = ask("Retention of the 2026-01 cohort", reply("cohort_retention", "retention", kind="cohort"))
+    assert out.outcome == "unanswerable" and not adapter.kpi_queries()
+
+
+def test_ratio_kpi_multi_period_answers_monthly():
+    rows = [[dt.datetime(2026, 1, 1), Decimal("0.25")], [dt.datetime(2026, 2, 1), Decimal("0.3")],
+            [dt.datetime(2026, 3, 1), None]]
+    for pick in ("value", "sum"):
+        out, adapter = ask("Retention 1 month after first order, all of 2026?",
+                           reply("cohort_retention", "retention", kind="year", value="2026", msf=1, pick=pick),
+                           results=[rows])
+        assert out.outcome == "answer" and out.value is None, out.text
+        assert "2026-01 0.25" in out.text and "2026-02 0.3" in out.text and "no single figure" in out.text
+        sql = adapter.kpi_queries()[0]
+        assert "SUM(" not in sql and 'ORDER BY "cohort_month"' in sql and 'EXTRACT(YEAR FROM "cohort_month")' in sql
+    # the series query passes the validator
+    build(c.read_registry(FakeAdapter(), "analyst"), "cohort_retention", col="retention", kind="all", value=None, msf=1)
+    # additive KPIs keep sum; max still names one period
+    out, adapter = ask("GMV 2026?", reply("gmv", "gmv", kind="year", value="2026", pick="sum"),
+                       results=[[[Decimal("900"), 2]]])
+    assert out.outcome == "answer" and out.value == 900 and 'SUM("gmv")' in adapter.kpi_queries()[0]
+    assert c.wants_series(c.read_registry(FakeAdapter(), "analyst").kpis["cohort_retention"],
+                          c.CertifiedReply.model_validate(json.loads(reply("cohort_retention", "retention", kind="year",
+                                                                           value="2026", msf=1, pick="max")))) is False
+
+
 def test_uncertified_kpi_is_unanswerable_and_never_runs():
     out, adapter = ask("GMV please", reply("stg_customers", "customer_unique_id"))
     assert out.outcome == "unanswerable" and not out.sql and not adapter.kpi_queries()

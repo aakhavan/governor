@@ -1,6 +1,6 @@
 # STATUS: governor
 
-Updated 06 Nov 2026 13:35. Run `20261106-132359`.
+Updated 06 Nov 2026 14:29. Run `20261106-142945`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
@@ -33,9 +33,9 @@ Updated 06 Nov 2026 13:35. Run `20261106-132359`.
 | D7 | Certified answers in ask | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-05T13:05:52 |
 | D8a | Build evaluation harness (agent vs one-shot baseline) | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-05T13:24:01 |
 | D8b | Certified-answer evaluation, red team and the capstone report | design | yes | done | 1/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-05T14:26:32 |
-| D12 | Clean-up from the D6 and D8 gate reviews | mechanical | - | passed | 2/2 |  | claude-tc-sonnet | cursor-grok: pass | 2026-11-06T13:35:50 |
-| D11 | Red-team findings (first live run, 5 Nov) | design | yes | pending | 0/2 |  | - | - | - |
+| D12 | Clean-up from the D6 and D8 gate reviews | mechanical | - | done | 2/2 |  | claude-tc-sonnet | cursor-grok: pass | 2026-11-06T13:35:50 |
+| D11 | Red-team findings (first live run, 5 Nov) | design | yes | approved | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-06T14:29:45 |
 
-Cost so far (reported + notional): $88.70 of $150.00 run budget; 109 agent call(s).
+Cost so far (reported + notional): $92.29 of $150.00 run budget; 112 agent call(s).
 
-Next: D12 is passed: `factory resume`.
+Next: D11 is approved: `factory resume`.

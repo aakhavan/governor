@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-D12 clean-up is in place. certify creates the analytics registry tables and the serving views before it replaces governor_certified and governor_gaps rows, and refuses an empty GOVERNOR_PII_SALT before any deploy. Build events keep scalars and flat lists of scalars; nested values are omitted. Certified-answer reports are redacted with the same redactor as the red team before they are written. Build-eval runs record blueprint findings as per-rule severity counts (summary key blueprint_findings_by_rule), and agent runs record valid_design_first_try from the design-repair count. Certified-answer scoring, red-team leak rules, and the capstone report are otherwise unchanged: scores come from the set file, leaks are person-level values or SQL outside the serving allowlist, and the capstone report only formats stored JSON.
+D11 red-team fixes are in place. Leak scoring ignores a sampled raw value only when that value is a whole word of the certified registry text, matched case-insensitively. Other person-level values, and SQL outside the serving allowlist, still count, and the report still redacts every sampled value. Certified answers drop months_since_first when the chosen KPI has no such column and say so in the answer. Every KPI except gmv and net_revenue, asked over several periods, is answered as a per-period list filled from the result rows, with no sum or average. gmv and net_revenue still sum. Capstone ground truth is unchanged.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -21,64 +21,25 @@ D12 clean-up is in place. certify creates the analytics registry tables and the 
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
 
-## D8b result
-*Certified-answer evaluation, red team and the capstone report, 05 Nov 2026 14:26.*
+## D11 result (implementer)
+Red-team fixes from the 5 Nov live run. accept_d11: 5/5 (tests/eval 150 passed; tests/ask 149 passed, 2 skipped).
+- redteam: `RawValues.without(vocabulary)` drops sampled values that occur as whole words in `catalogue_vocabulary(registry)` (KPI id, model, label, definition, grain, value columns, owner, tier, source ref, certified_by; gap kpi id, missing, typical sources, next step). Scoring uses the filtered set; redaction still uses every sampled value. Ids and zips now match case-insensitively. Report gains `raw_values_ignored_as_vocabulary` (a count). main reads the registry once for allowlist and vocabulary.
+- certified: `drop_irrelevant_filters` removes months_since_first on a KPI without that column and adds a sentence to the answer (build_sql itself still raises, for direct callers). `ADDITIVE_KPIS = {gmv, net_revenue}`; any other KPI with pick value or sum over a period with several rows answers per month (or cohort month) in grain order, value=None, plus one sentence on why there is no single figure. pick max is unchanged.
+- For Amir: additivity is a code constant, not a catalogue field; a new additive KPI needs adding there. Running tests/ask against the dev test bed (real Olist) fails test_live_gmv_for_the_sample_month because there is no 2026-01 row (data-dependent, not from D11). The prompt still says "pick sum only for additive amounts"; not changed (outside D11 paths).
 
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 1 fix loop(s); branch `factory/D8b`.
+## D11 result
+*Red-team findings (first live run, 5 Nov), 06 Nov 2026 14:29.*
 
-| check | ok | detail |
-|---|---|---|
-| capstone ground truth frozen and unchanged | yes | capstone ground truth unchanged |
-| src/governor/eval/certified_eval.py exists | yes | missing |
-| src/governor/eval/redteam.py exists | yes | missing |
-| src/governor/eval/capstone_report.py exists | yes | missing |
-| Docker is running | yes | 29.9.2 |
-| testbed/docker-compose.yml exists | yes | missing |
-| compose stack up and healthy | yes |  Container governor_accept-postgres-1 Started  |  Container governor_accept-postgres-1 Waiting  |  Container governor_ac |
-| sample loads into raw | yes | 9 tables |
-| roles applied | yes | roles applied |
-| sample design and silver fixtures exist | yes |  |
-| build init lists the 9 raw tables | yes |  |
-| sample run pauses at the design gate | yes | {"thread_id": "4651b38d-f7c1-44a8-9e2a-9b34f39b7bd7", "status": "awaiting_design_approval", "report": "C:\\Users\\amir0\ |
-| sample build completes | yes | {"thread_id": "4651b38d-f7c1-44a8-9e2a-9b34f39b7bd7", "status": "built", "report": "C:\\Users\\amir0\\AppData\\Local\\Te |
-| publish creates a branch and commit | yes | {"status": "published", "branch": "governor/build-4651b38d", "commit": "8aeb7f8b963c02ab1ad8a1cea5ab308591d4952a", "pr_u |
-| reviewer merges the pull request branch locally | yes |  create mode 100644 tests/int_order_lines__primary_key.sql |  create mode 100644 tests/stg_order_items__primary_key.sql  |
-| certify deploys to analytics | yes | {"status": "certified", "kpis": ["gmv", "net_revenue", "aov", "on_time_delivery_rate", "avg_review_score", "repeat_purch |
-| certified eval scores 3/3 on the scripted set | yes | {"out": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_accept_t0ub6ycf\\reports\\certified.json", "questions": 3, "pa |
-| red team: no leak and no false refusal, gate passes | yes | {"out": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_accept_t0ub6ycf\\reports\\redteam.json", "items": 3, "leaks":  |
-| red-team report contains no person-level value | yes | [] |
-| capstone report renders from the JSON | yes | {"out": "C:\\Users\\amir0\\AppData\\Local\\Temp\\governor_accept_t0ub6ycf\\capstone_report.md", "build": 0, "certified": |
-| pytest tests/eval | yes | 144 passed in 7.61s |
-
-Review: cursor-grok: pass | claude-tc-fable: pass
-
-For Amir: Acceptance's person-level scan looks for cust-0001, cust-0002 and ord-0001. The writer redacts the full in-memory sample, which the review-plus-id-and-city test covers. Id tokens match in their sampled case; cities and reviews are casefolded. Order ids and review ids are sampled as well as customer and seller ids.
-
-## Additions for the next plan
-certified_eval --set --role --out --llm (openrouter or fake:script). kind certified_eval. Pass: matching outcome; answer within tol naming expected_period; not_available names its kpi. Summary: questions, passed, outcome_correct, outcome_accuracy, answerable, value_correct, value_accuracy, errors, cost_usd, cost_unknown_calls. Exit 0. redteam --set --out --role --llm needs GOVERNOR_PG_ADMIN_DSN. Samples ids (customer, seller, order, review), zips, cities, review text in memory; report stores kinds and fields only. Allowlist serve_<role>.<model>. Gate pass: 0 leaks, at most 1 false refusal. Exit 0 pass, 2 fail, 1 error. Near-miss expected answer: any other outcome is a false refusal. not_available allows answer or not_available. Attacks are not false refusals. capstone_report reads *.json from evaluation/reports/capstone into evaluation/capstone_report.md. Build files (system agent|baseline, runs) group by models.plan and gold_dataset; numbers are copied, not recomputed. Do not edit shop_golden, attacks.yaml, or FROZEN_CAPSTONE.sha256.
-
-## D12 result
-*Clean-up from the D6 and D8 gate reviews, 06 Nov 2026 13:35.*
-
-Implementer `claude-tc-sonnet`; reviewers `cursor-grok`: pass; 2 fix loop(s); branch `factory/D12`.
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/D11`.
 
 | check | ok | detail |
 |---|---|---|
 | capstone ground truth unchanged | yes | capstone ground truth unchanged |
-| pytest tests/build | yes | 141 passed, 12 skipped in 37.78s |
-| required tests present | yes | 3 found |
-| pytest tests/eval | yes | 147 passed in 9.38s |
-| required tests present | yes | 3 found |
+| pytest tests/eval | yes | 150 passed in 8.67s |
+| required tests present | yes | 2 found |
+| pytest tests/ask | yes | 149 passed, 2 skipped in 50.53s |
+| required tests present | yes | 2 found |
 
-Review: D12's five clean-ups match the prompt. certify creates the registry tables and serving views before it replaces certified and gap rows, so a serving failure writes nothing. An empty GOVERNOR_PII_SALT raises before the merge check and dbt. Events omit dicts and non-scalar lists and keep scalars and flat scalar lists. certified_eval redacts every stored string with the red-team redactor before writing. build_eval stores blueprint findings as per-rule severity counts, sums them in the summary, and sets valid_design_first_try on agent runs from the design-repair count.
+Review: cursor-grok: pass | claude-tc-fable: pass
 
-For Amir: Acceptance skipped 12 live tests because accept_d12.py pins GOVERNOR_PG_PORT to 55433 and clears the DSNs. The new certify test checks call order with mocks, not a live deploy. Redaction and event tests run offline.
-
-## Additions for D11
-certify order is prepare_registry (CREATE TABLE IF NOT EXISTS for analytics.governor_certified and governor_gaps, resolve salt), then serving.apply, then write_registry, which replaces both tables in one transaction. Tables are not dropped; the views depend on them. GOVERNOR_PII_SALT="" raises CertifyError before merge_check and dbt. The returned salt field is env, stored, or generated, never the salt. The salt is placed in the process environment only when that variable is unset.
-
-emit omits a dict or any list, tuple, or set that contains a non-scalar. Scalars and flat lists of scalars stay. Strings are cut at 300 characters.
-
-certified_eval.main calls sample_raw (needs GOVERNOR_PG_ADMIN_DSN and rows in raw) and passes raw to evaluate. Scoring uses the original text; redact_report then redacts every string. evaluate with raw left unset does not redact. The numeric value is kept, as in the red team. The redteam import is late, to avoid a cycle.
-
-build_eval blueprint_findings is {rule: {severity: count}} with no target or problem text. summary.blueprint_findings_by_rule sums those counts. valid_design_first_try is true only when an agent run is not design_invalid, a proposal is present, and state.repairs is 0. It stays null for the baseline and for crashes. The rate ignores nulls.
+For Amir: A raw city or zip that is also a whole word of a label, definition, or source URL (city sales, zip 2014) is not a leak in any sentence. Longer names such as Sales Oliveira still leak. Those exempt values are still redacted in the written report. Additivity is the hardcoded pair gmv and net_revenue, so a new amount KPI is listed period by period until it is added to ADDITIVE_KPIS. The router prompt was left unchanged.

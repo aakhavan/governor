@@ -50,6 +50,10 @@ GRAIN_COLUMNS = {"month": "month", "cohort_month": "cohort_month"}
 MSF = "months_since_first"
 # Which period kinds each grain can express.
 KINDS = {"month": {"month", "year", "all"}, "cohort_month": {"cohort", "year", "all"}, "total": {"all"}}
+# KPIs whose monthly values add up to the period's value (amounts). Every other KPI is a ratio (rate, average, AOV,
+# CLV, retention): over a period with several rows it is answered with the per-period values, never summed.
+ADDITIVE_KPIS = frozenset({"gmv", "net_revenue"})
+SERIES_CAP = 100  # per-period rows listed in one answer (the validator's default limit)
 _MONTH = re.compile(r"^(\d{4})-(0[1-9]|1[0-2])$")
 _YEAR = re.compile(r"^(\d{4})$")
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
@@ -251,8 +255,36 @@ def _q(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def is_additive(kpi: CertifiedKpi) -> bool:
+    return kpi.kpi_id in ADDITIVE_KPIS
+
+
+def _single_row(kpi: CertifiedKpi, period: Period) -> bool:
+    return period.kind in ("month", "cohort") or kpi.grain == "total"
+
+
+def wants_series(kpi: CertifiedKpi, reply: CertifiedReply) -> bool:
+    """A ratio KPI asked as one value (or a sum) over a period with several rows: answered with per-period values."""
+    period = reply.period or Period(kind="all")
+    return (not is_additive(kpi) and reply.pick in ("value", "sum") and not _single_row(kpi, period)
+            and GRAIN_COLUMNS.get(kpi.grain) is not None)
+
+
+def drop_irrelevant_filters(kpi: CertifiedKpi, reply: CertifiedReply) -> tuple[CertifiedReply, list[str]]:
+    """The reply without filters ``kpi`` has no column for, and one note per dropped filter."""
+    notes: list[str] = []
+    if reply.months_since_first is not None and not kpi.has_msf:
+        notes.append(f"The filter {MSF}={reply.months_since_first} does not apply to {kpi.kpi_id} "
+                     f"(it has no {MSF} column) and was ignored.")
+        reply = reply.model_copy(update={"months_since_first": None})
+    return reply, notes
+
+
 def build_sql(kpi: CertifiedKpi, schema: str, reply: CertifiedReply) -> tuple[str, str]:
-    """``(sql, value_column)`` for the reply against ``kpi``'s own table; ``Unanswerable`` when it cannot be."""
+    """``(sql, value_column)`` for the reply against ``kpi``'s own table; ``Unanswerable`` when it cannot be.
+
+    A ratio KPI over a period with several rows (``wants_series``) reads every period's value in grain order.
+    """
     column = (reply.value_column or "").lower() or None
     if column is None and len(kpi.value_columns) == 1:
         column = kpi.value_columns[0]
@@ -276,8 +308,8 @@ def build_sql(kpi: CertifiedKpi, schema: str, reply: CertifiedReply) -> tuple[st
         keys.append((_q(MSF), str(int(reply.months_since_first))))
     elif kpi.has_msf:
         raise Unanswerable(f"{kpi.kpi_id} needs {MSF} (which month after the cohort month)")
-    single = period.kind in ("month", "cohort") or kpi.grain == "total"
-    if reply.pick == "value" and not single:
+    series = wants_series(kpi, reply)
+    if reply.pick == "value" and not series and not _single_row(kpi, period):
         raise Unanswerable(f"a {period.kind} period of {kpi.kpi_id} has many rows; pick max or sum")
     if reply.pick != "value" and grain_col is None:
         raise Unanswerable(f"{kpi.kpi_id} is a single total; there is nothing to {reply.pick}")
@@ -289,6 +321,10 @@ def build_sql(kpi: CertifiedKpi, schema: str, reply: CertifiedReply) -> tuple[st
         cond = f" WHERE ({', '.join(k for k, _ in keys)}) = ({', '.join(v for _, v in keys)})"
     else:
         cond = ""
+    if series:
+        g = _q(grain_col)
+        return (f"SELECT {g} AS grain_value, {col} AS kpi_value FROM {table}{cond} ORDER BY {g} LIMIT {SERIES_CAP}",
+                column)
     if reply.pick == "sum":
         return f"SELECT SUM({col}) AS kpi_value, COUNT({col}) AS periods FROM {table}{cond}", column
     head = f"{_q(grain_col)} AS grain_value, " if grain_col else ""
@@ -465,6 +501,8 @@ def answer(
         if kid in registry.gaps or kid in _catalogue_ids(kpis_path):
             return CertifiedAnswer(outcome="not_available", text=_gap_text(kid, registry.gaps.get(kid)), kpi_id=kid)
         return _unanswerable("No certified KPI covers this question.")
+    reply, notes = drop_irrelevant_filters(kpi, reply)
+    series = wants_series(kpi, reply)
     try:
         sql_text, column = build_sql(kpi, registry.schema, reply)
     except Unanswerable as why:
@@ -480,7 +518,19 @@ def answer(
         raise CertifiedError(f"the certified query for {kid} failed: {error}") from None
     citation = kpi.citation()
     period = _describe_period(kpi, reply)
-    if reply.pick == "sum":
+    value: float | None
+    if series:
+        points = [(_period_label(g), float(v)) for g, v in rows if isinstance(v, (int, float, Decimal))]
+        if not points:
+            return CertifiedAnswer(outcome="unanswerable", text=f"The certified table {kpi.model} has no values "
+                                   f"{period}.", kpi_id=kid, sql=checked.sql, citation=citation)
+        unit = "cohort month" if kpi.grain == "cohort_month" else "month"
+        listed = "; ".join(f"{label} {format_number(v)}" for label, v in points)
+        text = (f"{kpi.label} ({column}) {period}, per {unit}: {listed}. There is no single figure for the period "
+                f"because {kid} is a ratio, not an amount: it cannot be summed, and an average of the {unit} values "
+                f"would ignore how much each {unit} contributes.")
+        value = None
+    elif reply.pick == "sum":
         raw, count = (rows[0] if rows else (None, 0))
         if raw is None or not count:
             return CertifiedAnswer(outcome="unanswerable", text=f"The certified table {kpi.model} has no rows "
@@ -502,7 +552,8 @@ def answer(
                     f"in {_period_label(rows[0][0])}.")
         else:
             text = f"{kpi.label} ({column}) {period} was {format_number(value)}."
-    return CertifiedAnswer(outcome="answer", text=f"{text} {_cite_text(kpi)}", value=value, kpi_id=kid,
+    text = " ".join([text, *notes, _cite_text(kpi)])
+    return CertifiedAnswer(outcome="answer", text=text, value=value, kpi_id=kid,
                            sql=checked.sql, citation=citation)
 
 
