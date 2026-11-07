@@ -158,6 +158,10 @@ def _expr_statement(d):
     _col(_model(d, "stg_orders"), "order_status")["expr"] = "select order_status from raw.olist_orders_dataset"
 
 
+def _key_not_unique(d):
+    _model(d, "stg_orders")["primary_key"] = ["order_status"]
+
+
 CASES = [
     ("UNKNOWN_SOURCE_TABLE", "stg_orders", _unknown_table),
     ("UNKNOWN_SOURCE_COLUMN", "stg_orders.purchased_at", _unknown_column),
@@ -185,6 +189,7 @@ CASES = [
     ("DECLINE_WITHOUT_GAP", "kpi.conversion_rate", _decline_empty_next_step),
     ("DECLINE_WITHOUT_GAP", "kpi.conversion_rate", _decline_no_reason),
     ("EXPR_UNPARSEABLE", "stg_orders.order_status", _expr_statement),
+    ("KEY_NOT_UNIQUE", "stg_orders", _key_not_unique),
 ]
 
 
@@ -201,6 +206,53 @@ def test_code_fires(code, subject, mutate, good, profile, policy):
 def test_every_validation_code_has_a_case():
     covered = {c[0] for c in CASES} | {"PROPOSAL_UNPARSEABLE"}  # raised by the graph, tested in test_graph
     assert covered == set(design.CODES)
+
+
+# ---- keys against the profile (batch2c section 19) ----
+
+def _table(profile, name):
+    return next(t for t in profile["tables"] if t["name"] == name)
+
+
+def _key_findings(doc, profile, policy):
+    return [f for f in _codes(doc, profile, policy) if f.code == "KEY_NOT_UNIQUE"]
+
+
+def test_key_not_unique_flags_non_candidate_key(good, profile, policy):
+    _model(good, "stg_orders")["primary_key"] = ["order_status"]
+    hits = _key_findings(good, profile, policy)
+    assert [f.subject for f in hits] == ["stg_orders"]
+    assert "[order_id]" in hits[0].problem and "olist_orders_dataset" in hits[0].problem
+    # names and counts only: no raw value as a whole token
+    assert [v for v in _sample_values()
+            if re.search(rf"(?<![\w-]){re.escape(v)}(?![\w-])", hits[0].problem)] == []
+
+
+def test_key_superset_of_candidate_key_is_accepted(good, profile, policy):
+    assert ["order_id", "order_item_id"] in _table(profile, "olist_order_items_dataset")["candidate_keys"]
+    assert _key_findings(good, profile, policy) == []  # the candidate pair (order_item_id through a cast)
+    _model(good, "stg_order_items")["primary_key"] = ["order_id", "order_item_id", "seller_id"]
+    assert _key_findings(good, profile, policy) == []  # a superset of a unique key is unique
+    _model(good, "stg_order_items")["primary_key"] = ["order_id"]  # one half of the pair is not
+    assert [f.subject for f in _key_findings(good, profile, policy)] == ["stg_order_items"]
+
+
+def test_key_on_table_without_candidate_key_is_flagged(good, profile, policy):
+    _table(profile, "olist_order_reviews_dataset")["candidate_keys"] = []
+    hits = _key_findings(good, profile, policy)
+    assert [f.subject for f in hits] == ["stg_reviews"]
+    assert "olist_order_reviews_dataset has no unique column or column pair" in hits[0].problem
+
+
+def test_computed_key_is_flagged(good, profile, policy):
+    _col(_model(good, "stg_orders"), "order_id")["expr"] = "UPPER(order_id)"
+    hits = _key_findings(good, profile, policy)
+    assert [f.subject for f in hits] == ["stg_orders.order_id"]
+    assert "key column 'order_id' is computed" in hits[0].problem
+    # a bare column, a cast of one (either syntax) and a null expr are not computed
+    for expr in ("order_id", "CAST(order_id AS text)", "order_id::text", None):
+        _col(_model(good, "stg_orders"), "order_id")["expr"] = expr
+        assert _key_findings(good, profile, policy) == [], expr
 
 
 def test_unbuildable_kpi_marked_build_is_caught(good, profile, policy):

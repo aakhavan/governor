@@ -46,6 +46,21 @@ def test_bad_proposal_is_repaired(tmp_path, profile, good):
     assert "MAPPING_UNKNOWN_COLUMN kpi.gmv" in llm.prompts[1][1] and "Your previous proposal" in llm.prompts[1][1]
 
 
+def test_design_repair_fixes_key_before_the_gate(tmp_path, profile, good):
+    first = json.loads(json.dumps(good))
+    next(m for m in first["silver_models"] if m["name"] == "stg_order_items")["primary_key"] = ["order_id"]
+    out, llm = _start(tmp_path, profile, [first, good])
+    assert out["status"] == graph.AWAITING and len(llm.prompts) == 2
+    assert "KEY_NOT_UNIQUE stg_order_items" in llm.prompts[1][1]
+    assert "[order_id, order_item_id]" in llm.prompts[1][1]
+    config = {"configurable": {"thread_id": out["thread_id"]}}
+    with graph.open_checkpointer(tmp_path / "state" / graph.CHECKPOINT_FILE) as saver:
+        values = graph.build_graph(FakeBuildLLM({}), saver).get_state(config).values
+    assert values["findings"] == [] and values["repairs"] == 1  # design_repairs == 1
+    pk = next(m for m in values["proposal"]["silver_models"] if m["name"] == "stg_order_items")["primary_key"]
+    assert pk == ["order_id", "order_item_id"]
+
+
 def test_two_repairs_then_design_invalid(tmp_path, profile, good):
     out, llm = _start(tmp_path, profile, [_bad(good)] * 5)
     assert out["status"] == graph.INVALID and out["findings"] == ["MAPPING_UNKNOWN_COLUMN"]

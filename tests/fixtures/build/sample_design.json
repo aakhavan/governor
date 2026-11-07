@@ -21,7 +21,7 @@
       "primary_key": ["order_id", "order_item_id"],
       "columns": [
         {"name": "order_id", "expr": "order_id", "type": "text", "pii": false, "description": ""},
-        {"name": "order_item_id", "expr": "CAST(NULLIF(order_item_id, '') AS integer)", "type": "integer", "pii": false, "description": "item number within the order"},
+        {"name": "order_item_id", "expr": "CAST(order_item_id AS integer)", "type": "integer", "pii": false, "description": "item number within the order"},
         {"name": "product_id", "expr": "product_id", "type": "text", "pii": false, "description": ""},
         {"name": "seller_id", "expr": "seller_id", "type": "text", "pii": false, "description": ""},
         {"name": "shipping_limit_at", "expr": "CAST(NULLIF(shipping_limit_date, '') AS timestamp)", "type": "timestamp", "pii": false, "description": ""},

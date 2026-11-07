@@ -1,6 +1,6 @@
 # STATUS: governor
 
-Updated 06 Nov 2026 16:47. Run `20261106-164736`.
+Updated 07 Nov 2026 14:26. Run `20261107-142621`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
@@ -36,8 +36,10 @@ Updated 06 Nov 2026 16:47. Run `20261106-164736`.
 | D12 | Clean-up from the D6 and D8 gate reviews | mechanical | - | done | 2/2 |  | claude-tc-sonnet | cursor-grok: pass | 2026-11-06T13:35:50 |
 | D11 | Red-team findings (first live run, 5 Nov) | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-06T14:29:46 |
 | D10 | Column descriptions from lineage | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-06T15:12:44 |
-| D9 | Slack app | design | yes | approved | 2/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-06T16:47:36 |
+| D9 | Slack app | design | yes | done | 2/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-06T16:47:36 |
+| D14 | Keys checked against the profile | design | yes | approved | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-07T14:26:21 |
+| D9b | Slack clean-up | design | - | pending | 0/2 |  | - | - | - |
 
-Cost so far (reported + notional): $107.35 of $150.00 run budget; 125 agent call(s).
+Cost so far (reported + notional): $110.16 of $150.00 run budget; 128 agent call(s).
 
-Next: D9 is approved: `factory resume`.
+Next: D14 is approved: `factory resume`.

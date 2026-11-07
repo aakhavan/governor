@@ -1257,3 +1257,26 @@ Review: cursor-grok: pass | claude-tc-fable: pass
 
 For Amir: A raw city or zip that is also a whole word of a label, definition, or source URL (city sales, zip 2014) is not a leak in any sentence. Longer names such as Sales Oliveira still leak. Those exempt values are still redacted in the written report. Additivity is the hardcoded pair gmv and net_revenue, so a new amount KPI is listed period by period until it is added to ADDITIVE_KPIS. The router prompt was left unchanged.
 
+## Relocks
+- 07 Nov 2026 12:45: spec fix (via supervise, by human) (changed: plan.yaml, plan/accept/accept_d14.py, plan/accept/accept_d9b.py, plan/prompts/D14.md, plan/prompts/D9b.md)
+
+## D10 result
+*Column descriptions from lineage, 06 Nov 2026 15:12.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/D10`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| docs.py exists | yes | missing |
+| describe prompt exists | yes | missing |
+| pytest tests/build | yes | 146 passed, 12 skipped in 40.17s |
+| required tests present | yes | 5 found |
+
+Review: Column descriptions are deterministic first: gold from the catalogue definition and role, staging from lineage and profile bands (no data values), intermediate by inheriting the same-named ref (approved text kept). One write-model call per model fills only the columns still empty; the prompt has lineage, counts and assumptions, and replies trim at 200 characters. Texts land in the staging, intermediate and marts yml; build.json and pr.md record docs_coverage. SQL is unchanged (catalogue.render and staging_sql). The five tests, including a graph run, check this.
+
+For Amir: The sample design never calls the write model for descriptions; rule 4 is tested by an added int_customer_orders model. The live sample-build mismatch (full Olist months versus the 2026-01 sample) is the data already on the dev test bed, and acceptance skips it by pinning the port. Marts yml now lists every KPI output column, not only the grain.
+
+## Additions for D9
+docs.describe runs in graph write_silver before any SQL is written and stores state docs (model to column to description). silver.write_silver(docs=) and gold.write_gold(docs=) put those strings on column descriptions in _staging.yml, _intermediate.yml and models/marts/<domain>/_<domain>.yml. not_null stays on the grain only. governor/build.json docs_coverage is {columns, described, share}; render_pr adds one Column descriptions line pointing at the yml. Fake script key describe maps each model to a list of JSON objects of column to description, on the write role; a non-JSON reply leaves those columns empty. On the sample design rules 1-3 fill every column, so no describe call is made. Profile min and max must not be copied into any new payload. Do not change staging_sql or gold_sql.
+

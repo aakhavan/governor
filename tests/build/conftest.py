@@ -33,6 +33,10 @@ def sample_profile() -> dict:
                          "distinct": len(set(nonnull)), "pii": pii, "min": None, "max": None})
             if rows and len(nonnull) == len(rows) and len(set(nonnull)) == len(rows):
                 keys.append([name])
+        if rows and not keys:  # like the profiler: unique, null-free column pairs when no single column is a key
+            full = [n for n in names if all((r[n] or "").strip() for r in rows)]
+            keys = [[a, b] for i, a in enumerate(full) for b in full[i + 1:]
+                    if len({((r[a] or "").strip(), (r[b] or "").strip()) for r in rows}) == len(rows)]
         tables.append({"name": f.stem, "rows": len(rows), "columns": cols, "candidate_keys": keys})
     return Profile.model_validate({"schema": "raw", "profiled_at_rows": True, "tables": tables,
                                    "relationships": []}).to_json_dict()

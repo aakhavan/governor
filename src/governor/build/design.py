@@ -7,6 +7,7 @@
 - :func:`validate` is code: it returns :class:`Finding` objects with the section 6 codes. Three extra codes cover
   what the table does not: ``PROPOSAL_UNPARSEABLE`` (the reply is not a proposal; raised by the graph),
   ``EXPR_UNPARSEABLE`` (an ``expr`` or boolean mapping is not one SQL expression) and ``KPI_DUPLICATE``.
+  ``KEY_NOT_UNIQUE`` (batch2c section 19): a staging model's key must contain a candidate key of its source table.
 - :func:`render_report` writes the section 7 markdown for the design gate.
 """
 
@@ -33,6 +34,8 @@ CODES = (
     "DECLINE_WITHOUT_GAP",
     # beyond the section 6 table
     "PROPOSAL_UNPARSEABLE", "EXPR_UNPARSEABLE", "KPI_DUPLICATE",
+    # batch2c section 19
+    "KEY_NOT_UNIQUE",
 )
 
 
@@ -149,6 +152,50 @@ def _has(name: str, columns: set[str]) -> bool:
     return name in columns or name.lower() in columns
 
 
+def _key_source(expr: str | None, name: str) -> str | None:
+    """The raw column a staging key column reads: ``expr`` null means the column of the same name; a bare column or
+    a cast of one maps to that column. Anything else (computed, or not one expression) gives None."""
+    if not (expr or "").strip():
+        return name
+    try:
+        tree = sqlglot.parse_one(expr, read="postgres")
+    except SqlglotError:
+        return None
+    while isinstance(tree, (exp.Paren, exp.Cast)):
+        tree = tree.this
+    return tree.name if isinstance(tree, exp.Column) and tree.name else None
+
+
+def _key_findings(m, table) -> list[tuple[str, str]]:
+    """Section 19: a staging key must contain a candidate key of its profiled source table (subject, problem)."""
+    have = {c.name for c in table.columns}
+    exprs = {c.name: c.expr for c in m.columns}
+    out: list[tuple[str, str]] = []
+    raw: set[str] = set()
+    for k in m.primary_key:
+        if k not in exprs:
+            return []  # undeclared key column: MISSING_KEY
+        src = _key_source(exprs[k], k)
+        if src is None:
+            out.append((f"{m.name}.{k}", f"key column '{k}' is computed; key a staging model on raw columns"))
+            continue
+        if not _has(src, have):
+            return out  # UNKNOWN_SOURCE_COLUMN reports it
+        raw.add(src if src in have else src.lower())
+    if out or not m.primary_key:
+        return out
+    if any(set(ck) <= raw for ck in table.candidate_keys):
+        return []
+    key = ", ".join(m.primary_key)
+    if not table.candidate_keys:
+        return [(m.name, f"primary_key [{key}] is not known to be unique: {table.name} has no unique column or "
+                         "column pair in the profile; leave it unstaged unless a KPI needs it, or dedupe it in an "
+                         "intermediate model")]
+    cands = "; ".join("[" + ", ".join(ck) + "]" for ck in table.candidate_keys)
+    return [(m.name, f"primary_key [{key}] (raw columns [{', '.join(sorted(raw))}]) contains no candidate key of "
+                     f"{table.name} ({table.rows} rows); its candidate keys are {cands}: key on one of them")]
+
+
 def _is_pii(table: str, column: str, policy: dict[str, str], profiled: set[tuple[str, str]]) -> bool:
     return column in policy or f"{table}.{column}" in policy or (table, column) in profiled
 
@@ -219,6 +266,9 @@ def validate(proposal: Proposal | dict, profile: Profile | dict, catalogue: KpiC
                                       and _is_pii(m.source_table, col if col in have else col.lower(), policy, pii_profiled))
                     if pii_read and not c.pii:
                         add("PII_UNTAGGED", f"{m.name}.{c.name}", f"reads PII column(s) {pii_read} but has pii: false (L6)")
+                # keys against the profile's candidate keys (batch2c section 19)
+                for subject, problem in _key_findings(m, prof.table(m.source_table)):
+                    add("KEY_NOT_UNIQUE", subject, problem)
 
     # PII passed on by name through intermediate models (L6)
     for m in prop.silver_models:
