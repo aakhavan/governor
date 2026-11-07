@@ -26,3 +26,30 @@ A thin client on top of the build functions and the event log (`batch2b.md` sect
 ## 18. Superset (D13, draft: run only if Amir decides on 7 Nov)
 
 Superset as a container beside the test bed, reading `serve_analyst` through a read-only `governor_superset` role; datasets, charts and one "Shop KPIs" dashboard for the certified KPIs generated from `analytics.governor_certified` as Superset's YAML export and imported by script. Not in `plan.yaml` until decided.
+
+## 19. Keys checked against the profile (D14)
+
+Agreed with Amir on 7 Nov 2026, after the first Slack run: the design declared `review_id` the key of `stg_order_reviews` (789 duplicates in Olist: one review can cover several orders) and keyed `stg_geolocation` on a column that is not unique (131,707 duplicates). Both passed validation, were approved, and failed the L4 key tests in the silver build, which escalates a failing staging model at once. The profile already holds each table's candidate keys (single columns and column pairs that are unique with no nulls), and the planner already sees them; nothing checked the design against them.
+
+- New validation code `KEY_NOT_UNIQUE` in `design.validate`, for staging models with a `source_table` in the profile:
+  - map each `primary_key` column to the raw column it reads: `expr` null means the raw column of the same name; an `expr` that is a bare column, or a cast of one, maps to that column; any other `expr` makes the key unverifiable and is a finding ("key column '<k>' is computed; key a staging model on raw columns");
+  - the key is accepted when some candidate key of the source table is a subset of the mapped raw columns (a superset of a unique key is unique);
+  - otherwise a finding that names the source table's candidate keys, or says the table has none ("`<table>` has no unique column or column pair in the profile; leave it unstaged unless a KPI needs it, or dedupe it in an intermediate model"). Counts and column names only, never values.
+- Intermediate models are not checked (their grain is not visible statically; their L4 test still runs in dbt).
+- The finding goes through the existing design repair loop like any other code, so the planner fixes it before the gate. `propose.md` gains one line: a staging model's `primary_key` must contain one of its source table's `candidate_keys`.
+- Fixtures and fake scripts in `tests/fixtures/build/` are made consistent with the rule; the rule is not loosened to keep an old fixture passing.
+
+## 20. Slack clean-up (D9b)
+
+From the first Slack runs on 6 and 7 Nov and the D9 review notes.
+
+- **Ended runs read as ended.** The progress message gets a terminal state:
+  - `escalated` or `blueprint_failed`: the failing stage gets `:x:`, stages after it `:heavy_minus_sign:`, the header becomes `:red_circle: stopped at <stage>` plus a one-line reason (at most 200 characters, scrubbed like the escalation reply). For dbt test failures the reason names the failing tests and their failure counts (from the checkpointed error, or `target/run_results.json` in the target when the error is missing); for a connection or compilation error, the error's first line.
+  - `built`: header `:large_green_circle: built`; `published`: `:large_green_circle: published` with the pull-request link.
+  - **Superseded:** `/governor run <target>` marks every open record of the same project (not terminal, not waiting at the design gate) as `:white_circle: superseded by <id8>`; the build thread itself is not touched.
+  - **Interrupted:** at app start, every record that is not terminal and not waiting at the design gate is marked `:white_circle: interrupted (bot restarted)`. A design waiting at the gate stays open: its checkpoint survives a restart and can still be approved.
+- **No misleading reply.** The background run no longer posts "Run finished at `awaiting_design_approval`". At the gate it posts nothing extra (the card is the message); when the run ends in an error state it relies on the escalation reply and the terminal header; only an exception in the run itself posts `:warning: run failed: ...` as before.
+- **Escalation names the failure.** The escalation reply always names the failing node and its error; `model: null` with an empty error no longer happens (fall back to `run_results.json`, then to the stage).
+- **Who may run.** `GOVERNOR_SLACK_RUNNERS` (comma-separated Slack user ids) may use `/governor run`; default: the approvers. Others get an ephemeral refusal and nothing starts.
+- **design.md without mapping SQL.** The uploaded copy omits KPI mapping values (they can hold SQL literals); the line says "mappings omitted here; they are in the pull request". The file in the target is unchanged.
+- **PR link in the event.** `publish.py` adds `pr_url` (or null) to the `published` event; the notifier uses it.

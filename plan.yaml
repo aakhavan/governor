@@ -280,3 +280,20 @@ steps:
     allowed_paths: [src/governor/integrations/, tests/integrations/, docs/slack.md, pyproject.toml, uv.lock]
     human_gate: true
     review_focus: "Slack is a thin client: no build logic; only allowlisted users approve and the decision records the mapped name; command text parsed strictly; tokens from env only; no data values in any Slack payload; a notifier failure never breaks a build"
+  # ---- Batch 2c follow-ups, agreed 7 Nov 2026 after the first Slack runs. Contract: docs/capstone/batch2c.md sections 19-20.
+  - id: D14
+    title: Keys checked against the profile
+    tier: design
+    prompt: plan/prompts/D14.md
+    accept: plan/accept/accept_d14.py
+    allowed_paths: [src/governor/build/design.py, src/governor/build/prompts/propose.md, tests/build/, tests/fixtures/build/]
+    human_gate: true
+    review_focus: "a staging key is accepted only when it contains a profiled candidate key; computed keys are flagged; findings name columns and counts, never values; the repair loop fixes it before the gate; the rule is not loosened to keep old fixtures passing"
+  - id: D9b
+    title: Slack clean-up
+    tier: design
+    prompt: plan/prompts/D9b.md
+    accept: plan/accept/accept_d9b.py
+    allowed_paths: [src/governor/integrations/, tests/integrations/, tests/build/, docs/slack.md, src/governor/build/publish.py]
+    human_gate: false
+    review_focus: "ended runs read as ended (failed, superseded, interrupted) and a gate-waiting design stays open; reasons are scrubbed one-liners with test names and counts, never rows; runners allowlisted; uploaded design.md has no mapping values; Slack still holds no build logic"
