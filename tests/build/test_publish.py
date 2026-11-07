@@ -82,6 +82,35 @@ def test_publish_pushes_to_origin(built, tmp_path):
     assert out["branch"] in heads and "main" in heads
 
 
+def _events(target):
+    return [json.loads(line) for line in
+            (target.parent / "state" / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+
+
+def test_published_event_carries_pr_url(built, monkeypatch):
+    target, tid = built
+    url = "https://github.com/example/olist-dbt/pull/7"
+    real_run = subprocess.run
+
+    def fake_run(cmd, *a, **k):
+        if cmd and cmd[0] == "gh":  # no network: gh prints the new pull request's url
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"Creating pull request\n{url}\n", stderr="")
+        return real_run(cmd, *a, **k)
+
+    monkeypatch.setattr(pub.subprocess, "run", fake_run)
+    out = pub.publish(target, open_pr=True)
+    assert out["pr_url"] == url
+    ev = _events(target)[-1]
+    assert ev["kind"] == "published" and ev["pr_url"] == url and ev["pr"] is True and ev["thread_id"] == tid
+
+
+def test_published_event_pr_url_is_null_without_a_pr(built):
+    target, _ = built
+    assert pub.publish(target)["pr_url"] is None
+    ev = _events(target)[-1]
+    assert ev["kind"] == "published" and "pr_url" in ev and ev["pr_url"] is None
+
+
 def test_certify_refuses_before_the_merge(built):
     target, _ = built
     assert cert.certify(target, "amir", dbt_runner=_no_dbt)["status"] == "not_merged"  # not published yet

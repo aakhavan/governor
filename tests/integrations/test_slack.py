@@ -205,7 +205,7 @@ def test_design_card_has_counts_gaps_and_buttons(tmp_path, monkeypatch, fake, pr
         (blocks.APPROVE_ACTION, tid, "Approve"), (blocks.REJECT_ACTION, tid, "Reject")]
     upload = fake.named("files_upload_v2")
     assert len(upload) == 1 and upload[0]["filename"] == "design.md" and upload[0]["thread_ts"] == ts
-    assert upload[0]["file"].endswith("design.md")
+    assert upload[0]["content"].startswith("#") and "## KPIs" in upload[0]["content"]
 
     # an invalid design has its findings and no buttons
     _, invalid = blocks.design_card(tid, good, [{"code": "MAPPING_UNKNOWN_COLUMN", "subject": "kpi.gmv",

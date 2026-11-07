@@ -5,9 +5,14 @@ One message per build thread in ``GOVERNOR_SLACK_CHANNEL``, updated in place wit
 cost; details go in the Slack thread under it:
 
 - ``design_gate``: the design card (silver models, KPIs to build and to decline with gap reasons, validation
-  findings, Approve / Reject buttons) and ``governor/design.md`` attached as a file;
-- ``escalated``: the failing model and its error, without data values;
-- ``published``: the branch (the app adds the pull-request link when it ran the publish).
+  findings, Approve / Reject buttons) and ``governor/design.md`` attached without its KPI mapping values;
+- ``escalated``: the failing node and its error, without data values (checkpoint, then the target's
+  ``target/run_results.json``, then the stage);
+- ``published``: the branch and the pull-request link (the event's ``pr_url``).
+
+Ended runs read as ended (batch2c section 20): the header turns red (``stopped at <stage>`` and a one-line reason)
+or green (built, published); records left open by a newer run of the project or by a restart are marked
+superseded or interrupted. A record waiting at the design gate stays open.
 
 The card and the escalation read the build thread's checkpoint (proposal, findings, target, escalation); events
 themselves carry only counts, names and codes. Build thread id to message timestamp lives in
@@ -100,6 +105,10 @@ class MessageStore:
             rec = self._load().get(thread_id)
         return dict(rec) if isinstance(rec, dict) else None
 
+    def all(self) -> dict[str, dict]:
+        with self._lock:
+            return {k: dict(v) for k, v in self._load().items() if isinstance(v, dict)}
+
     def put(self, thread_id: str, rec: dict) -> None:
         with self._lock:
             data = self._load()
@@ -111,6 +120,54 @@ class MessageStore:
 
 
 # --------------------------------------------------------------------------- notifier
+
+
+_FAILED_STAGE = {"silver": "silver_built", "gold": "gold_built"}
+
+
+def _terminal(rec: dict, event: dict) -> None:
+    """Set the record's terminal state (``outcome`` and what the header needs) from an ending event."""
+    kind, status = event.get("kind"), event.get("status")
+    end: dict | None = None
+    if kind == "escalated":
+        stage = str(event.get("stage") or "build")
+        blueprint = status == graph.BLUEPRINT_FAILED
+        end = {"outcome": blocks.FAILED, "failed_stage": _FAILED_STAGE.get(stage, "gold_built"),
+               "stopped_at": f"{stage} (blueprint check)" if blueprint else stage,
+               "reason": event.get("_reason") or f"the {stage} stage ended with no error recorded"}
+    elif kind == "design_gate" and status == graph.INVALID:
+        codes = ", ".join(str(c) for c in event.get("codes") or []) or "findings"
+        end = {"outcome": blocks.FAILED, "failed_stage": "validated", "stopped_at": "validation",
+               "reason": f"design invalid ({codes}); see governor/design.md"}
+    elif kind == "rejected" and status == graph.REJECTED:
+        end = {"outcome": blocks.FAILED, "failed_stage": "design_gate", "stopped_at": "the design gate",
+               "reason": "design rejected for the second time"}
+    elif kind == "built":
+        end = {"outcome": blocks.BUILT}
+    elif kind == "published":
+        end = {"outcome": blocks.PUBLISHED, "pr_url": event.get("pr_url")}
+    if end is not None:
+        for k in ("outcome", "failed_stage", "stopped_at", "reason", "pr_url", "superseded_by"):
+            rec.pop(k, None)
+        rec.update({k: v for k, v in end.items() if v is not None})
+
+
+def is_open(rec: dict) -> bool:
+    """Not ended and not waiting at the design gate (a gate survives a restart and can still be approved)."""
+    return rec.get("outcome") not in blocks.TERMINAL and rec.get("status") != graph.AWAITING
+
+
+def read_run_results(target: str | Path | None) -> list[dict]:
+    """``target/run_results.json`` in the target project: unique id, status, failure count and message only."""
+    if not target:
+        return []
+    path = Path(target) / "target" / "run_results.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8")).get("results") or []
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [{"unique_id": r.get("unique_id"), "status": r.get("status"), "failures": r.get("failures"),
+             "message": r.get("message")} for r in raw if isinstance(r, dict)]
 
 
 def _apply(rec: dict, event: dict) -> dict:
@@ -134,6 +191,7 @@ def _apply(rec: dict, event: dict) -> dict:
     if kind in _STAGE_KEYS and gate_ok and kind not in done:
         done.append(kind)
     rec["done"] = done
+    _terminal(rec, event)
     rec["status"] = event.get("status") or {
         "run_started": "started", "profiled": "profiled", "proposed": "design proposed", "validated": "validated",
         "approved": "approved, building silver", "silver_built": "silver built, building gold",
@@ -170,7 +228,17 @@ class Notifier:
         thread_id = event.get("thread_id")
         if not thread_id:
             return
+        if event.get("kind") == "escalated":
+            failure = self.failure(thread_id, event)
+            event = {**event, "_failure": failure, "_reason": failure["reason"]}
         rec = _apply(self.store.get(thread_id) or {"done": []}, event)
+        self._render(thread_id, rec)
+        extra = getattr(self, f"_on_{event.get('kind')}", None)
+        if extra is not None:
+            extra(thread_id, event, rec)
+
+    def _render(self, thread_id: str, rec: dict) -> None:
+        """Post or update the thread's progress message and store the record."""
         text, block_list = blocks.progress(thread_id, rec)
         if rec.get("ts"):
             self.client.chat_update(channel=rec["channel"], ts=rec["ts"], text=text, blocks=block_list)
@@ -178,9 +246,77 @@ class Notifier:
             resp = self.client.chat_postMessage(channel=self.channel, text=text, blocks=block_list)
             rec["ts"], rec["channel"] = resp["ts"], resp.get("channel") or self.channel
         self.store.put(thread_id, rec)
-        extra = getattr(self, f"_on_{event.get('kind')}", None)
-        if extra is not None:
-            extra(thread_id, event, rec)
+
+    # ---- ended without an event (a newer run, a restart)
+
+    def open_threads(self, project: str | None = None) -> list[str]:
+        """Records that are not terminal and not waiting at the design gate (of one project, when given)."""
+        return [tid for tid, rec in self.store.all().items()
+                if is_open(rec) and (project is None or rec.get("project") == project)]
+
+    def mark(self, thread_id: str, outcome: str, **fields: Any) -> None:
+        """Give an open record a terminal state (superseded or interrupted) and update its message."""
+        rec = self.store.get(thread_id)
+        if rec is None:
+            return
+        rec.update({"outcome": outcome, **fields})
+        if rec.get("ts"):
+            self._render(thread_id, rec)
+        else:
+            self.store.put(thread_id, rec)
+
+    def supersede(self, project: str, new_thread_id: str) -> list[str]:
+        """``/governor run``: every open record of the project is superseded by the new build thread."""
+        marked = [t for t in self.open_threads(project) if t != new_thread_id]
+        for tid in marked:
+            self._safe_mark(tid, blocks.SUPERSEDED, superseded_by=new_thread_id)
+        return marked
+
+    def interrupt_open(self) -> list[str]:
+        """At app start: open records cannot finish any more (their run died with the old process)."""
+        marked = self.open_threads()
+        for tid in marked:
+            self._safe_mark(tid, blocks.INTERRUPTED)
+        return marked
+
+    def _safe_mark(self, thread_id: str, outcome: str, **fields: Any) -> None:
+        try:
+            self.mark(thread_id, outcome, **fields)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("slack: cannot mark %s %s: %s", blocks.short(thread_id), outcome, type(exc).__name__)
+
+    # ---- the failure behind an escalation
+
+    def failure(self, thread_id: str, event: dict) -> dict:
+        """``{stage, node, error, reason}``: the checkpointed error first, then ``target/run_results.json``, then
+        the stage. ``node`` and ``error`` may be None (the escalation reply names the stage then); ``reason`` is one
+        scrubbed line for the progress header."""
+        stage = str(event.get("stage") or "build")
+        if event.get("status") == graph.BLUEPRINT_FAILED:
+            error = f"{int(event.get('blueprint_findings') or 0)} blueprint findings (high severity); see governor/build.json"
+            return {"stage": stage, "node": "blueprint check", "error": error, "reason": error}
+        try:
+            values = self.values(thread_id) or {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("slack: cannot read the checkpoint of %s: %s", blocks.short(thread_id), type(exc).__name__)
+            values = {}
+        stage_state = (values.get(stage) or {}) if stage in ("silver", "gold") else {}
+        esc = stage_state.get("escalated") or {}
+        node = event.get("model") or esc.get("model")
+        error = esc.get("error")
+        if not error and node:
+            # the escalation is emitted inside the node, before its return is checkpointed:
+            # the previous checkpoint still holds the failing model's error
+            error = ((stage_state.get("failures") or {}).get(node) or "")[-3000:] or None
+        if not error:
+            rr_node, error = blocks.run_results_failures(read_run_results(values.get("target")))
+            node = node or rr_node
+        if not node and error:
+            tests = blocks.failing_tests(error)
+            node = tests[0][0] if tests else None
+        reason = blocks.reason_line(error) if error else ""
+        return {"stage": stage, "node": node, "error": error,
+                "reason": reason or f"the {stage} stage ended with no error recorded"}
 
     # ---- details in the thread
 
@@ -191,7 +327,9 @@ class Notifier:
         self.client.chat_postMessage(channel=rec["channel"], thread_ts=rec["ts"], text=text, blocks=block_list)
         report = Path(values["target"]) / "governor" / "design.md" if values.get("target") else None
         if report is not None and report.is_file():
-            self.client.files_upload_v2(channel=rec["channel"], thread_ts=rec["ts"], file=str(report),
+            # the uploaded copy omits the KPI mapping values (they can hold SQL literals); the file is unchanged
+            content = blocks.design_without_mappings(report.read_text(encoding="utf-8"))
+            self.client.files_upload_v2(channel=rec["channel"], thread_ts=rec["ts"], content=content,
                                         filename="design.md", title=f"design.md (build {blocks.short(thread_id)})")
 
     def _on_rejected(self, thread_id: str, event: dict, rec: dict) -> None:
@@ -204,19 +342,8 @@ class Notifier:
         self.reply(thread_id, f"SQL repair {int(event.get('repairs') or 0)}: {models}")
 
     def _on_escalated(self, thread_id: str, event: dict, rec: dict) -> None:
-        values = self.values(thread_id) or {}
-        stage = event.get("stage")
-        stage_state = (values.get(stage) or {}) if stage in ("silver", "gold") else {}
-        esc = stage_state.get("escalated") or {}
-        model = event.get("model") or esc.get("model")
-        error = esc.get("error")
-        if not error and model:
-            # the escalation is emitted inside the node, before its return is checkpointed:
-            # the previous checkpoint still holds the failing model's error
-            error = ((stage_state.get("failures") or {}).get(model) or "")[-3000:] or None
-        if event.get("status") == graph.BLUEPRINT_FAILED:
-            error = f"{int(event.get('blueprint_findings') or 0)} blueprint findings (high severity); see governor/build.json"
-        text, block_list = blocks.escalation(thread_id, stage, model, error)
+        failure = event.get("_failure") or self.failure(thread_id, event)
+        text, block_list = blocks.escalation(thread_id, failure["stage"], failure["node"], failure["error"])
         self.reply(thread_id, text, block_list)
 
     def _on_built(self, thread_id: str, event: dict, rec: dict) -> None:
@@ -225,7 +352,8 @@ class Notifier:
                               f"tests passed, gaps: {gaps}. Publish with `/governor publish {blocks.short(thread_id)}`.")
 
     def _on_published(self, thread_id: str, event: dict, rec: dict) -> None:
-        text, block_list = blocks.published(thread_id, event.get("branch"), pr_opened=bool(event.get("pr")))
+        text, block_list = blocks.published(thread_id, event.get("branch"), event.get("pr_url"),
+                                            pr_opened=bool(event.get("pr")))
         self.reply(thread_id, text, block_list)
 
 
@@ -265,4 +393,5 @@ def notify(event: dict) -> None:
         log.warning("slack notifier failed on %s: %s", kind, type(exc).__name__)
 
 
-__all__ = ["MESSAGES_FILE", "MessageStore", "Notifier", "configure", "known_threads", "notify", "thread_values"]
+__all__ = ["MESSAGES_FILE", "MessageStore", "Notifier", "configure", "is_open", "known_threads", "notify",
+           "read_run_results", "thread_values"]

@@ -1280,3 +1280,29 @@ For Amir: The sample design never calls the write model for descriptions; rule 4
 ## Additions for D9
 docs.describe runs in graph write_silver before any SQL is written and stores state docs (model to column to description). silver.write_silver(docs=) and gold.write_gold(docs=) put those strings on column descriptions in _staging.yml, _intermediate.yml and models/marts/<domain>/_<domain>.yml. not_null stays on the grain only. governor/build.json docs_coverage is {columns, described, share}; render_pr adds one Column descriptions line pointing at the yml. Fake script key describe maps each model to a list of JSON objects of column to description, on the write role; a non-JSON reply leaves those columns empty. On the sample design rules 1-3 fill every column, so no describe call is made. Profile min and max must not be copied into any new payload. Do not change staging_sql or gold_sql.
 
+## D9 result
+*Slack app, 06 Nov 2026 16:47.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 2 fix loop(s); branch `factory/D9`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| slack-bolt is a dependency | yes |  |
+| src/governor/integrations/slack/app.py exists | yes | missing |
+| src/governor/integrations/slack/blocks.py exists | yes | missing |
+| src/governor/integrations/slack/notifier.py exists | yes | missing |
+| docs/slack.md exists | yes | missing |
+| governor.build never imports Slack | yes |  |
+| Slack modules import without tokens | yes |  |
+| pytest tests/integrations | yes | 7 passed in 5.33s |
+| required tests present | yes | 7 found |
+| pytest tests/build | yes | 146 passed, 12 skipped in 40.96s |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: Slack-started publish posts the PR URL from publish()'s return. A terminal publish only says a PR was opened, because the published event has pr: true and no pr_url. An approver missing from GOVERNOR_SLACK_NAMES is stored as their Slack user id. An escalation with no model name can omit the error, because silver_done emits before that checkpoint is written. design.md is uploaded whole, so mapping SQL is in the file; the card omits mappings. Tests use a fake Web API client and do not open Socket Mode.
+
+## Additions for the next plan
+Do not import governor.integrations from governor.build. Progress events stay scalars: counts, names, codes, status, cost, and pr_url (null when no pull request). The Slack record outcome is failed, built, published, superseded, or interrupted. A gate record stays open only while its stored status is awaiting_design_approval; design_invalid and a second rejection are already failed, so a restart must not mark them interrupted. safe_text still turns integers of 5 or more digits into #, except (N failure(s)) and Got N results. Both dbt lines are parsed: silver 'dbt test <unique_id> <status>: Got N', and gold 'dbt <unique_id> <status>: Got N' where unique_id starts with test. The uploaded design.md is the rendered report with the KPI mapping cell replaced; the table is | id | decision | domain | mapping or reason | and the file in the target is not modified. A publish from Slack posts the link only through the notifier, which create_app registers. Superseded does not cancel the old build thread: a later escalated, built, or published event on that same thread replaces the superseded header.
+

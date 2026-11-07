@@ -252,7 +252,7 @@ def publish(target: str | Path, *, open_pr: bool = False) -> dict:
         pr_url = (proc.stdout.strip().splitlines() or [None])[-1]
     out: dict[str, Any] = {"status": "published", "branch": branch, "commit": commit, "pr_url": pr_url}
     emit("published", thread_id=thread_id, branch=branch, commit=commit, kpis=n_kpis, gaps=n_gaps, pushed=pushed,
-         pr=bool(pr_url), scaffold=scaffold, seconds=round(time.monotonic() - started, 1))
+         pr=bool(pr_url), pr_url=pr_url, scaffold=scaffold, seconds=round(time.monotonic() - started, 1))
     return out
 
 

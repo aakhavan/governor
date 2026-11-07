@@ -6,6 +6,8 @@ a build thread that exists); anything else gets the usage message. Slack needs a
 so the command is acknowledged first and the build work runs in a background thread; progress then arrives through
 the build events and the notifier.
 
+Only users in ``GOVERNOR_SLACK_RUNNERS`` (default: the approvers) may ``run``. A run supersedes the project's open
+records; at start the app marks open records interrupted (a design waiting at the gate stays open).
 Only users in ``GOVERNOR_SLACK_APPROVERS`` may approve, reject or publish; others get an ephemeral refusal. The
 approver's mapped name (``GOVERNOR_SLACK_NAMES``) is passed as ``by``, so it lands in ``approved.yaml`` as
 ``approved_by``. ``certify`` stays a terminal command (it needs the admin login).
@@ -33,6 +35,7 @@ APPROVER_ACTIONS = ("approve", "reject", "publish")
 MAX_NOTE = 1000
 MIN_PREFIX = 8
 REFUSAL = "Only approvers listed in GOVERNOR_SLACK_APPROVERS can {action} a build."
+RUN_REFUSAL = "Only users listed in GOVERNOR_SLACK_RUNNERS (default: the approvers) can start a build."
 
 
 class UsageError(ValueError):
@@ -168,6 +171,9 @@ class GovernorSlack:
         if cmd.action in APPROVER_ACTIONS and not self.config.is_approver(user_id):
             respond(text=REFUSAL.format(action=cmd.action), response_type="ephemeral")
             return
+        if cmd.action == "run" and not self.config.is_runner(user_id):
+            respond(text=RUN_REFUSAL, response_type="ephemeral")
+            return
         if cmd.action == "run":
             thread_id = str(uuid.uuid4())
             respond(text=f"Starting build `{blocks.short(thread_id)}` for `{cmd.target}`; progress in #{self.config.channel}.",
@@ -234,15 +240,28 @@ class GovernorSlack:
             log.warning("slack reply failed: %s", type(exc).__name__)
 
     def _run(self, target: str, thread_id: str) -> None:
+        # Open records of the same project (not ended, not at the gate) will never finish now.
+        try:
+            self.notifier.supersede(target, thread_id)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("slack: superseding older runs failed: %s", type(exc).__name__)
         try:
             # Same as the CLI run: make sure the target is a dbt project (dbt_project.yml, profiles) before the build.
             from governor.build.workspace import init_target
 
             init_target(self.config.targets[target], target)
-            out = self.build.start(self.config.targets[target], target, self._llm(), thread_id=thread_id)
-            self._say(thread_id, f"Run finished at `{out.get('status')}`.")
+            # The outcome is the progress message (and the design card or escalation reply): no extra reply here.
+            self.build.start(self.config.targets[target], target, self._llm(), thread_id=thread_id)
         except Exception as exc:  # noqa: BLE001
             self._say(thread_id, f":warning: run failed: {_error_line(exc)}")
+
+    def mark_interrupted(self) -> list[str]:
+        """At app start: open records (not ended, not waiting at the gate) were cut off by the restart."""
+        try:
+            return self.notifier.interrupt_open()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("slack: marking interrupted runs failed: %s", type(exc).__name__)
+            return []
 
     def _approve(self, cmd: Command, user_id: str) -> None:
         out = self.build.approve(cmd.thread_id, self.config.name_for(user_id), self._llm())
@@ -264,9 +283,7 @@ class GovernorSlack:
         out = self.publisher(target, open_pr=_has_origin(target))
         if out.get("status") != "published":
             self._say(tid, f"Not published: {blocks.safe_text(out.get('reason'), 300)}")
-        elif out.get("pr_url"):
-            text, block_list = blocks.published(tid, out.get("branch"), out["pr_url"])
-            self._say(tid, text, block_list)
+        # published: the event carries pr_url and the notifier posts the link
 
 
 def _has_origin(target: Path) -> bool:
@@ -292,6 +309,7 @@ def create_app(config: SlackConfig, gov: GovernorSlack | None = None):
     gov = gov or GovernorSlack(config, app.client)
     notifier_module.configure(gov.notifier)
     ensure_notifier_registered()
+    gov.mark_interrupted()
 
     @app.command("/governor")
     def _command(ack, body, respond):  # noqa: ANN001
