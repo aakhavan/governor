@@ -257,7 +257,7 @@ def test_published_header_and_link_from_the_event(tmp_path, fake):
     url = "https://github.com/example/olist-dbt/pull/7"
     n.handle({"kind": "published", "thread_id": TA, "branch": "governor/build-aaaaaaaa", "pr": True, "pr_url": url})
     head = _header(_last_update(fake, ts))
-    assert head.startswith(f":large_green_circle: published <{url}|pull request>")
+    assert head.startswith(f":large_green_circle: published: <{url}>")
     assert f"<{url}|pull request>" in fake.named("chat_postMessage")[-1]["text"]
     assert ":white_check_mark: published" in _checklist(_last_update(fake, ts))
     # a publish without a pull request still reads as published, with no link

@@ -324,6 +324,26 @@ def test_propose_is_one_structured_call(profile, good):
         design.propose(profile, CATALOGUE, BLUEPRINT, [], FakeBuildLLM({"propose": ["not json"]}))
 
 
+def test_schema_prefixed_source_table_is_normalised(profile, good, policy):
+    """Batch2c section 21: ``raw.<table>`` is the profiled ``<table>`` (code, not a repair); others stay findings."""
+    table = _model(good, "stg_orders")["source_table"]
+    prefixed = json.loads(json.dumps(good))
+    _model(prefixed, "stg_orders")["source_table"] = f"raw.{table}"
+    assert _codes(prefixed, profile, policy) == []
+    # propose returns the bare name, so the checkpointed proposal (and silver) never sees the prefix
+    p = design.propose(profile, CATALOGUE, BLUEPRINT, [], FakeBuildLLM({"propose": [json.dumps(prefixed)]}))
+    assert next(m for m in p.silver_models if m.name == "stg_orders").source_table == table
+    assert design.normalise_source_tables(prefixed, profile).model_dump()["silver_models"] == \
+        Proposal.model_validate(good).model_dump()["silver_models"]
+    # an unknown table, another schema, or a prefix on an unknown table is still UNKNOWN_SOURCE_TABLE
+    for bad in ("raw.olist_nope", f"public.{table}", "olist_nope", f"raw.raw.{table}"):
+        doc = json.loads(json.dumps(good))
+        _model(doc, "stg_orders")["source_table"] = bad
+        found = _codes(doc, profile, policy)
+        assert [(f.code, f.subject) for f in found if f.code == "UNKNOWN_SOURCE_TABLE"] == \
+            [("UNKNOWN_SOURCE_TABLE", "stg_orders")], bad
+
+
 # ---- the report ----
 
 SECTIONS = ["## Silver models", "## KPIs", "## Gap report", "## Assumptions", "## Validation findings", "## Commands"]

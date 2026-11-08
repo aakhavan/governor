@@ -1306,3 +1306,26 @@ For Amir: Slack-started publish posts the PR URL from publish()'s return. A term
 ## Additions for the next plan
 Do not import governor.integrations from governor.build. Progress events stay scalars: counts, names, codes, status, cost, and pr_url (null when no pull request). The Slack record outcome is failed, built, published, superseded, or interrupted. A gate record stays open only while its stored status is awaiting_design_approval; design_invalid and a second rejection are already failed, so a restart must not mark them interrupted. safe_text still turns integers of 5 or more digits into #, except (N failure(s)) and Got N results. Both dbt lines are parsed: silver 'dbt test <unique_id> <status>: Got N', and gold 'dbt <unique_id> <status>: Got N' where unique_id starts with test. The uploaded design.md is the rendered report with the KPI mapping cell replaced; the table is | id | decision | domain | mapping or reason | and the file in the target is not modified. A publish from Slack posts the link only through the notifier, which create_app registers. Superseded does not cancel the old build thread: a later escalated, built, or published event on that same thread replaces the superseded header.
 
+## Relocks
+- 08 Nov 2026 14:17: spec fix (via supervise, by human) (changed: plan.yaml, plan/accept/accept_d9c.py, plan/prompts/D9c.md)
+
+## D14 result
+*Keys checked against the profile, 07 Nov 2026 14:26.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/D14`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| KEY_NOT_UNIQUE is a validation code | yes | missing |
+| propose prompt mentions candidate keys | yes | missing |
+| pytest tests/build | yes | 152 passed, 12 skipped in 39.34s |
+| required tests present | yes | 5 found |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: STATUS.md shows a later lock_mismatch because plan files changed after the lock. That is outside this review; the acceptance result given for D14 passed. If a primary_key names a column the model does not declare, _key_findings returns nothing and MISSING_KEY blocks the gate, so a computed column earlier in that same key is not also reported until a later repair.
+
+## Additions for D9b
+KEY_NOT_UNIQUE is raised by design.validate for a staging model whose source_table is in the profile. It is not a new graph branch: any finding, including this one, goes through the existing propose repair loop (at most two design repairs) before the gate. A staging primary_key is valid when some candidate key of the source table is a subset of the raw columns its key columns read. A null expr means the raw column of the same name; a bare column or a cast of one maps to that column; any other expr is computed and is KEY_NOT_UNIQUE on subject <model>.<column>. A table with no candidate key gets one finding: leave it unstaged unless a KPI needs it, or dedupe it in an intermediate model. Intermediate models are not checked. Findings contain column names and the table row count, never data values. propose.md already states the rule. tests/build/conftest.py sample_profile now records unique null-free column pairs when a table has no single-column key, matching profile.py. sample_design.json keys stg_reviews on [review_id, order_id], which that sample profile accepts.
+

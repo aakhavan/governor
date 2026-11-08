@@ -36,7 +36,20 @@ The Slack app moves the human design gate from the terminal to Slack (contract: 
 
 `<thread>` is the full build thread id or its first 8 characters. Anything else gets the usage message. Each build thread has one message in the channel, updated in place with the stage checklist (profiled, design proposed, validated, waiting for approval, approved, silver built, gold built, published), the repairs and the model cost. At the design gate the thread under that message gets the design card with its **Approve** and **Reject** buttons (Reject asks for a note in a modal), and `design.md` is attached. The attached copy leaves out the KPI mapping values (they can hold SQL literals; the line says "mappings omitted here; they are in the pull request"); the file in the target is unchanged. An escalation names the failing node and its error, with quoted literals and DETAIL lines removed: the error comes from the build checkpoint, else from `target/run_results.json` in the target (failing tests and their failure counts, never rows), else the stage is named. A publish posts the pull-request link from the `published` event (`pr_url`).
 
-Only users in `GOVERNOR_SLACK_RUNNERS` can start a build; when it is not set, the approvers can. Only users in `GOVERNOR_SLACK_APPROVERS` can approve, reject or publish. Everyone else gets an ephemeral refusal and nothing starts.
+Only users in `GOVERNOR_SLACK_RUNNERS` can start a build; when it is not set, the approvers can. Only users in `GOVERNOR_SLACK_APPROVERS` can approve, reject or publish, with the commands or the buttons. Everyone else gets an ephemeral refusal and nothing starts.
+
+### Next steps and the publish button
+
+Slack does not run custom slash commands in thread replies, so the next step is shown in the channel message itself:
+
+- **Built:** under the checklist, `Next: Open the pull request: /governor publish <id8>` and an **Open pull request** button. The thread's "Built" reply has the same button and three steps: ① open the pull request, ② review and merge it on GitHub, ③ certify in a terminal: `python -m governor.build certify --target <target> --by "<name>"`. The target path comes from `GOVERNOR_SLACK_TARGETS` and the name is the approver's mapped name (`GOVERNOR_SLACK_NAMES`). `certify` stays a terminal command because it needs the admin login.
+- **Published:** the header links the pull request (`:large_green_circle: published: <PR url>`) and the "Next" line becomes `Review and merge on GitHub, then certify: python -m governor.build certify ...`. The thread gets the link and the same line. When there is no pull request (the target has no `origin`), the header names the branch and the line says to merge it into `main` locally, then certify.
+
+Pressing **Open pull request** is the same as `/governor publish <id8>`. Only approvers can press it.
+
+### Decided buttons
+
+After an approve, the design card's buttons are replaced by `:white_check_mark: Approved by <name> at <time>`. After a reject, they are replaced by `:x: Rejected by <name>: <note>`, and the next proposal gets a new card with fresh buttons. After a publish, the **Open pull request** button is replaced by the link, in the channel message and in the "Built" reply. A stale button gets an ephemeral "out of date" answer and changes nothing. A button is stale when the design is already decided or no longer at the gate, when it is on an older card, or when the build is already published or not built yet.
 
 ### Terminal states
 
@@ -45,8 +58,8 @@ An ended run reads as ended in its progress message:
 | state | header | checklist |
 |---|---|---|
 | escalated, blueprint failed, design invalid, rejected twice | `:red_circle: stopped at <stage>` and a one-line reason (at most 200 characters, scrubbed): the failing tests with their failure counts, or the error's first line | `:x:` on the failed stage, `:heavy_minus_sign:` on the stages after it |
-| built | `:large_green_circle: built` | |
-| published | `:large_green_circle: published` with the pull-request link | |
+| built | `:large_green_circle: built`, the "Next" line and the **Open pull request** button | |
+| published | `:large_green_circle: published: <PR url>` (or the branch to merge locally) and the merge-then-certify line | |
 | superseded | `:white_circle: superseded by <id8>`: a new `/governor run` of the same project ended this open run | `:heavy_minus_sign:` on the stages not reached |
 | interrupted | `:white_circle: interrupted (bot restarted)`: the app restarted while the run was open | `:heavy_minus_sign:` on the stages not reached |
 

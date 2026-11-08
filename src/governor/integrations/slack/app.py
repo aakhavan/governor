@@ -11,6 +11,11 @@ records; at start the app marks open records interrupted (a design waiting at th
 Only users in ``GOVERNOR_SLACK_APPROVERS`` may approve, reject or publish; others get an ephemeral refusal. The
 approver's mapped name (``GOVERNOR_SLACK_NAMES``) is passed as ``by``, so it lands in ``approved.yaml`` as
 ``approved_by``. ``certify`` stays a terminal command (it needs the admin login).
+
+Buttons (batch2c section 21): Approve, Reject and **Open pull request** (approvers only). A stale press (the design
+already decided or no longer at the gate, an older card, a build already published) is answered ephemerally and
+changes nothing. A reject from Slack replaces the card's buttons with the name and the note before the plan model
+proposes again.
 """
 
 from __future__ import annotations
@@ -140,7 +145,7 @@ class GovernorSlack:
                  build: Any = graph, publisher: Callable[..., dict] = build_publish.publish):
         self.config = config
         self.client = client
-        self.notifier = notifier or Notifier(client, config.channel, values=values)
+        self.notifier = notifier or Notifier(client, config.channel, values=values, targets=config.targets)
         self.runner = runner
         self.llm_factory = llm_factory
         self.threads = threads
@@ -182,22 +187,67 @@ class GovernorSlack:
             return
         self._start(cmd, user_id, respond)
 
-    def handle_approve_button(self, user_id: str, thread_id: str, respond: Callable[..., Any]) -> None:
+    # ---- buttons: approvers only; a stale button (the design decided, the build published) changes nothing
+
+    def _card_stale(self, thread_id: str, message_ts: str | None = None) -> bool:
+        """The design card's buttons are stale once the design is decided, when the press comes from an older card,
+        or when the thread no longer waits at the design gate."""
+        rec = self.notifier.store.get(thread_id) or {}
+        if rec.get("card_decided"):
+            return True
+        if message_ts and rec.get("card_ts") and message_ts != rec["card_ts"]:
+            return True
+        try:
+            status = (self.values(thread_id) or {}).get("status")
+        except Exception:  # noqa: BLE001
+            status = None
+        return status != graph.AWAITING
+
+    def _publish_stale(self, thread_id: str) -> bool:
+        """The **Open pull request** button is live only while the build is built and not yet published."""
+        return (self.notifier.store.get(thread_id) or {}).get("outcome") != blocks.BUILT
+
+    @staticmethod
+    def _stale(thread_id: str, respond: Callable[..., Any], what: str) -> None:
+        respond(text=f"This button is out of date: build `{blocks.short(thread_id)}` {what}. Nothing changed.",
+                response_type="ephemeral", replace_original=False)
+
+    def handle_approve_button(self, user_id: str, thread_id: str, respond: Callable[..., Any],
+                              message_ts: str | None = None) -> None:
         if not self.config.is_approver(user_id):
             respond(text=REFUSAL.format(action="approve"), response_type="ephemeral", replace_original=False)
             return
+        if self._card_stale(thread_id, message_ts):
+            self._stale(thread_id, respond, "is not waiting for this design decision")
+            return
         self._start(Command("approve", thread_id=thread_id), user_id, respond)
 
-    def handle_reject_button(self, user_id: str, thread_id: str, trigger_id: str, respond: Callable[..., Any]) -> None:
+    def handle_reject_button(self, user_id: str, thread_id: str, trigger_id: str, respond: Callable[..., Any],
+                             message_ts: str | None = None) -> None:
         if not self.config.is_approver(user_id):
             respond(text=REFUSAL.format(action="reject"), response_type="ephemeral", replace_original=False)
             return
+        if self._card_stale(thread_id, message_ts):
+            self._stale(thread_id, respond, "is not waiting for this design decision")
+            return
         self.client.views_open(trigger_id=trigger_id, view=blocks.reject_modal(thread_id))
+
+    def handle_publish_button(self, user_id: str, thread_id: str, respond: Callable[..., Any]) -> None:
+        if not self.config.is_approver(user_id):
+            respond(text=REFUSAL.format(action="publish"), response_type="ephemeral", replace_original=False)
+            return
+        if self._publish_stale(thread_id):
+            self._stale(thread_id, respond, "is not waiting to be published")
+            return
+        self._start(Command("publish", thread_id=thread_id), user_id, respond)
 
     def handle_reject_submit(self, user_id: str, thread_id: str, note: str) -> dict | None:
         """Returns a Bolt ``ack`` payload with input errors, or None when the rejection was started."""
         if not self.config.is_approver(user_id):
             return {"response_action": "errors", "errors": {blocks.NOTE_BLOCK: REFUSAL.format(action="reject")}}
+        if self._card_stale(thread_id):
+            return {"response_action": "errors",
+                    "errors": {blocks.NOTE_BLOCK: "This design was already decided. Nothing changed."}}
         note = (note or "").strip()
         if not note:
             return {"response_action": "errors", "errors": {blocks.NOTE_BLOCK: "Write what should change."}}
@@ -269,6 +319,12 @@ class GovernorSlack:
                                       f"`{out.get('status')}`.")
 
     def _reject(self, cmd: Command, user_id: str) -> None:
+        # the card is decided before the call: a successful reject posts a new card for the next proposal
+        try:
+            self.notifier.decide_card(str(cmd.thread_id), blocks.decided_line("reject", self.config.name_for(user_id),
+                                                                              note=cmd.note))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("slack: cannot replace the design card buttons: %s", type(exc).__name__)
         out = self.build.reject(cmd.thread_id, cmd.note, self._llm())
         self._say(str(cmd.thread_id), f"Rejected by {self.config.name_for(user_id)}; the thread is at "
                                       f"`{out.get('status')}`.")
@@ -316,15 +372,24 @@ def create_app(config: SlackConfig, gov: GovernorSlack | None = None):
         ack()
         gov.handle_command(body.get("user_id", ""), body.get("text", ""), respond)
 
+    def _message_ts(body: dict) -> str | None:
+        return (body.get("container") or {}).get("message_ts") or (body.get("message") or {}).get("ts")
+
     @app.action(blocks.APPROVE_ACTION)
     def _approve(ack, body, respond):  # noqa: ANN001
         ack()
-        gov.handle_approve_button(body["user"]["id"], body["actions"][0]["value"], respond)
+        gov.handle_approve_button(body["user"]["id"], body["actions"][0]["value"], respond, _message_ts(body))
 
     @app.action(blocks.REJECT_ACTION)
     def _reject(ack, body, respond):  # noqa: ANN001
         ack()
-        gov.handle_reject_button(body["user"]["id"], body["actions"][0]["value"], body["trigger_id"], respond)
+        gov.handle_reject_button(body["user"]["id"], body["actions"][0]["value"], body["trigger_id"], respond,
+                                 _message_ts(body))
+
+    @app.action(blocks.PUBLISH_ACTION)
+    def _publish(ack, body, respond):  # noqa: ANN001
+        ack()
+        gov.handle_publish_button(body["user"]["id"], body["actions"][0]["value"], respond)
 
     @app.view(blocks.REJECT_MODAL)
     def _reject_note(ack, body, view):  # noqa: ANN001

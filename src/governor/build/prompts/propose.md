@@ -13,7 +13,7 @@ You design the silver layer (dbt `staging` and `intermediate` models) of a compa
 
 ## Rules for the silver models
 
-- A **staging** model (`folder: "staging"`, name `stg_<entity>`) reads exactly one raw table: `source_table` is the raw table name and `refs` is `[]`. Each column's `expr` is a Postgres SQL expression over that raw table's columns only (for example `CAST(NULLIF(order_purchase_timestamp, '') AS timestamp)`). Give columns clear names and proper types.
+- A **staging** model (`folder: "staging"`, name `stg_<entity>`) reads exactly one raw table: `source_table` is the bare raw table name exactly as the profile lists it, without a schema prefix (`olist_orders_dataset`, not `raw.olist_orders_dataset`), and `refs` is `[]`. Each column's `expr` is a Postgres SQL expression over that raw table's columns only (for example `CAST(NULLIF(order_purchase_timestamp, '') AS timestamp)`). Give columns clear names and proper types.
 - An **intermediate** model (`folder: "intermediate"`, name `int_<name>`) has `source_table: null` and `refs` naming the silver models it reads. Its columns declare the output with `expr: null`; the SQL is written later from your `description`, so the description must say the grain and how the refs are joined or deduplicated.
 - Every model has a `primary_key` made of columns it declares.
 - A staging model's `primary_key` must contain one of its source table's `candidate_keys`, each key column read as the bare raw column or a cast of it. A raw table with no candidate keys cannot be staged as is: leave it out unless a KPI needs it, and then dedupe it in an intermediate model.

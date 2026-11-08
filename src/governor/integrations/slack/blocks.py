@@ -8,11 +8,13 @@ drops quoted literals and ``DETAIL`` lines.
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 from typing import Any, Iterable
 
 APPROVE_ACTION = "governor_approve"
 REJECT_ACTION = "governor_reject"
+PUBLISH_ACTION = "governor_publish"
 REJECT_MODAL = "governor_reject_modal"
 NOTE_BLOCK = NOTE_ACTION = "note"
 
@@ -126,9 +128,13 @@ def _headline(thread_id: str, rec: dict) -> tuple[str, str]:
         where = rec.get("stopped_at") or _LABELS.get(rec.get("failed_stage") or "", "build")
         reason = safe_text(rec.get("reason") or "no error recorded", 200)
         return f":red_circle: stopped at {where}: *{who}*\n{reason}", f"stopped at {where}: {who}: {reason}"
-    if outcome in (BUILT, PUBLISHED):
-        link = f" <{rec['pr_url']}|pull request>" if outcome == PUBLISHED and rec.get("pr_url") else ""
-        return f":large_green_circle: {outcome}{link}: *{who}*", f"{outcome}: {who}"
+    if outcome == PUBLISHED:
+        if rec.get("pr_url"):
+            return f":large_green_circle: published: <{rec['pr_url']}> · *{who}*", f"published: {rec['pr_url']}: {who}"
+        where = f"branch `{rec['branch']}`" if rec.get("branch") else "no pull request"
+        return f":large_green_circle: published: {where} · *{who}*", f"published: {where}: {who}"
+    if outcome == BUILT:
+        return f":large_green_circle: built: *{who}*", f"built: {who}"
     if outcome == SUPERSEDED:
         what = f"superseded by `{short(rec.get('superseded_by'))}`"
         return f":white_circle: {what}: *{who}*", f"{what}: {who}"
@@ -138,13 +144,88 @@ def _headline(thread_id: str, rec: dict) -> tuple[str, str]:
     return f"*{who}*: {status}", f"{who}: {status}"
 
 
-def progress(thread_id: str, rec: dict) -> tuple[str, list[dict]]:
+def progress(thread_id: str, rec: dict, certify: str | None = None) -> tuple[str, list[dict]]:
     """The one message per build thread: a header (the terminal state once the run ended), a stage checklist,
-    repairs and cost."""
+    the next step once the run is built or published (batch2c section 21), repairs and cost."""
     head, text = _headline(thread_id, rec)
     facts = (f"design repairs: {int(rec.get('design_repairs') or 0)} · SQL repairs: {int(rec.get('sql_repairs') or 0)}"
              f" · model cost: {_cost(rec.get('cost_usd'))} · thread `{thread_id}`")
-    return text.replace("`", ""), [_section(head), _section("\n".join(_checklist(rec))), _context(facts)]
+    out = [_section(head), _section("\n".join(_checklist(rec)))]
+    outcome = rec.get("outcome")
+    if outcome == BUILT:
+        out += [_section(f"*Next:* Open the pull request: `/governor publish {short(thread_id)}`"),
+                publish_actions(thread_id)]
+    elif outcome == PUBLISHED:
+        out.append(_section(f"*Next:* {after_publish(rec.get('pr_url'), rec.get('branch'), certify)}"))
+    return text.replace("`", ""), out + [_context(facts)]
+
+
+# --------------------------------------------------------------------------- next steps (batch2c section 21)
+
+
+def certify_command(target: Any = None, name: Any = None) -> str:
+    """The terminal certify line: the target path from ``GOVERNOR_SLACK_TARGETS`` and the approver's mapped name."""
+    path = str(target) if target else "<target>"
+    if " " in path:
+        path = f'"{path}"'
+    by = str(name).replace('"', "") if name else "<name>"
+    return f'python -m governor.build certify --target {path} --by "{by}"'
+
+
+def after_publish(pr_url: str | None, branch: Any, certify: str | None) -> str:
+    """The step after a publish: merge the pull request on GitHub, or (no ``origin``) the branch locally; then
+    certify in a terminal (it needs the admin login)."""
+    cmd = f"`{certify or certify_command()}`"
+    if pr_url:
+        return f"Review and merge on GitHub, then certify: {cmd}"
+    where = f"branch `{branch}`" if branch else "the publish branch"
+    return f"No pull request (the target has no `origin`): merge {where} into `main` locally, then certify: {cmd}"
+
+
+def publish_actions(thread_id: str) -> dict:
+    """The **Open pull request** button (approvers only: the app checks every press)."""
+    return {"type": "actions", "block_id": f"publish_{short(thread_id)}", "elements": [
+        {"type": "button", "action_id": PUBLISH_ACTION, "style": "primary", "value": thread_id,
+         "text": {"type": "plain_text", "text": "Open pull request"}}]}
+
+
+def built_reply(thread_id: str, summary: str, certify: str | None = None,
+                published_link: str | None = None) -> tuple[str, list[dict]]:
+    """The thread's "Built" reply: the summary, the three next steps and the **Open pull request** button. Once
+    published, the button gives way to the link (``published_link``)."""
+    steps = (f"*Next*\n① open the pull request: `/governor publish {short(thread_id)}`\n"
+             f"② review and merge it on GitHub\n"
+             f"③ certify in a terminal: `{certify or certify_command()}`")
+    out = [_section(summary), _section(steps)]
+    out.append(_section(published_link) if published_link else publish_actions(thread_id))
+    return summary.replace("`", ""), out
+
+
+def published_link(pr_url: str | None, branch: Any) -> str:
+    """What replaces the **Open pull request** button after the publish."""
+    if pr_url:
+        return f":rocket: Published: <{pr_url}|pull request> (branch `{branch}`)"
+    return f":rocket: Published on branch `{branch}` (no pull request: merge it locally)"
+
+
+def _when(ts: Any) -> str:
+    """An event timestamp as a Slack date (shown in the reader's time zone), UTC as the fallback text."""
+    try:
+        stamp = dt.datetime.fromisoformat(str(ts))
+    except ValueError:
+        return safe_text(ts, 40)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=dt.timezone.utc)
+    utc = stamp.astimezone(dt.timezone.utc)
+    return f"<!date^{int(stamp.timestamp())}^{{date_short_pretty}} {{time}}|{utc:%Y-%m-%d %H:%M} UTC>"
+
+
+def decided_line(action: str, name: Any = None, ts: Any = None, note: Any = None) -> str:
+    """The line that replaces the design card's buttons once the design is decided."""
+    if action == "approve":
+        return f":white_check_mark: Approved by {safe_text(name or 'someone', 80)}" + (f" at {_when(ts)}" if ts else "")
+    who = f" by {safe_text(name, 80)}" if name else ""
+    return f":x: Rejected{who}" + (f": {safe_text(note, 300)}" if note else "")
 
 
 # --------------------------------------------------------------------------- failure reasons (no data values)
@@ -231,9 +312,11 @@ def _gap_reason(k: dict) -> str:
     return f"`{k.get('id')}`: {reason}" + (f" (missing: {safe_text(missing, 120)})" if missing else "")
 
 
-def design_card(thread_id: str, proposal: dict | None, findings: list[dict] | None, status: str) -> tuple[str, list[dict]]:
+def design_card(thread_id: str, proposal: dict | None, findings: list[dict] | None, status: str,
+                decided: str | None = None) -> tuple[str, list[dict]]:
     """Silver models, KPIs to build and to decline with gap reasons, validation findings, and (when the design
-    waits at the gate) Approve / Reject buttons. Mappings are not shown: they can hold SQL literals."""
+    waits at the gate) Approve / Reject buttons. Once decided, the ``decided`` line replaces the buttons.
+    Mappings are not shown: they can hold SQL literals."""
     proposal = proposal or {}
     findings = findings or []
     silver = proposal.get("silver_models") or []
@@ -252,7 +335,10 @@ def design_card(thread_id: str, proposal: dict | None, findings: list[dict] | No
     blocks.append(_section("*Validation findings*\n" + _bullets(
         (f"`{f.get('code')}` {safe_text(f.get('subject'), 80)}: {safe_text(f.get('problem'), 160)}" for f in findings),
         "No findings.")))
-    if waiting:
+    if decided:
+        blocks.append(_section(decided))
+        blocks.append(_context("The full report is `governor/design.md`."))
+    elif waiting:
         blocks.append({"type": "actions", "block_id": f"gate_{short(thread_id)}", "elements": [
             {"type": "button", "action_id": APPROVE_ACTION, "style": "primary", "value": thread_id,
              "text": {"type": "plain_text", "text": "Approve"}},
@@ -297,13 +383,14 @@ def escalation(thread_id: str, stage: Any, model: Any, error: Any) -> tuple[str,
     return f"Build {short(thread_id)} escalated at {stage}: {node}", blocks
 
 
-def published(thread_id: str, branch: Any, pr_url: str | None = None, pr_opened: bool = False) -> tuple[str, list[dict]]:
+def published(thread_id: str, branch: Any, pr_url: str | None = None, pr_opened: bool = False,
+              certify: str | None = None) -> tuple[str, list[dict]]:
     if pr_url:
         text = f":rocket: Build `{short(thread_id)}` published: <{pr_url}|pull request> (branch `{branch}`)"
     else:
         state = "pull request opened" if pr_opened else "no pull request opened"
         text = f":rocket: Build `{short(thread_id)}` published on branch `{branch}` ({state})"
-    return text, [_section(text)]
+    return text, [_section(text), _section(f"*Next:* {after_publish(pr_url, branch, certify)}")]
 
 
 def line(text: str) -> tuple[str, list[dict]]:
@@ -324,7 +411,8 @@ def usage(targets: Iterable[str], error: str | None = None) -> str:
     return (f"{error}\n" if error else "") + USAGE.format(targets=names)
 
 
-__all__ = ["BUILT", "FAILED", "INTERRUPTED", "MAPPINGS_OMITTED", "PUBLISHED", "SUPERSEDED", "TERMINAL",
+__all__ = ["PUBLISH_ACTION", "after_publish", "built_reply", "certify_command", "decided_line", "publish_actions",
+           "published_link", "BUILT", "FAILED", "INTERRUPTED", "MAPPINGS_OMITTED", "PUBLISHED", "SUPERSEDED", "TERMINAL",
            "design_without_mappings", "failing_tests", "first_line", "node_name", "reason_line",
            "run_results_failures", "tests_reason", "APPROVE_ACTION","NOTE_ACTION", "NOTE_BLOCK", "REJECT_ACTION", "REJECT_MODAL", "STAGES", "design_card",
            "escalation", "line", "progress", "published", "reject_modal", "safe_text", "short", "status_list", "usage"]

@@ -14,6 +14,12 @@ Ended runs read as ended (batch2c section 20): the header turns red (``stopped a
 or green (built, published); records left open by a newer run of the project or by a restart are marked
 superseded or interrupted. A record waiting at the design gate stays open.
 
+Next steps in the channel (batch2c section 21): a built run's message carries a "Next" line and the **Open pull
+request** button, and so does the thread's "Built" reply (with the three steps and the certify line: the target path
+from ``GOVERNOR_SLACK_TARGETS`` and the approver's mapped name). Once published, the header links the pull request
+(or names the branch to merge locally) and the button gives way to the link. After approve or reject the design
+card's buttons give way to the decision (``card_ts`` and ``built_ts`` in the record name those replies).
+
 The card and the escalation read the build thread's checkpoint (proposal, findings, target, escalation); events
 themselves carry only counts, names and codes. Build thread id to message timestamp lives in
 ``GOVERNOR_STATE_DIR/slack_messages.json``. ``notify`` never raises: a Slack failure is logged and the build goes on.
@@ -145,9 +151,9 @@ def _terminal(rec: dict, event: dict) -> None:
     elif kind == "built":
         end = {"outcome": blocks.BUILT}
     elif kind == "published":
-        end = {"outcome": blocks.PUBLISHED, "pr_url": event.get("pr_url")}
+        end = {"outcome": blocks.PUBLISHED, "pr_url": event.get("pr_url"), "branch": event.get("branch")}
     if end is not None:
-        for k in ("outcome", "failed_stage", "stopped_at", "reason", "pr_url", "superseded_by"):
+        for k in ("outcome", "failed_stage", "stopped_at", "reason", "pr_url", "branch", "superseded_by"):
             rec.pop(k, None)
         rec.update({k: v for k, v in end.items() if v is not None})
 
@@ -177,6 +183,8 @@ def _apply(rec: dict, event: dict) -> dict:
     kind = event.get("kind")
     if kind == "run_started":
         rec["project"] = event.get("project")
+    if kind == "approved" and event.get("by"):
+        rec["approved_by"] = event["by"]  # the mapped name, for the certify line
     if kind == "proposed":
         rec["design_repairs"] = int(event.get("repair") or 0)
     if kind == "repair":
@@ -202,11 +210,12 @@ def _apply(rec: dict, event: dict) -> dict:
 
 class Notifier:
     def __init__(self, client: Any, channel: str, store: MessageStore | None = None,
-                 values: Callable[[str], dict | None] = thread_values):
+                 values: Callable[[str], dict | None] = thread_values, targets: dict[str, Any] | None = None):
         self.client = client
         self.channel = channel
         self.store = store or MessageStore()
         self.values = values
+        self.targets = dict(targets or {})  # GOVERNOR_SLACK_TARGETS: project name -> target path
 
     # ---- posting
 
@@ -214,15 +223,53 @@ class Notifier:
         rec = self.store.get(thread_id) or {}
         return rec.get("channel") or self.channel, rec.get("ts")
 
-    def reply(self, thread_id: str, text: str, block_list: list[dict] | None = None) -> None:
-        """A detail line under the thread's message (or in the channel when there is none yet)."""
+    def reply(self, thread_id: str, text: str, block_list: list[dict] | None = None) -> Any:
+        """A detail line under the thread's message (or in the channel when there is none yet). Returns Slack's
+        response (its ``ts`` names the reply)."""
         channel, ts = self._thread(thread_id)
         kwargs: dict[str, Any] = {"channel": channel, "text": text}
         if block_list:
             kwargs["blocks"] = block_list
         if ts:
             kwargs["thread_ts"] = ts
-        self.client.chat_postMessage(**kwargs)
+        return self.client.chat_postMessage(**kwargs)
+
+    def _values(self, thread_id: str) -> dict:
+        try:
+            return self.values(thread_id) or {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("slack: cannot read the checkpoint of %s: %s", blocks.short(thread_id), type(exc).__name__)
+            return {}
+
+    def certify_line(self, thread_id: str, rec: dict) -> str:
+        """``python -m governor.build certify --target <path> --by "<name>"``: the path from
+        ``GOVERNOR_SLACK_TARGETS`` (else the checkpointed target), the approver's mapped name."""
+        target = self.targets.get(rec.get("project") or "") or self._values(thread_id).get("target")
+        return blocks.certify_command(target, rec.get("approved_by"))
+
+    def _save(self, thread_id: str, **fields: Any) -> dict | None:
+        rec = self.store.get(thread_id)
+        if rec is None:
+            return None
+        rec.update(fields)
+        self.store.put(thread_id, rec)
+        return rec
+
+    # ---- decided messages (batch2c section 21)
+
+    def decide_card(self, thread_id: str, decision: str) -> bool:
+        """Replace the open design card's buttons with ``decision``. False when there is no open card (already
+        decided, or none posted): nothing changes then."""
+        rec = self.store.get(thread_id)
+        if not rec or not rec.get("card_ts") or rec.get("card_decided"):
+            return False
+        self._save(thread_id, card_decided=True)
+        values = self._values(thread_id)
+        text, block_list = blocks.design_card(thread_id, values.get("proposal"), values.get("findings"),
+                                              str(values.get("status") or ""), decided=decision)
+        self.client.chat_update(channel=rec.get("channel") or self.channel, ts=rec["card_ts"], text=text,
+                                blocks=block_list)
+        return True
 
     def handle(self, event: dict) -> None:
         thread_id = event.get("thread_id")
@@ -239,7 +286,8 @@ class Notifier:
 
     def _render(self, thread_id: str, rec: dict) -> None:
         """Post or update the thread's progress message and store the record."""
-        text, block_list = blocks.progress(thread_id, rec)
+        certify = self.certify_line(thread_id, rec) if rec.get("outcome") in (blocks.BUILT, blocks.PUBLISHED) else None
+        text, block_list = blocks.progress(thread_id, rec, certify)
         if rec.get("ts"):
             self.client.chat_update(channel=rec["channel"], ts=rec["ts"], text=text, blocks=block_list)
         else:
@@ -324,7 +372,10 @@ class Notifier:
         values = self.values(thread_id) or {}
         text, block_list = blocks.design_card(thread_id, values.get("proposal"), values.get("findings"),
                                               str(event.get("status") or values.get("status")))
-        self.client.chat_postMessage(channel=rec["channel"], thread_ts=rec["ts"], text=text, blocks=block_list)
+        resp = self.client.chat_postMessage(channel=rec["channel"], thread_ts=rec["ts"], text=text, blocks=block_list)
+        if resp and resp.get("ts"):
+            # the open card: its buttons are replaced once the design is decided (a new card after a reject)
+            self._save(thread_id, card_ts=resp["ts"], card_decided=event.get("status") != graph.AWAITING)
         report = Path(values["target"]) / "governor" / "design.md" if values.get("target") else None
         if report is not None and report.is_file():
             # the uploaded copy omits the KPI mapping values (they can hold SQL literals); the file is unchanged
@@ -332,7 +383,12 @@ class Notifier:
             self.client.files_upload_v2(channel=rec["channel"], thread_ts=rec["ts"], content=content,
                                         filename="design.md", title=f"design.md (build {blocks.short(thread_id)})")
 
+    def _on_approved(self, thread_id: str, event: dict, rec: dict) -> None:
+        self.decide_card(thread_id, blocks.decided_line("approve", event.get("by"), event.get("ts")))
+
     def _on_rejected(self, thread_id: str, event: dict, rec: dict) -> None:
+        # a Slack reject decided the card already (with the name and note); a terminal reject has neither
+        self.decide_card(thread_id, blocks.decided_line("reject"))
         final = event.get("status") == graph.REJECTED
         self.reply(thread_id, "Design rejected for the second time: the thread ends." if final
                    else "Design rejected: the plan model proposes again with the note.")
@@ -346,14 +402,35 @@ class Notifier:
         text, block_list = blocks.escalation(thread_id, failure["stage"], failure["node"], failure["error"])
         self.reply(thread_id, text, block_list)
 
+    @staticmethod
+    def _built_summary(event_or_rec: dict) -> str:
+        gaps = ", ".join(f"`{g}`" for g in event_or_rec.get("gaps") or []) or "none"
+        return (f"Built: {int(event_or_rec.get('kpis_built') or 0)} KPIs, "
+                f"{int(event_or_rec.get('tests_passed') or 0)} tests passed, gaps: {gaps}.")
+
     def _on_built(self, thread_id: str, event: dict, rec: dict) -> None:
-        gaps = ", ".join(f"`{g}`" for g in event.get("gaps") or []) or "none"
-        self.reply(thread_id, f"Built: {int(event.get('kpis_built') or 0)} KPIs, {int(event.get('tests_passed') or 0)} "
-                              f"tests passed, gaps: {gaps}. Publish with `/governor publish {blocks.short(thread_id)}`.")
+        summary = self._built_summary(event)
+        text, block_list = blocks.built_reply(thread_id, summary, self.certify_line(thread_id, rec))
+        resp = self.reply(thread_id, text, block_list)
+        if resp and resp.get("ts"):
+            # the reply's button is replaced by the link after the publish
+            self._save(thread_id, built_ts=resp["ts"], built_summary=summary)
 
     def _on_published(self, thread_id: str, event: dict, rec: dict) -> None:
+        certify = self.certify_line(thread_id, rec)
+        stored = self.store.get(thread_id) or rec
+        if stored.get("built_ts"):
+            text, block_list = blocks.built_reply(thread_id, stored.get("built_summary") or "Built.", certify,
+                                                  published_link=blocks.published_link(event.get("pr_url"),
+                                                                                       event.get("branch")))
+            try:
+                self.client.chat_update(channel=stored.get("channel") or self.channel, ts=stored["built_ts"],
+                                        text=text, blocks=block_list)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("slack: cannot replace the publish button of %s: %s", blocks.short(thread_id),
+                            type(exc).__name__)
         text, block_list = blocks.published(thread_id, event.get("branch"), event.get("pr_url"),
-                                            pr_opened=bool(event.get("pr")))
+                                            pr_opened=bool(event.get("pr")), certify=certify)
         self.reply(thread_id, text, block_list)
 
 
@@ -378,7 +455,7 @@ def _from_env() -> Notifier | None:
                 return None
             from slack_sdk import WebClient
 
-            _default = Notifier(WebClient(token=cfg.bot_token), cfg.channel)
+            _default = Notifier(WebClient(token=cfg.bot_token), cfg.channel, targets=cfg.targets)
         return _default
 
 

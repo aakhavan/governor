@@ -8,6 +8,8 @@
   what the table does not: ``PROPOSAL_UNPARSEABLE`` (the reply is not a proposal; raised by the graph),
   ``EXPR_UNPARSEABLE`` (an ``expr`` or boolean mapping is not one SQL expression) and ``KPI_DUPLICATE``.
   ``KEY_NOT_UNIQUE`` (batch2c section 19): a staging model's key must contain a candidate key of its source table.
+  Before validation (and on every proposal :func:`propose` returns), :func:`normalise_source_tables` turns a
+  ``<profile schema>.<table>`` source table into the bare profiled table name (batch2c section 21).
 - :func:`render_report` writes the section 7 markdown for the design gate.
 """
 
@@ -123,10 +125,37 @@ def propose(profile, catalogue: KpiCatalogue, blueprint: Blueprint, approved, ll
     The model answers in :class:`ProposalReply` (each KPI mapping as ``mapping_pairs``, batch2b section 11); the
     pairs become the ``mapping`` dict here, before validation."""
     prompt = build_prompt(profile, catalogue, blueprint, approved, findings, previous=previous, note=note)
-    return llm.structured("propose", prompt, ProposalReply, role="plan").to_proposal()
+    return normalise_source_tables(llm.structured("propose", prompt, ProposalReply, role="plan").to_proposal(), profile)
 
 
 # --------------------------------------------------------------------------- validation
+
+
+def _bare_table(source_table: str | None, schema: str, tables: set[str]) -> str | None:
+    """``<profile schema>.<table>`` -> ``<table>`` when ``<table>`` is profiled; anything else unchanged."""
+    if not source_table or source_table in tables:
+        return source_table
+    prefix, sep, rest = source_table.partition(".")
+    if sep and schema and prefix.strip('"').lower() == schema.lower() and rest.strip('"') in tables:
+        return rest.strip('"')
+    return source_table
+
+
+def normalise_source_tables(proposal: Proposal | dict, profile: Profile | dict) -> Proposal:
+    """Staging ``source_table`` written as ``<profile schema>.<table>`` (``raw.olist_orders_dataset``) becomes the
+    bare profiled table name (batch2c section 21). Code, not a repair: any other unknown name stays and validation
+    reports it as ``UNKNOWN_SOURCE_TABLE``."""
+    prop = proposal if isinstance(proposal, Proposal) else Proposal.model_validate(proposal)
+    prof = _as_profile(profile)
+    tables = {t.name for t in prof.tables}
+    models = []
+    changed = False
+    for m in prop.silver_models:
+        bare = _bare_table(m.source_table, prof.schema_, tables)
+        if bare != m.source_table:
+            m, changed = m.model_copy(update={"source_table": bare}), True
+        models.append(m)
+    return prop.model_copy(update={"silver_models": models}) if changed else prop
 
 
 def _finding(f: Finding | dict) -> Finding:
@@ -209,8 +238,8 @@ def _is_pii(table: str, column: str, policy: dict[str, str], profiled: set[tuple
 def validate(proposal: Proposal | dict, profile: Profile | dict, catalogue: KpiCatalogue,
              policy: dict[str, str] | None) -> list[Finding]:
     """Every section 6 code that applies, in model then KPI order. Empty means the proposal is valid."""
-    prop = proposal if isinstance(proposal, Proposal) else Proposal.model_validate(proposal)
     prof = _as_profile(profile)
+    prop = normalise_source_tables(proposal, prof)
     policy = policy or {}
     out: list[Finding] = []
 

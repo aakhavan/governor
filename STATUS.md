@@ -1,6 +1,6 @@
 # STATUS: governor
 
-Updated 07 Nov 2026 15:02. Run `20261107-142621`.
+Updated 08 Nov 2026 15:03. Run `20261108-150359`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
@@ -38,8 +38,9 @@ Updated 07 Nov 2026 15:02. Run `20261107-142621`.
 | D10 | Column descriptions from lineage | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-06T15:12:44 |
 | D9 | Slack app | design | yes | done | 2/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-06T16:47:36 |
 | D14 | Keys checked against the profile | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-07T14:26:22 |
-| D9b | Slack clean-up | design | - | passed | 1/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-07T15:02:30 |
+| D9b | Slack clean-up | design | - | done | 1/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-07T15:02:30 |
+| D9c | Next steps in the channel, PR link, small fixes | design | yes | approved | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-08T15:03:59 |
 
-Cost so far (reported + notional): $112.95 of $150.00 run budget; 132 agent call(s).
+Cost so far (reported + notional): $117.86 of $150.00 run budget; 135 agent call(s).
 
-Next: D9b is passed: `factory resume`.
+Next: D9c is approved: `factory resume`.

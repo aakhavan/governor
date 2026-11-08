@@ -396,7 +396,16 @@ def _raw_ready() -> bool:
         from governor.build.workspace import build_dsn
 
         with psycopg.connect(build_dsn(), connect_timeout=3) as c:
-            return c.execute("select count(*) from information_schema.tables where table_schema = 'raw'").fetchone()[0] >= 9
+            if c.execute("select count(*) from information_schema.tables where table_schema = 'raw'").fetchone()[0] < 9:
+                return False
+            # only the synthetic sample: against the full Olist data the independent values would not match
+            for csv_path in sorted(SAMPLE.glob("*.csv")):
+                with csv_path.open(newline="", encoding="utf-8") as f:
+                    want = sum(1 for _ in csv.DictReader(f))
+                got = c.execute(f'select count(*) from raw."{csv_path.stem}"').fetchone()[0]
+                if got != want:
+                    return False
+            return True
     except Exception:  # noqa: BLE001
         return False
 
@@ -454,7 +463,8 @@ def expected_values():
             "avg_review_score": {m: score_sum[m] / score_n[m] for m in score_n}}, repeat
 
 
-@pytest.mark.skipif(not _raw_ready(), reason="needs GOVERNOR_BUILD_PASSWORD and the Olist tables in raw")
+@pytest.mark.skipif(not _raw_ready(), reason="needs GOVERNOR_BUILD_PASSWORD and raw holding the synthetic sample "
+                                             "(row counts equal testbed/sample/*.csv); skipped on the full Olist data")
 def test_live_sample_build_matches_independent_values(tmp_path, profile, good):
     import psycopg
 

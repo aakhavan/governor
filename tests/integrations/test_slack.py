@@ -149,9 +149,11 @@ def test_approve_button_calls_graph_with_mapped_name(tmp_path, monkeypatch, fake
     ts = notifier.MessageStore().get(tid)["ts"]
     replies = [c["text"] for c in fake.named("chat_postMessage") if c.get("thread_ts") == ts]
     assert any("Approved by Amir Akhavan" in t for t in replies)
-    # a second click is a readable error in the thread, not a crash
+    # a second click on the (stale) button is answered ephemerally and changes nothing (batch2c section 21)
+    posted = len(fake.calls)
     gov.handle_approve_button(APPROVER, tid, resp)
-    assert "not waiting" in fake.named("chat_postMessage")[-1]["text"]
+    assert "out of date" in resp.said[-1]["text"] and resp.said[-1]["response_type"] == "ephemeral"
+    assert len(fake.calls) == posted and len(calls) == 1
 
     # Reject: the button opens the note modal; its submission calls graph.reject with the note
     tid2 = _to_gate(tmp_path, profile, good)
