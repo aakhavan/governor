@@ -297,8 +297,10 @@ class GovernorSlack:
             log.warning("slack: superseding older runs failed: %s", type(exc).__name__)
         try:
             # Same as the CLI run: make sure the target is a dbt project (dbt_project.yml, profiles) before the build.
+            from governor.build.publish import ensure_on_main
             from governor.build.workspace import init_target
 
+            ensure_on_main(self.config.targets[target])  # publish branches from main (same as the CLI run)
             init_target(self.config.targets[target], target)
             # The outcome is the progress message (and the design card or escalation reply): no extra reply here.
             self.build.start(self.config.targets[target], target, self._llm(), thread_id=thread_id)

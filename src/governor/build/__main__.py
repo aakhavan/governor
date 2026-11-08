@@ -91,6 +91,12 @@ def _run(args: argparse.Namespace) -> int:
             profile = json.loads(args.profile.read_text(encoding="utf-8"))
     except Exception as e:  # noqa: BLE001
         return _fail("cannot start the build", e)
+    try:
+        from governor.build.publish import ensure_on_main
+
+        ensure_on_main(args.target)  # publish branches from main: never build on an earlier build's branch
+    except Exception as e:  # noqa: BLE001
+        return _fail("cannot start the build", e)
     init_target(args.target, args.project_name)
     try:
         out = graph.start(args.target, args.project_name, llm, policy=args.policy, profile=profile)

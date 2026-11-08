@@ -82,6 +82,30 @@ def test_publish_pushes_to_origin(built, tmp_path):
     assert out["branch"] in heads and "main" in heads
 
 
+def test_next_build_after_publish_starts_on_main(built):
+    """8 Nov: publish left the target on the build branch, the next build wrote over it, and the next publish's
+    checkout of main aborted. A clean target is switched back to main before a new build."""
+    target, tid = built
+    out = pub.publish(target)
+    assert git(target, "rev-parse", "--abbrev-ref", "HEAD").strip() == out["branch"]
+    assert pub.ensure_on_main(target) == out["branch"]
+    assert git(target, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+    assert pub.ensure_on_main(target) is None  # already on main: nothing to do
+
+
+def test_new_build_refused_on_a_dirty_build_branch(built):
+    target, _ = built
+    out = pub.publish(target)
+    (target / "governor" / "design.md").write_text("changed", encoding="utf-8")
+    with pytest.raises(pub.PublishError, match="uncommitted changes"):
+        pub.ensure_on_main(target)
+    assert git(target, "rev-parse", "--abbrev-ref", "HEAD").strip() == out["branch"]  # nothing switched
+
+
+def test_ensure_on_main_ignores_a_target_without_git(tmp_path):
+    assert pub.ensure_on_main(tmp_path) is None and not (tmp_path / ".git").exists()
+
+
 def _events(target):
     return [json.loads(line) for line in
             (target.parent / "state" / "events.jsonl").read_text(encoding="utf-8").splitlines()]

@@ -104,6 +104,24 @@ def ensure_repo(target: Path) -> bool:
     return True
 
 
+def ensure_on_main(target: str | Path) -> str | None:
+    """Before a new build: a target that is its own git repo must be on ``main``, because ``publish`` branches
+    from ``main`` and git refuses that checkout over the new build's files when the target is still on an earlier
+    build's branch. A clean target on another branch is switched to ``main`` (returns the branch it left); one with
+    uncommitted changes is refused with a readable :class:`PublishError`. Not a repo, or no commits yet: nothing to do."""
+    target = Path(target)
+    if not target.is_dir() or not _is_own_repo(target) or not _has_commits(target):
+        return None
+    branch = git(target, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if branch == MAIN:
+        return None
+    if git(target, "status", "--porcelain").stdout.strip():
+        raise PublishError(f"the target is on branch '{branch}' with uncommitted changes; commit, stash or discard "
+                           f"them and switch to '{MAIN}' before a new build")
+    git(target, "checkout", MAIN)
+    return branch
+
+
 # --------------------------------------------------------------------------- pr.md
 
 
@@ -256,4 +274,4 @@ def publish(target: str | Path, *, open_pr: bool = False) -> dict:
     return out
 
 
-__all__ = ["PublishError", "kpi_meta", "load_build", "publish", "read_published", "render_pr"]
+__all__ = ["PublishError", "ensure_on_main", "kpi_meta", "load_build", "publish", "read_published", "render_pr"]
