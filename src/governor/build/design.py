@@ -154,15 +154,21 @@ def _has(name: str, columns: set[str]) -> bool:
 
 def _key_source(expr: str | None, name: str) -> str | None:
     """The raw column a staging key column reads: ``expr`` null means the column of the same name; a bare column or
-    a cast of one maps to that column. Anything else (computed, or not one expression) gives None."""
+    a cast of one, or ``NULLIF(<col>, '')``, maps to that column. Anything else (computed, or not one expression) gives None."""
     if not (expr or "").strip():
         return name
     try:
         tree = sqlglot.parse_one(expr, read="postgres")
     except SqlglotError:
         return None
-    while isinstance(tree, (exp.Paren, exp.Cast)):
-        tree = tree.this
+    while True:
+        if isinstance(tree, (exp.Paren, exp.Cast)):
+            tree = tree.this
+        elif isinstance(tree, exp.Nullif) and isinstance(tree.expression, exp.Literal) \
+                and tree.expression.is_string and tree.expression.this == "":
+            tree = tree.this  # NULLIF(col, '') only turns '' into null, which the key's not-null test catches
+        else:
+            break
     return tree.name if isinstance(tree, exp.Column) and tree.name else None
 
 

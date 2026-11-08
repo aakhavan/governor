@@ -250,9 +250,13 @@ def test_computed_key_is_flagged(good, profile, policy):
     assert [f.subject for f in hits] == ["stg_orders.order_id"]
     assert "key column 'order_id' is computed" in hits[0].problem
     # a bare column, a cast of one (either syntax) and a null expr are not computed
-    for expr in ("order_id", "CAST(order_id AS text)", "order_id::text", None):
+    for expr in ("order_id", "CAST(order_id AS text)", "order_id::text", None,
+                 "NULLIF(order_id, '')", "CAST(NULLIF(order_id, '') AS text)"):
         _col(_model(good, "stg_orders"), "order_id")["expr"] = expr
         assert _key_findings(good, profile, policy) == [], expr
+    # NULLIF with anything but '' can merge values, so it stays computed
+    _col(_model(good, "stg_orders"), "order_id")["expr"] = "NULLIF(order_id, 'x')"
+    assert [f.subject for f in _key_findings(good, profile, policy)] == ["stg_orders.order_id"]
 
 
 def test_unbuildable_kpi_marked_build_is_caught(good, profile, policy):
