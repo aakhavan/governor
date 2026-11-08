@@ -297,3 +297,11 @@ steps:
     allowed_paths: [src/governor/integrations/, tests/integrations/, tests/build/, docs/slack.md, src/governor/build/publish.py]
     human_gate: false
     review_focus: "ended runs read as ended (failed, superseded, interrupted) and a gate-waiting design stays open; reasons are scrubbed one-liners with test names and counts, never rows; runners allowlisted; uploaded design.md has no mapping values; Slack still holds no build logic"
+  - id: D9c
+    title: Next steps in the channel, PR link, small fixes
+    tier: design
+    prompt: plan/prompts/D9c.md
+    accept: plan/accept/accept_d9c.py
+    allowed_paths: [src/governor/integrations/, tests/integrations/, docs/slack.md, src/governor/build/design.py, src/governor/build/prompts/propose.md, tests/build/, tests/fixtures/build/]
+    human_gate: true
+    review_focus: "the next step is visible in the channel message; only approvers can open a PR; decided buttons are replaced and stale presses change nothing; the schema prefix is normalised only for profiled tables, other unknown names stay findings; Slack holds no build logic; no data values in payloads"
