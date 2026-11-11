@@ -1359,3 +1359,50 @@ For Amir: Acceptance details missing and still there are not failures. check() r
 - `design.normalise_source_tables` runs in `propose` (so the checkpointed proposal and silver see the bare name) and again in `validate`. Only the profile's own schema prefix is stripped (case-insensitive, quotes allowed); `public.<t>` or `raw.raw.<t>` stay UNKNOWN_SOURCE_TABLE.
 - Live sample test: `_raw_ready` also compares `count(*)` of every `raw.<csv stem>` with the sample CSV row counts.
 
+## D9c result
+*Next steps in the channel, PR link, small fixes, 08 Nov 2026 15:03.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/D9c`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| governor.build never imports Slack | yes |  |
+| propose prompt asks for the bare table name | yes | missing |
+| Slack modules import without tokens | yes |  |
+| pytest tests/integrations | yes | 21 passed in 7.78s |
+| required tests present | yes | 6 found |
+| pytest tests/build | yes | 155 passed, 12 skipped in 45.74s |
+| required tests present | yes | 1 found |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: The acceptance detail "missing" on the propose-prompt check is check()'s failure string; the check passed because propose.md tells the model to give the bare table name. A Slack reject marks the card decided before graph.reject, so a failed reject leaves the card reading rejected and blocks another press. A reject from the CLI shows ":x: Rejected" without a name or note, because the rejected event carries neither and graph.py is outside this step.
+
+## Additions for the next plan
+Record fields: approved_by (approved event, certify --by), branch and pr_url (published event), card_ts and card_decided (open design card), built_ts and built_summary (Built reply whose button becomes the link). Certify --target is GOVERNOR_SLACK_TARGETS[project], else the checkpointed target. A Slack reject writes the decided line, name plus scrubbed note, before graph.reject, because the rejected event has no note; graph.py was outside this step. A reject that does not pass through the Slack app shows ':x: Rejected' with no name. If graph.reject then fails, the card stays rejected and later presses are stale. The slash command /governor publish is not stale-checked; the button is, unless the record outcome is built. design.normalise_source_tables runs in propose, so the checkpoint and silver see the bare name, and again inside validate, which does not write the proposal back. Only the profile schema prefix is removed (case-insensitive, optional double quotes). public.<table> and raw.raw.<table> stay UNKNOWN_SOURCE_TABLE. _raw_ready skips the live sample gold test unless count(*) of every raw."<csv stem>" equals that sample CSV. The Open pull request button calls publish with open_pr true only when the target has a .git entry and an origin remote.
+
+## E1 result
+*Certified answers in Slack (/governor ask), 11 Nov 2026 12:46.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/E1`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| governor.build imports neither Slack nor ask | yes |  |
+| governor.ask never imports integrations | yes |  |
+| no top-level import of governor.ask in the Slack modules | yes | import it inside the default asker |
+| Slack modules import without tokens or a database | yes |  |
+| usage text lists ask | yes |  |
+| docs/slack.md mentions /governor ask | yes |  |
+| docs/slack.md mentions GOVERNOR_SLACK_ASK_ROLE | yes |  |
+| docs/slack.md mentions GOVERNOR_SLACK_ASKERS | yes |  |
+| docs/slack.md mentions GOVERNOR_SLACK_ASK_LLM | yes |  |
+| pytest tests/integrations | yes | 36 passed in 7.56s |
+| required tests present | yes | 9 found |
+
+Review: E1 matches section 22. /governor ask takes its role only from GOVERNOR_SLACK_ASK_ROLE, calls certified.answer inside the default asker, and posts the escaped question, CertifiedAnswer.text, and the context line to the channel. Refusals and errors are ephemeral, do not repeat the question, and errors go through safe_text. Logs record outcome, KPI id, and user id. The sql field is not posted. The acceptance checks match this code.
+
+For Amir: The integration tests inject a fake asker, so the suite never calls certified.answer. The real call is GovernorSlack._default_asker. A bad GOVERNOR_SLACK_ASK_ROLE raises ConfigError while building SlackConfig, and __main__ exits before Socket Mode starts.
+

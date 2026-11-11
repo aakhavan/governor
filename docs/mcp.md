@@ -55,3 +55,48 @@ uv run pytest -q tests/mcp
 ```
 
 The tests start the server over stdio with the SDK client, list the tools and call each one.
+
+# Certified KPIs over MCP (`governor-certified`)
+
+`governor.ask.mcp_certified` is a second stdio server, beside `governor.ask.mcp_server` (which it does not change). It serves the certified KPI registry of the Postgres test bed: the MCP client chooses the KPI and the filters; the server builds the SQL in code, runs it through the validator (the allowlist is the certified models) and executes it read-only as the role's reader role. It makes no model call and takes no SQL.
+
+## Run it
+
+```bash
+uv run python -m governor.ask.mcp_certified
+```
+
+It connects with the ask login, `GOVERNOR_PG_DSN`, on each tool call, so it starts and lists its tools without a database. Without one (or when the registry cannot be read) every tool returns `{"outcome": "error", "text": "<one line>"}`; the text never contains a connection string.
+
+## Role
+
+`GOVERNOR_MCP_ROLE` (default `analyst`) fixes the role for the process. It must be one of the certified reader roles (`analyst`, `finance_admin`), or the server exits at start-up with code 2. No tool takes a role argument; to serve the other role, start a second process.
+
+## Claude Desktop / Cursor
+
+```json
+{
+  "mcpServers": {
+    "governor-certified": {
+      "command": "uv",
+      "args": ["run", "--directory", "<repo>", "python", "-m", "governor.ask.mcp_certified"],
+      "env": { "GOVERNOR_MCP_ROLE": "analyst", "GOVERNOR_PG_DSN": "<the ask login DSN>" }
+    }
+  }
+}
+```
+
+Put the DSN in the client's env (or the user environment), never in a file in this repo. Cursor takes the same block in `.cursor/mcp.json`.
+
+## Tools
+
+All read-only, each returns a JSON object.
+
+| tool | arguments | result |
+|---|---|---|
+| `list_certified_kpis` | none | `{kpis: [{kpi_id, label, definition, grain, value_columns, owner, certified_by, certified_at}], not_available: [{kpi_id, missing, next_step}]}` |
+| `describe_kpi` | `kpi_id: str` | `{outcome: "certified", ...the fields above, model, source_tier, source_ref, template_sha256}`; a gap gives `{outcome: "not_available", missing, typical_sources, next_step, text}`; anything else `{outcome: "unknown"}` |
+| `query_kpi` | `kpi_id: str`, `value_column: str = null`, `period_kind: "month" \| "cohort" \| "year" \| "all" = "all"`, `period_value: str = null` (`YYYY-MM` or `YYYY`), `months_since_first: int = null`, `pick: "value" \| "max" \| "sum" = "value"` | `{outcome, text, value, kpi_id, sql, citation}`, outcome `answer`, `not_available` or `unanswerable` (the same path as `/v1/ask/certified`, after the model's choice); arguments that do not validate give `{outcome: "error", text}` and run no SQL |
+| `gap_report` | none | `{gaps: [{kpi_id, missing, typical_sources, next_step}]}` |
+
+Tests: `tests/mcp/test_mcp_certified.py` (in process with a fake adapter; stdio for the tool list and the no-database case).

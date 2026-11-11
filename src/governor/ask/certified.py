@@ -478,7 +478,7 @@ def answer(
     kpis_path: Path | None = None,
 ) -> CertifiedAnswer:
     """Answer ``question`` for ``role`` from the certified KPIs only."""
-    reader = reader_role(role)
+    reader_role(role)
     adapter = adapter or default_adapter()
     registry = read_registry(adapter, role)
     if llm is None:
@@ -488,6 +488,24 @@ def answer(
     reply = choose(llm, render_prompt(question, registry, _as_of()))
     if reply is None:
         return _unanswerable("The question could not be matched to a certified KPI.")
+    return answer_reply(reply, role, adapter, access_path=access_path, kpis_path=kpis_path, registry=registry)
+
+
+def answer_reply(
+    reply: CertifiedReply,
+    role: str,
+    adapter: Any = None,
+    *,
+    access_path: Path | None = None,
+    kpis_path: Path | None = None,
+    registry: Registry | None = None,
+) -> CertifiedAnswer:
+    """The certified path after the KPI choice: registry lookup, gap text, SQL built in code, validated, run as the
+    role's reader, answer text written in Python. ``registry`` skips the registry read when the caller has it."""
+    reader = reader_role(role)
+    adapter = adapter or default_adapter()
+    if registry is None:
+        registry = read_registry(adapter, role)
     if reply.category == "person_level":
         return CertifiedAnswer(outcome="refused", text="Requests about individual people or records are refused; "
                                "certified KPIs are aggregates only.")
