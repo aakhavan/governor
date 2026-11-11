@@ -16,6 +16,9 @@ Buttons (batch2c section 21): Approve, Reject and **Open pull request** (approve
 already decided or no longer at the gate, an older card, a build already published) is answered ephemerally and
 changes nothing. A reject from Slack replaces the card's buttons with the name and the note before the plan model
 proposes again.
+
+``ask <question>`` (batch2d section 22) is a thin client of ``governor.ask.certified.answer`` with the role fixed by
+``GOVERNOR_SLACK_ASK_ROLE``: answers go to the channel, refusals and errors are ephemeral to the asker.
 """
 
 from __future__ import annotations
@@ -39,6 +42,8 @@ log = logging.getLogger(__name__)
 APPROVER_ACTIONS = ("approve", "reject", "publish")
 MAX_NOTE = 1000
 MIN_PREFIX = 8
+MIN_QUESTION, MAX_QUESTION = 3, 300
+CHANNEL_OUTCOMES = ("answer", "not_available", "unanswerable")
 REFUSAL = "Only approvers listed in GOVERNOR_SLACK_APPROVERS can {action} a build."
 RUN_REFUSAL = "Only users listed in GOVERNOR_SLACK_RUNNERS (default: the approvers) can start a build."
 
@@ -49,10 +54,11 @@ class UsageError(ValueError):
 
 @dataclass(frozen=True)
 class Command:
-    action: str  # run | status | approve | reject | publish
+    action: str  # run | status | approve | reject | publish | ask
     target: str | None = None
     thread_id: str | None = None
     note: str | None = None
+    question: str | None = None
 
 
 def resolve_thread(token: str, threads: Iterable[str]) -> str | None:
@@ -69,6 +75,12 @@ def resolve_thread(token: str, threads: Iterable[str]) -> str | None:
 def parse_command(text: str, targets: Iterable[str], threads: Iterable[str]) -> Command:
     """Strict parsing of the ``/governor`` text. Raises :class:`UsageError` for anything else."""
     targets = set(targets)
+    head = (text or "").strip().split(maxsplit=1)
+    if head and head[0] == "ask":
+        question = head[1].strip() if len(head) > 1 else ""
+        if not MIN_QUESTION <= len(question) <= MAX_QUESTION:
+            raise UsageError(f"`ask` needs a question of {MIN_QUESTION} to {MAX_QUESTION} characters.")
+        return Command("ask", question=question)
     parts = (text or "").strip().split(maxsplit=2)
     if not parts:
         raise UsageError("No command given.")
@@ -142,7 +154,8 @@ class GovernorSlack:
                  llm_factory: Callable[[str], Any] | None = None,
                  threads: Callable[[], Iterable[str]] = known_threads,
                  values: Callable[[str], dict | None] = thread_values,
-                 build: Any = graph, publisher: Callable[..., dict] = build_publish.publish):
+                 build: Any = graph, publisher: Callable[..., dict] = build_publish.publish,
+                 asker: Callable[[str, str], Any] | None = None):
         self.config = config
         self.client = client
         self.notifier = notifier or Notifier(client, config.channel, values=values, targets=config.targets)
@@ -152,6 +165,7 @@ class GovernorSlack:
         self.values = values
         self.build = build
         self.publisher = publisher
+        self.asker = asker or self._default_asker
         self._busy: set[str] = set()
         self._lock = threading.Lock()
 
@@ -161,6 +175,12 @@ class GovernorSlack:
         from governor.build.llm import make_llm
 
         return make_llm(self.config.llm)
+
+    def _default_asker(self, question: str, role: str) -> Any:
+        """``certified.answer`` with the ask model; imported here so the Slack modules import without a database."""
+        from governor.ask import certified
+
+        return certified.answer(question, role, certified.make_llm(self.config.ask_llm))
 
     # ---- entry points (each answers at once; long work goes to the runner)
 
@@ -172,6 +192,14 @@ class GovernorSlack:
             return
         if cmd.action == "status":
             respond(text=blocks.status_list(recent_threads()), response_type="ephemeral")
+            return
+        if cmd.action == "ask":
+            if not self.config.is_asker(user_id):
+                respond(text=blocks.ASK_REFUSAL, response_type="ephemeral")
+                return
+            respond(text=blocks.ASK_ACK, response_type="ephemeral")
+            question = str(cmd.question)
+            self.runner(lambda: self._ask(question, user_id, respond))
             return
         if cmd.action in APPROVER_ACTIONS and not self.config.is_approver(user_id):
             respond(text=REFUSAL.format(action=cmd.action), response_type="ephemeral")
@@ -306,6 +334,31 @@ class GovernorSlack:
             self.build.start(self.config.targets[target], target, self._llm(), thread_id=thread_id)
         except Exception as exc:  # noqa: BLE001
             self._say(thread_id, f":warning: run failed: {_error_line(exc)}")
+
+    def _ask(self, question: str, user_id: str, respond: Callable[..., Any]) -> None:
+        """The certified path (batch2d section 22). The role is the configured one; the question never reaches a log."""
+        role = self.config.ask_role
+        try:
+            out = self.asker(question, role)
+        except Exception as exc:  # noqa: BLE001  (CertifiedError or anything else: same scrubbed ephemeral line)
+            log.info("slack ask: outcome=error (%s) user=%s", type(exc).__name__, user_id)
+            respond(text=blocks.ask_error(exc), response_type="ephemeral")
+            return
+        outcome, kpi_id = getattr(out, "outcome", None), getattr(out, "kpi_id", None)
+        log.info("slack ask: outcome=%s kpi=%s user=%s", outcome, kpi_id, user_id)
+        if outcome in CHANNEL_OUTCOMES:
+            text, block_list = blocks.ask_answer(question, str(out.text), role, kpi_id)
+            try:
+                self.client.chat_postMessage(channel=self.config.channel, text=text, blocks=block_list)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("slack ask: posting the answer failed: %s", type(exc).__name__)
+                respond(text=blocks.ask_error("the answer could not be posted to the channel"),
+                        response_type="ephemeral")
+            return
+        if outcome == "refused":
+            respond(text=str(out.text), response_type="ephemeral")
+            return
+        respond(text=blocks.ask_error(f"unexpected outcome {blocks.safe_text(outcome, 40)}"), response_type="ephemeral")
 
     def mark_interrupted(self) -> list[str]:
         """At app start: open records (not ended, not waiting at the gate) were cut off by the restart."""

@@ -1329,3 +1329,33 @@ For Amir: STATUS.md shows a later lock_mismatch because plan files changed after
 ## Additions for D9b
 KEY_NOT_UNIQUE is raised by design.validate for a staging model whose source_table is in the profile. It is not a new graph branch: any finding, including this one, goes through the existing propose repair loop (at most two design repairs) before the gate. A staging primary_key is valid when some candidate key of the source table is a subset of the raw columns its key columns read. A null expr means the raw column of the same name; a bare column or a cast of one maps to that column; any other expr is computed and is KEY_NOT_UNIQUE on subject <model>.<column>. A table with no candidate key gets one finding: leave it unstaged unless a KPI needs it, or dedupe it in an intermediate model. Intermediate models are not checked. Findings contain column names and the table row count, never data values. propose.md already states the rule. tests/build/conftest.py sample_profile now records unique null-free column pairs when a table has no single-column key, matching profile.py. sample_design.json keys stg_reviews on [review_id, order_id], which that sample profile accepts.
 
+## Relocks
+- 11 Nov 2026 12:33: batch 2d: E1-E4 added (changed: plan.yaml, plan/accept/accept_e1.py, plan/accept/accept_e2.py, plan/accept/accept_e3.py, plan/accept/accept_e4.py, plan/prompts/E1.md, plan/prompts/E2.md, plan/prompts/E3.md, plan/prompts/E4.md)
+
+## D9b result
+*Slack clean-up, 07 Nov 2026 15:02.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 1 fix loop(s); branch `factory/D9b`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| governor.build never imports Slack | yes |  |
+| GOVERNOR_SLACK_RUNNERS documented | yes | missing |
+| no 'Run finished at' reply | yes | still there |
+| Slack modules import without tokens | yes |  |
+| pytest tests/integrations | yes | 15 passed in 5.61s |
+| required tests present | yes | 7 found |
+| pytest tests/build | yes | 154 passed, 12 skipped in 46.32s |
+
+Review: D9b matches section 20 and the acceptance run is trustworthy. Terminal headers are red (stopped, :x: then :heavy_minus_sign:) or green (built/published); superseded and interrupted cover other open records, and a gate-waiting design stays open. Reasons name every failing test with its full count in both dbt spellings, keep 131707 through the second scrub, and omit row tokens. Runners are allowlisted, uploaded design.md drops mapping cells without editing the file, and the notifier posts pr_url from the published event.
+
+For Amir: Acceptance details missing and still there are not failures. check() records its detail argument even when ok is true. GOVERNOR_SLACK_RUNNERS is in docs/slack.md, and no integration source contains Run finished at. A run marked superseded is not cancelled; if that build later escalates, builds, or publishes, the notifier replaces the superseded header with that later outcome.
+
+## Additions for D9c (implementer)
+- Slack record fields: `approved_by` (from the approved event, for the certify `--by`), `branch`, `card_ts`/`card_decided` (the open design card), `built_ts`/`built_summary` (the Built reply whose button becomes the link). Certify `--target` is `GOVERNOR_SLACK_TARGETS[project]` (resolved absolute path), else the checkpointed target.
+- Approve card update comes from the `approved` event (so terminal approvals also replace the buttons). The `rejected` event has no note and graph.py is outside D9c, so a Slack reject decides the card in the app *before* `graph.reject` (name + scrubbed note); a terminal reject shows `:x: Rejected` without name. If `graph.reject` then fails, the card still reads rejected (the warning is posted in the thread).
+- Stale = card decided, press from an older card (`container.message_ts` != `card_ts`), or checkpoint status not `awaiting_design_approval`; publish button stale unless the record outcome is `built`. Slash commands are not stale-checked (they still go to the build, which refuses as before). Existing D9 test now expects the ephemeral stale answer on a second Approve press instead of the "not waiting" thread reply; D9b test expects the new `published: <url>` header.
+- `design.normalise_source_tables` runs in `propose` (so the checkpointed proposal and silver see the bare name) and again in `validate`. Only the profile's own schema prefix is stripped (case-insensitive, quotes allowed); `public.<t>` or `raw.raw.<t>` stay UNKNOWN_SOURCE_TABLE.
+- Live sample test: `_raw_ready` also compares `count(*)` of every `raw.<csv stem>` with the sample CSV row counts.
+

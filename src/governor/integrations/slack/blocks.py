@@ -36,6 +36,7 @@ USAGE = ("Usage:\n"
          "• `/governor approve <thread>`: approve the design at the gate\n"
          "• `/governor reject <thread> <note>`: send the design back with a note\n"
          "• `/governor publish <thread>`: commit the built project to a branch and open the pull request\n"
+         "• `/governor ask <question>`: a certified answer from the published KPIs (3 to 300 characters)\n"
          "`<thread>` is the full build thread id or its first 8 characters.")
 
 _MAX_ITEMS = 25
@@ -406,12 +407,45 @@ def status_list(threads: list[dict]) -> str:
         + (f" ({t.get('status')})" if t.get("status") else "") + f", {t.get('ts') or ''}" for t in threads)
 
 
+# --------------------------------------------------------------------------- /governor ask (batch2d section 22)
+
+ASK_ACK = "Looking that up..."
+ASK_REFUSAL = "Only users listed in GOVERNOR_SLACK_ASKERS (default: the runners) can ask for certified answers."
+ASK_ERROR = "Certified answers are not available right now: {reason}"
+
+
+def slack_escape(text: Any, limit: int = 300) -> str:
+    """User text for a Slack message: one line, ``&``, ``<`` and ``>`` escaped (no mentions, no links)."""
+    s = " ".join(str(text or "").split())
+    if len(s) > limit:
+        s = s[: limit - 1] + "…"
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def ask_context(role: str, kpi_id: Any = None) -> str:
+    return f"certified path · role {role}" + (f" · KPI {kpi_id}" if kpi_id else "")
+
+
+def ask_answer(question: str, answer_text: str, role: str, kpi_id: Any = None) -> tuple[str, list[dict]]:
+    """The channel message for ``answer``, ``not_available`` and ``unanswerable``: the question (escaped, one line),
+    the answer text unchanged (it carries the citation or the gap) and the context line. Never SQL."""
+    q = f":speech_balloon: *{slack_escape(question)}*"
+    blocks = [_section(q), _section(answer_text), _context(ask_context(role, kpi_id))]
+    return answer_text, blocks
+
+
+def ask_error(reason: Any) -> str:
+    """The ephemeral error line; the reason is scrubbed (no data values)."""
+    return ASK_ERROR.format(reason=safe_text(reason, 200) or "unknown error")
+
+
 def usage(targets: Iterable[str], error: str | None = None) -> str:
     names = ", ".join(f"`{t}`" for t in sorted(targets)) or "none configured"
     return (f"{error}\n" if error else "") + USAGE.format(targets=names)
 
 
-__all__ = ["PUBLISH_ACTION", "after_publish", "built_reply", "certify_command", "decided_line", "publish_actions",
+__all__ = ["ASK_ACK", "ASK_ERROR", "ASK_REFUSAL", "ask_answer", "ask_context", "ask_error", "slack_escape",
+           "PUBLISH_ACTION","after_publish", "built_reply", "certify_command", "decided_line", "publish_actions",
            "published_link", "BUILT", "FAILED", "INTERRUPTED", "MAPPINGS_OMITTED", "PUBLISHED", "SUPERSEDED", "TERMINAL",
            "design_without_mappings", "failing_tests", "first_line", "node_name", "reason_line",
            "run_results_failures", "tests_reason", "APPROVE_ACTION","NOTE_ACTION", "NOTE_BLOCK", "REJECT_ACTION", "REJECT_MODAL", "STAGES", "design_card",

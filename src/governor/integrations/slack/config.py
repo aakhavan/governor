@@ -7,6 +7,11 @@
 - ``GOVERNOR_SLACK_NAMES``: ``<user id>=<name>`` pairs; the name becomes ``approved_by``
 - ``GOVERNOR_SLACK_TARGETS``: ``<name>=<path>`` pairs, for example ``olist=..\\olist-dbt`` (relative to the repo)
 - ``GOVERNOR_SLACK_LLM``: the build model for run, approve and reject (``openrouter`` default, or ``fake:<script>``)
+- ``GOVERNOR_SLACK_ASK_ROLE``: the reader role for ``/governor ask`` (default ``analyst``; one of the certified
+  reader roles, else a configuration error at start)
+- ``GOVERNOR_SLACK_ASKERS``: comma-separated Slack user ids allowed to ``/governor ask``, or ``*`` for everyone
+  (default: the runners)
+- ``GOVERNOR_SLACK_ASK_LLM``: the model for ``/governor ask`` (``openrouter`` default, or ``fake:<script>``)
 """
 
 from __future__ import annotations
@@ -18,8 +23,11 @@ from pathlib import Path
 from typing import Mapping
 
 from governor.core import paths
+from governor.core.serving import READER_ROLES
 
 DEFAULT_CHANNEL = "governor"
+DEFAULT_ASK_ROLE = "analyst"
+EVERYONE = "*"
 NOTIFIER_SPEC = "governor.integrations.slack.notifier:notify"
 TARGET_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -60,6 +68,13 @@ class SlackConfig:
     names: dict[str, str] = field(default_factory=dict)
     targets: dict[str, Path] = field(default_factory=dict)
     llm: str = "openrouter"
+    ask_role: str = DEFAULT_ASK_ROLE
+    askers: frozenset[str] | None = None  # None: the runners; {"*"}: everyone
+    ask_llm: str = "openrouter"
+
+    def __post_init__(self) -> None:
+        if self.ask_role not in READER_ROLES:
+            raise ConfigError(f"GOVERNOR_SLACK_ASK_ROLE: must be one of {', '.join(sorted(READER_ROLES))}")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "SlackConfig":
@@ -72,10 +87,14 @@ class SlackConfig:
         approvers = _ids(env.get("GOVERNOR_SLACK_APPROVERS"))
         raw_runners = env.get("GOVERNOR_SLACK_RUNNERS")
         runners = _ids(raw_runners) if raw_runners and raw_runners.strip() else None
+        raw_askers = env.get("GOVERNOR_SLACK_ASKERS")
+        askers = _ids(raw_askers) if raw_askers and raw_askers.strip() else None
         return cls(bot_token=env.get("SLACK_BOT_TOKEN") or None, app_token=env.get("SLACK_APP_TOKEN") or None,
                    channel=(env.get("GOVERNOR_SLACK_CHANNEL") or DEFAULT_CHANNEL).strip().lstrip("#"),
                    approvers=approvers, runners=runners, names=_pairs(env.get("GOVERNOR_SLACK_NAMES"), "GOVERNOR_SLACK_NAMES"),
-                   targets=targets, llm=(env.get("GOVERNOR_SLACK_LLM") or "openrouter").strip())
+                   targets=targets, llm=(env.get("GOVERNOR_SLACK_LLM") or "openrouter").strip(),
+                   ask_role=(env.get("GOVERNOR_SLACK_ASK_ROLE") or DEFAULT_ASK_ROLE).strip(),
+                   askers=askers, ask_llm=(env.get("GOVERNOR_SLACK_ASK_LLM") or "openrouter").strip())
 
     def is_approver(self, user_id: str) -> bool:
         return user_id in self.approvers
@@ -83,6 +102,12 @@ class SlackConfig:
     def is_runner(self, user_id: str) -> bool:
         """``GOVERNOR_SLACK_RUNNERS`` may start builds; unset, the approvers may."""
         return user_id in (self.approvers if self.runners is None else self.runners)
+
+    def is_asker(self, user_id: str) -> bool:
+        """``GOVERNOR_SLACK_ASKERS`` (``*``: everyone) may ``/governor ask``; unset, the runners may."""
+        if self.askers is None:
+            return self.is_runner(user_id)
+        return EVERYONE in self.askers or (bool(user_id) and user_id in self.askers)
 
     def name_for(self, user_id: str) -> str:
         """The ``approved_by`` name: the mapped name, else the Slack user id."""
@@ -97,4 +122,4 @@ def ensure_notifier_registered(env: dict | None = None) -> None:
         env["GOVERNOR_BUILD_NOTIFIERS"] = ",".join(specs + [NOTIFIER_SPEC])
 
 
-__all__ = ["ConfigError", "DEFAULT_CHANNEL", "NOTIFIER_SPEC", "SlackConfig", "ensure_notifier_registered"]
+__all__ = ["ConfigError", "DEFAULT_ASK_ROLE", "DEFAULT_CHANNEL", "EVERYONE","NOTIFIER_SPEC", "SlackConfig", "ensure_notifier_registered"]
