@@ -305,3 +305,36 @@ steps:
     allowed_paths: [src/governor/integrations/, tests/integrations/, docs/slack.md, src/governor/build/design.py, src/governor/build/prompts/propose.md, tests/build/, tests/fixtures/build/]
     human_gate: true
     review_focus: "the next step is visible in the channel message; only approvers can open a PR; decided buttons are replaced and stale presses change nothing; the schema prefix is normalised only for profiled tables, other unknown names stay findings; Slack holds no build logic; no data values in payloads"
+  # ---- Batch 2d (E1-E4), agreed 11 Nov 2026. Contract: docs/capstone/batch2d.md. The planner sweep (section 26) is a human run.
+  - id: E1
+    title: Certified answers in Slack (/governor ask)
+    tier: design
+    prompt: plan/prompts/E1.md
+    accept: plan/accept/accept_e1.py
+    allowed_paths: [src/governor/integrations/, tests/integrations/, docs/slack.md]
+    human_gate: false
+    review_focus: "Slack holds no answer logic (it calls certified.answer and shows its text); the role comes only from configuration; refusals and errors are ephemeral and never repeat the question; no SQL and no data values beyond the certified answer text in any message; the question text is never logged; Slack modules import without a database or tokens"
+  - id: E2
+    title: Certified KPIs over MCP (second read-only server)
+    tier: design
+    prompt: plan/prompts/E2.md
+    accept: plan/accept/accept_e2.py
+    allowed_paths: [src/governor/ask/mcp_certified.py, src/governor/ask/certified.py, tests/mcp/, tests/ask/, docs/mcp.md]
+    human_gate: false
+    review_focus: "certified.answer behaves exactly as before (test_certified.py untouched and green); the MCP path runs the same build_sql, validator and reader role as answer; no tool takes a role or raw SQL; bad arguments run no SQL; errors carry no connection string; the existing mcp_server is unchanged"
+  - id: E3
+    title: Perturbed test bed for one holdout run
+    tier: design
+    prompt: plan/prompts/E3.md
+    accept: plan/accept/accept_e3.py
+    allowed_paths: [testbed/perturb.py, testbed/load_csv_dir.py, testbed/README.md, src/governor/eval/build_eval.py, tests/testbed/, tests/eval/]
+    human_gate: false
+    review_focus: "values and row counts are untouched so the frozen gold still applies; no original table or column name survives; the perturbed policy tags exactly the renamed PII columns; --replace cannot mix two datasets and touches only schema raw; build_eval behaves as before without --policy; no real data in the repo"
+  - id: E4
+    title: Injection tests, error redaction and the threat model
+    tier: design
+    prompt: plan/prompts/E4.md
+    accept: plan/accept/accept_e4.py
+    allowed_paths: [src/governor/build/redact.py, src/governor/build/silver.py, tests/build/, tests/fixtures/build/, docs/capstone/threat-model.md]
+    human_gate: true
+    review_focus: "no data value can reach a model through the repair prompt, while the identifiers the repair needs survive; redaction is applied where the prompt is rendered, not to the stored failure; design.validate and graph.py are unchanged; every hijack shape either has a finding or is a strict xfail listed in the threat model; the threat model claims only what a test or an evaluation file shows"

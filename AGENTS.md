@@ -41,3 +41,9 @@ This repo is **governor** (core + ask modules), built step by step by the code f
 - Contract: `docs/capstone/batch2.md`. Code goes in `src/governor/build/`; it never imports `governor.ask`.
 - Tests use the fake LLM only. Never write credentials to a file; connection settings come from env.
 - Scratch output goes to the system temp folder, never the repo root.
+
+## Capstone batch 2d (E1 onwards)
+
+- Contract: `docs/capstone/batch2d.md`. `src/governor/build/graph.py`, `src/governor/build/design.py` and everything under `evaluation/` do not change in this batch.
+- `governor.integrations` may import `governor.ask` and `governor.build`; those two never import each other or `governor.integrations`.
+- No data value from the warehouse goes into a prompt, a log line, a Slack message or a file in the repo. Tests use a marker string to prove it.
