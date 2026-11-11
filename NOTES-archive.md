@@ -1406,3 +1406,41 @@ Review: E1 matches section 22. /governor ask takes its role only from GOVERNOR_S
 
 For Amir: The integration tests inject a fake asker, so the suite never calls certified.answer. The real call is GovernorSlack._default_asker. A bad GOVERNOR_SLACK_ASK_ROLE raises ConfigError while building SlackConfig, and __main__ exits before Socket Mode starts.
 
+## E2 result (implementer notes)
+accept_e2: 17/17 checks pass (tests/mcp 15 passed; tests/ask 158 passed, 2 skipped); tests/integrations 36 passed. Notes for review: `answer_reply` has an extra keyword-only `registry=` so `answer` keeps one registry read. `query_kpi` types `period_kind` and `pick` as plain strings so a bad value comes back as `{"outcome": "error"}` from our CertifiedReply validation instead of an SDK ToolError; the allowed values are in the tool description. `describe_kpi` reads `template_sha256` with a separate optional query (read_registry's column list is unchanged so the existing fakes keep working); a catalogue KPI with no gap row is `not_available`. describe/list use the private `certified._gap_text` and `_catalogue_ids`.
+
+## Additions for E2
+E2 splits certified.answer and adds answer_reply. Slack must keep calling certified.answer(question, role, certified.make_llm(config.ask_llm)) with no adapter, from GovernorSlack._default_asker only. That import has to stay inside the function: a top-level governor.ask import fails the E1 check. The omitted adapter is the ask login (GOVERNOR_PG_DSN), same as the API. make_llm("openrouter") returns None, and answer() then builds the chat model. READER_ROLES is the dict in governor.core.serving (keys analyst and finance_admin). SlackConfig rejects any other ask role at construction, including the Postgres role names. Channel outcomes are answer, not_available, and unanswerable. refused and any exception are ephemeral and must not include the question. The channel shows text only; sql, value, and citation stay off the message and out of the log. Ask logs are outcome, kpi id, and Slack user id. GOVERNOR_SLACK_ASKERS unset means the runners, and unset runners means the approvers. * means every user.
+
+## E2 result
+*Certified KPIs over MCP (second read-only server), 11 Nov 2026 13:14.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 1 fix loop(s); branch `factory/E2`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| governor.ask never imports build or integrations | yes |  |
+| tests/ask/test_certified.py unchanged against main | yes | the file differs from main |
+| src/governor/ask/mcp_server.py unchanged against main | yes | the file differs from main |
+| tests/mcp/test_mcp_server.py unchanged against main | yes | the file differs from main |
+| mcp_certified imports without a database | yes |  |
+| certified.answer_reply exists | yes |  |
+| build_server takes an adapter | yes |  |
+| docs/mcp.md mentions governor.ask.mcp_certified | yes |  |
+| docs/mcp.md mentions list_certified_kpis | yes |  |
+| docs/mcp.md mentions describe_kpi | yes |  |
+| docs/mcp.md mentions query_kpi | yes |  |
+| docs/mcp.md mentions gap_report | yes |  |
+| pytest tests/mcp | yes | 15 passed in 30.66s |
+| required tests present | yes | 9 found |
+| pytest tests/ask | yes | 158 passed, 2 skipped in 50.50s |
+| required tests present | yes | 1 found |
+
+Review: E2 matches section 23. certified.answer calls answer_reply after the model choice, and tests/ask/test_certified.py is unchanged and green. query_kpi uses that path: build_sql, the validator, and the role's reader. The four tools take no role and no SQL. Arguments that fail validation return outcome error and run no SQL. Errors are one line with the connection string scrubbed. describe_kpi returns unknown for an id that is neither certified nor a registry gap, including catalogue-only gross_margin. mcp_server.py is unchanged. Acceptance passed.
+
+For Amir: Acceptance details that say the file differs from main, for test_certified.py, mcp_server.py and test_mcp_server.py, are that check's failure text. git diff --quiet main returned 0, so those files match main. The E2 implementer note in NOTES.md still says a catalogue KPI with no gap is not_available and that describe uses _catalogue_ids. describe_kpi returns unknown and does not call _catalogue_ids. query_kpi still returns not_available for that id, because it calls answer_reply.
+
+## Additions for E3
+E2 adds python -m governor.ask.mcp_certified, server name governor-certified. GOVERNOR_MCP_ROLE defaults to analyst and must be a key of certified.READER_ROLES (analyst, finance_admin), not the Postgres role name. build_server(role, adapter=None) raises ValueError otherwise; main exits 2. Tools: list_certified_kpis, describe_kpi, query_kpi, gap_report. None takes a role or SQL. query_kpi builds a CertifiedReply with category answer and calls answer_reply. A registry gap is not_available. A catalogue id with no gap row is also not_available on query_kpi, because answer_reply still uses _catalogue_ids. describe_kpi stops after a certified row and a governor_gaps row, then returns outcome unknown plus kpi_id. It does not call _catalogue_ids. template_sha256 is a separate optional query, omitted when the column is absent; read_registry's SELECT list is unchanged. answer_reply(reply, role, adapter=None, *, access_path, kpis_path, registry=None) is the path after the model choice; answer passes the registry it already read so it does not read twice. Slack must keep calling certified.answer from GovernorSlack._default_asker only, import inside the function. mcp_server.py, tests/ask/test_certified.py and tests/mcp/test_mcp_server.py are unchanged. Failures are outcome error with one line of text; safe_text redacts URLs and password, user, host, hostaddr, dbname, port, dsn, sslmode. E3 (perturbed test bed) does not use this server.
+

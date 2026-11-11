@@ -526,13 +526,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--llm", default="openrouter", help="openrouter or fake:<script.json>")
     ap.add_argument("--max-cost-usd", type=float, help="stop starting runs once the total cost reaches this")
     ap.add_argument("--work", type=Path, help="folder for the run targets (default: a new temp folder)")
+    ap.add_argument("--policy", type=Path, help="PII policy file for the hooks (default: the shop policy)")
     args = ap.parse_args(argv)
     if args.runs < 1:
         ap.error("--runs must be at least 1")
+    if args.policy and not args.policy.is_file():
+        ap.error(f"--policy: no such file: {args.policy}")
     try:
         llm = make_eval_llm(args.llm, args.plan_model, args.write_model)
-        report = evaluate(args.system, args.runs, args.gold, llm, work=args.work, max_cost_usd=args.max_cost_usd,
-                          llm_spec=args.llm if not args.llm.startswith("fake:") else "fake")
+        hooks = Hooks(policy=args.policy) if args.policy else None
+        report = evaluate(args.system, args.runs, args.gold, llm, work=args.work, hooks=hooks,
+                          max_cost_usd=args.max_cost_usd, llm_spec=args.llm if not args.llm.startswith("fake:") else "fake")
     except Exception as e:  # noqa: BLE001
         print(f"build eval failed: {_first_line(e)}", file=sys.stderr)
         return 1

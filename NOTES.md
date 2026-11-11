@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-E2 is in place: python -m governor.ask.mcp_certified (server governor-certified) serves list_certified_kpis, describe_kpi, query_kpi and gap_report read-only under GOVERNOR_MCP_ROLE (analyst or finance_admin). No model call; no tool takes SQL or a role. query_kpi calls certified.answer_reply, which builds the SQL, validates it and runs it as that role's reader. describe_kpi returns unknown when the id is neither certified nor in governor_gaps, including a catalogue-only id such as gross_margin; query_kpi returns not_available for that same id because answer_reply still consults the catalogue. Failures are an object with outcome error and one line of text, connection string scrubbed. answer_reply takes an optional registry so answer does not read the registry twice. E1 remains: /governor ask posts CertifiedAnswer.text from GovernorSlack._default_asker, role only from GOVERNOR_SLACK_ASK_ROLE, refusals and errors ephemeral, channel shows text only. The existing mcp_server is unchanged.
+E3 adds a deterministic perturb tool and a generic raw loader for one holdout on the same Olist rows under new names. perturb.py renames every table and column, reverses column order, splits orders into ord_hdr and ord_dlv, adds the 20-row etl_audit_log, and writes mapping.json plus a policy whose keys are the renamed PII columns and whose tags are unchanged. load_csv_dir.py loads a CSV folder into schema raw only; --replace drops every raw table first and is required when raw is not empty. build_eval --policy passes that file into the existing hooks; omitting it still uses knowledge/shop/policy.yaml. The README has the run-once holdout commands and the CC BY-NC-SA 4.0 licence. The holdout itself has not been run. Real Olist data is not in the repo.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -21,40 +21,35 @@ E2 is in place: python -m governor.ask.mcp_certified (server governor-certified)
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
 
-## E2 result (implementer notes)
-accept_e2: 17/17 checks pass (tests/mcp 15 passed; tests/ask 158 passed, 2 skipped); tests/integrations 36 passed. Notes for review: `answer_reply` has an extra keyword-only `registry=` so `answer` keeps one registry read. `query_kpi` types `period_kind` and `pick` as plain strings so a bad value comes back as `{"outcome": "error"}` from our CertifiedReply validation instead of an SDK ToolError; the allowed values are in the tool description. `describe_kpi` reads `template_sha256` with a separate optional query (read_registry's column list is unchanged so the existing fakes keep working); a catalogue KPI with no gap row is `not_available`. describe/list use the private `certified._gap_text` and `_catalogue_ids`.
+## E3 result (implementer notes)
+accept_e3: 15/15 checks pass (tests/testbed 15 passed, 7 skipped; tests/eval 153 passed). `testbed/perturb.py` maps each original column name to one new name in every table (customer_id -> cust_ref everywhere), so keys still join and the flat policy renames 1:1; orders split into `ord_hdr` and `ord_dlv` (both carry `ord_ref`; mapping.json maps `olist_orders_dataset.order_id` once, to `ord_hdr.ord_ref`). It imports `EXPECTED` and `validate_source` from load_olist and fails (exit 2, nothing written) on a header mismatch or a policy key that is not an Olist column. `testbed/load_csv_dir.py` drops `raw` tables without CASCADE, so a dependent object outside `raw` makes `--replace` fail instead of touching another schema. No live loader test: a round trip would drop `raw` on whatever stack it reaches. `build_eval --policy` builds `Hooks(policy=...)` only when given (missing file is a usage error); otherwise `hooks=None` as before.
 
-## Additions for E2
-E2 splits certified.answer and adds answer_reply. Slack must keep calling certified.answer(question, role, certified.make_llm(config.ask_llm)) with no adapter, from GovernorSlack._default_asker only. That import has to stay inside the function: a top-level governor.ask import fails the E1 check. The omitted adapter is the ask login (GOVERNOR_PG_DSN), same as the API. make_llm("openrouter") returns None, and answer() then builds the chat model. READER_ROLES is the dict in governor.core.serving (keys analyst and finance_admin). SlackConfig rejects any other ask role at construction, including the Postgres role names. Channel outcomes are answer, not_available, and unanswerable. refused and any exception are ephemeral and must not include the question. The channel shows text only; sql, value, and citation stay off the message and out of the log. Ask logs are outcome, kpi id, and Slack user id. GOVERNOR_SLACK_ASKERS unset means the runners, and unset runners means the approvers. * means every user.
+## E3 result
+*Perturbed test bed for one holdout run, 11 Nov 2026 13:32.*
 
-## E2 result
-*Certified KPIs over MCP (second read-only server), 11 Nov 2026 13:14.*
-
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 1 fix loop(s); branch `factory/E2`.
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/E3`.
 
 | check | ok | detail |
 |---|---|---|
 | capstone ground truth unchanged | yes | capstone ground truth unchanged |
-| governor.ask never imports build or integrations | yes |  |
-| tests/ask/test_certified.py unchanged against main | yes | the file differs from main |
-| src/governor/ask/mcp_server.py unchanged against main | yes | the file differs from main |
-| tests/mcp/test_mcp_server.py unchanged against main | yes | the file differs from main |
-| mcp_certified imports without a database | yes |  |
-| certified.answer_reply exists | yes |  |
-| build_server takes an adapter | yes |  |
-| docs/mcp.md mentions governor.ask.mcp_certified | yes |  |
-| docs/mcp.md mentions list_certified_kpis | yes |  |
-| docs/mcp.md mentions describe_kpi | yes |  |
-| docs/mcp.md mentions query_kpi | yes |  |
-| docs/mcp.md mentions gap_report | yes |  |
-| pytest tests/mcp | yes | 15 passed in 30.66s |
-| required tests present | yes | 9 found |
-| pytest tests/ask | yes | 158 passed, 2 skipped in 50.50s |
+| testbed/load_olist.py unchanged against main | yes | the file differs from main |
+| README has the perturbed holdout section | yes |  |
+| README states the Olist licence | yes |  |
+| no real data tracked | yes |  |
+| build_eval has --policy | yes |  |
+| perturb.py runs on the sample (a) | yes | {"cust": 6, "geo_zip": 5, "ord_line": 6, "ord_pay": 6, "ord_rvw": 4, "ord_hdr": 5, "ord_dlv": 5, "prod": 3, "slr": 2, "c |
+| perturb.py runs on the sample (b) | yes | {"cust": 6, "geo_zip": 5, "ord_line": 6, "ord_pay": 6, "ord_rvw": 4, "ord_hdr": 5, "ord_dlv": 5, "prod": 3, "slr": 2, "c |
+| mapping.json, policy.yaml and the junk table are written | yes | cat_xlat.csv, cust.csv, etl_audit_log.csv, geo_zip.csv, mapping.json, ord_dlv.csv, ord_hdr.csv, ord_line.csv, ord_pay.cs |
+| two runs give identical files | yes |  |
+| every sample table is renamed | yes |  |
+| pytest tests/testbed | yes | 15 passed, 7 skipped in 0.77s |
+| required tests present | yes | 8 found |
+| pytest tests/eval | yes | 153 passed in 8.15s |
 | required tests present | yes | 1 found |
 
-Review: E2 matches section 23. certified.answer calls answer_reply after the model choice, and tests/ask/test_certified.py is unchanged and green. query_kpi uses that path: build_sql, the validator, and the role's reader. The four tools take no role and no SQL. Arguments that fail validation return outcome error and run no SQL. Errors are one line with the connection string scrubbed. describe_kpi returns unknown for an id that is neither certified nor a registry gap, including catalogue-only gross_margin. mcp_server.py is unchanged. Acceptance passed.
+Review: E3 preserves every sample cell and row count, gives every table and column a new name (orders split into ord_hdr and ord_dlv), and writes a policy whose keys are exactly the renamed PII columns. load_csv_dir --replace drops only schema raw and refuses a non-empty raw. build_eval --policy only forwards the path; without it the shop policy stays. Acceptance tests cover those claims, and no real Olist data is tracked.
 
-For Amir: Acceptance details that say the file differs from main, for test_certified.py, mcp_server.py and test_mcp_server.py, are that check's failure text. git diff --quiet main returned 0, so those files match main. The E2 implementer note in NOTES.md still says a catalogue KPI with no gap is not_available and that describe uses _catalogue_ids. describe_kpi returns unknown and does not call _catalogue_ids. query_kpi still returns not_available for that id, because it calls answer_reply.
+For Amir: mapping.json records olist_orders_dataset.order_id only as ord_hdr.ord_ref; the same ids are also on ord_dlv. Tag values are still customer_id, location, and free_text, so the model sees the PII class on the new column names. The load_olist acceptance detail is the failure string stored on a passing check; the file matches main. Gold numbers are still the full dataset (99,441 orders). The holdout run is still yours.
 
-## Additions for E3
-E2 adds python -m governor.ask.mcp_certified, server name governor-certified. GOVERNOR_MCP_ROLE defaults to analyst and must be a key of certified.READER_ROLES (analyst, finance_admin), not the Postgres role name. build_server(role, adapter=None) raises ValueError otherwise; main exits 2. Tools: list_certified_kpis, describe_kpi, query_kpi, gap_report. None takes a role or SQL. query_kpi builds a CertifiedReply with category answer and calls answer_reply. A registry gap is not_available. A catalogue id with no gap row is also not_available on query_kpi, because answer_reply still uses _catalogue_ids. describe_kpi stops after a certified row and a governor_gaps row, then returns outcome unknown plus kpi_id. It does not call _catalogue_ids. template_sha256 is a separate optional query, omitted when the column is absent; read_registry's SELECT list is unchanged. answer_reply(reply, role, adapter=None, *, access_path, kpis_path, registry=None) is the path after the model choice; answer passes the registry it already read so it does not read twice. Slack must keep calling certified.answer from GovernorSlack._default_asker only, import inside the function. mcp_server.py, tests/ask/test_certified.py and tests/mcp/test_mcp_server.py are unchanged. Failures are outcome error with one line of text; safe_text redacts URLs and password, user, host, hostaddr, dbname, port, dsn, sslmode. E3 (perturbed test bed) does not use this server.
+## Additions for E4
+E4 must leave src/governor/build/graph.py, src/governor/build/design.py, and evaluation/ unchanged. E3 added testbed/perturb.py, testbed/load_csv_dir.py, build_eval --policy, and the Perturbed holdout section in testbed/README.md. knowledge/shop/policy.yaml is still the original column names. A perturbed policy is an output of perturb.py: same tags (customer_id, location, free_text), keys renamed (cust_ref, cust_uid, cust_zip5, cust_town, cust_uf, geo_y, geo_x, slr_zip5, slr_town, rvw_ttl, rvw_txt). The profiler marks PII when the column name is a policy key, on every table that has that name. Orders are split into ord_hdr and ord_dlv; mapping.json points order_id only at ord_hdr.ord_ref, and ord_dlv also carries it. etl_audit_log (20 fixed rows) is not in the mapping. load_csv_dir touches only schema raw; --replace is required when raw is not empty. build_eval without --policy leaves hooks unset, and Hooks.policy stays the shop policy. The holdout run has not been executed.

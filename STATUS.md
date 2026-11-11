@@ -1,6 +1,6 @@
 # STATUS: governor
 
-Updated 11 Nov 2026 13:14. Run `20261111-123318`.
+Updated 11 Nov 2026 13:32. Run `20261111-123318`.
 
 | step | title | tier | gate | state | loops | reason | implementer | verdicts | updated |
 |---|---|---|---|---|---|---|---|---|---|
@@ -41,10 +41,10 @@ Updated 11 Nov 2026 13:14. Run `20261111-123318`.
 | D9b | Slack clean-up | design | - | done | 1/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-07T15:02:30 |
 | D9c | Next steps in the channel, PR link, small fixes | design | yes | done | 0/2 |  | claude-tc-opus | cursor-grok: pass, claude-tc-fable: pass | 2026-11-08T15:03:59 |
 | E1 | Certified answers in Slack (/governor ask) | design | - | done | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-11T12:46:11 |
-| E2 | Certified KPIs over MCP (second read-only server) | design | - | passed | 1/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-11T13:14:14 |
-| E3 | Perturbed test bed for one holdout run | design | - | pending | 0/2 |  | - | - | - |
+| E2 | Certified KPIs over MCP (second read-only server) | design | - | done | 1/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-11T13:14:15 |
+| E3 | Perturbed test bed for one holdout run | design | - | passed | 0/2 |  | claude-tc-opus | cursor-grok: pass | 2026-11-11T13:32:20 |
 | E4 | Injection tests, error redaction and the threat model | design | yes | pending | 0/2 |  | - | - | - |
 
-Cost so far (reported + notional): $120.08 of $150.00 run budget; 141 agent call(s).
+Cost so far (reported + notional): $121.35 of $150.00 run budget; 143 agent call(s).
 
-Next: E2 is passed: `factory resume`.
+Next: E3 is passed: `factory resume`.

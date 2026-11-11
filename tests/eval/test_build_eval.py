@@ -262,3 +262,48 @@ def test_build_eval_valid_first_try_recorded(tmp_path, profile):
 def test_cli_rejects_unknown_system(capsys):
     with pytest.raises(SystemExit):
         be.main(["--system", "other", "--gold", str(SAMPLE_GOLD), "--out", "x.json"])
+
+
+# ---- --policy (batch2d section 24) ----
+
+def _capture_main(monkeypatch, tmp_path, extra):
+    seen = {}
+
+    def fake_evaluate(system, runs, gold_path, llm, **kw):
+        seen.update(kw)
+        return {"summary": {"runs": 0, "statuses": {}, "mean": {"gold_passed": 0}}, "total_cost_usd": 0.0,
+                "stopped_by_budget": False}
+
+    monkeypatch.setattr(be, "make_eval_llm", lambda *a: object())
+    monkeypatch.setattr(be, "evaluate", fake_evaluate)
+    assert be.main(["--system", "agent", "--gold", str(SAMPLE_GOLD), "--out", str(tmp_path / "r.json"), *extra]) == 0
+    return seen
+
+
+def test_build_eval_policy_option_reaches_the_hooks(monkeypatch, tmp_path):
+    policy = tmp_path / "policy.yaml"
+    policy.write_text("cust_ref: customer_id\n", encoding="utf-8")
+    hooks = _capture_main(monkeypatch, tmp_path, ["--policy", str(policy)])["hooks"]
+    assert hooks.policy == policy
+    # the agent path takes the policy from the hooks
+    calls = []
+
+    def fake_start(target, project, llm, *, policy, **kw):
+        calls.append(policy)
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(be.graph, "start", fake_start)
+    with pytest.raises(RuntimeError, match="stop here"):
+        be.run_agent(object(), tmp_path / "t", tmp_path / "w", hooks, None)
+    assert calls == [policy]
+
+
+def test_build_eval_default_policy_is_still_the_shop_policy(monkeypatch, tmp_path):
+    assert _capture_main(monkeypatch, tmp_path, [])["hooks"] is None
+    assert be.Hooks().policy == ROOT / "knowledge" / "shop" / "policy.yaml"
+
+
+def test_build_eval_rejects_a_missing_policy_file(tmp_path):
+    with pytest.raises(SystemExit):
+        be.main(["--system", "agent", "--gold", str(SAMPLE_GOLD), "--out", str(tmp_path / "r.json"),
+                 "--policy", str(tmp_path / "nope.yaml")])
