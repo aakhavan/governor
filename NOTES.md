@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-E3 adds a deterministic perturb tool and a generic raw loader for one holdout on the same Olist rows under new names. perturb.py renames every table and column, reverses column order, splits orders into ord_hdr and ord_dlv, adds the 20-row etl_audit_log, and writes mapping.json plus a policy whose keys are the renamed PII columns and whose tags are unchanged. load_csv_dir.py loads a CSV folder into schema raw only; --replace drops every raw table first and is required when raw is not empty. build_eval --policy passes that file into the existing hooks; omitting it still uses knowledge/shop/policy.yaml. The README has the run-once holdout commands and the CC BY-NC-SA 4.0 licence. The holdout itself has not been run. Real Olist data is not in the repo.
+E4 redacts dbt errors when the repair prompt is rendered and leaves the stored failure and the escalation record raw. redact_error drops DETAIL, HINT, CONTEXT, Failing row and Key ( lines, blanks single-quoted text and unknown double-quoted spans, and replaces runs of 7 or more digits with #. Known identifiers stay when double-quoted: model and column names, raw tables and columns, and the schemas dev_governor and raw. All five hijack shapes in tests/build/test_threats.py get findings from design.validate, which was not changed, and the threat model lists no xfail. docs/capstone/threat-model.md is 57 lines and covers ASI01, ASI02, ASI03, ASI06 and ASI09. graph.py, design.py, repair.md and propose.md match main. A well-typed wrong mapping still passes the code checks, including L8, and is left to the design-gate reviewer and evaluation/build_gold.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,9 +20,6 @@ E3 adds a deterministic perturb tool and a generic raw loader for one holdout on
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## E3 result (implementer notes)
-accept_e3: 15/15 checks pass (tests/testbed 15 passed, 7 skipped; tests/eval 153 passed). `testbed/perturb.py` maps each original column name to one new name in every table (customer_id -> cust_ref everywhere), so keys still join and the flat policy renames 1:1; orders split into `ord_hdr` and `ord_dlv` (both carry `ord_ref`; mapping.json maps `olist_orders_dataset.order_id` once, to `ord_hdr.ord_ref`). It imports `EXPECTED` and `validate_source` from load_olist and fails (exit 2, nothing written) on a header mismatch or a policy key that is not an Olist column. `testbed/load_csv_dir.py` drops `raw` tables without CASCADE, so a dependent object outside `raw` makes `--replace` fail instead of touching another schema. No live loader test: a round trip would drop `raw` on whatever stack it reaches. `build_eval --policy` builds `Hooks(policy=...)` only when given (missing file is a usage error); otherwise `hooks=None` as before.
 
 ## E3 result
 *Perturbed test bed for one holdout run, 11 Nov 2026 13:32.*
@@ -53,3 +50,38 @@ For Amir: mapping.json records olist_orders_dataset.order_id only as ord_hdr.ord
 
 ## Additions for E4
 E4 must leave src/governor/build/graph.py, src/governor/build/design.py, and evaluation/ unchanged. E3 added testbed/perturb.py, testbed/load_csv_dir.py, build_eval --policy, and the Perturbed holdout section in testbed/README.md. knowledge/shop/policy.yaml is still the original column names. A perturbed policy is an output of perturb.py: same tags (customer_id, location, free_text), keys renamed (cust_ref, cust_uid, cust_zip5, cust_town, cust_uf, geo_y, geo_x, slr_zip5, slr_town, rvw_ttl, rvw_txt). The profiler marks PII when the column name is a policy key, on every table that has that name. Orders are split into ord_hdr and ord_dlv; mapping.json points order_id only at ord_hdr.ord_ref, and ord_dlv also carries it. etl_audit_log (20 fixed rows) is not in the mapping. load_csv_dir touches only schema raw; --replace is required when raw is not empty. build_eval without --policy leaves hooks unset, and Hooks.policy stays the shop policy. The holdout run has not been executed.
+
+## E4 result
+*Injection tests, error redaction and the threat model, 11 Nov 2026 14:24.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 1 fix loop(s); branch `factory/E4`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| src/governor/build/graph.py unchanged against main | yes | the file differs from main |
+| src/governor/build/design.py unchanged against main | yes | the file differs from main |
+| src/governor/build/prompts/repair.md unchanged against main | yes | the file differs from main |
+| src/governor/build/prompts/propose.md unchanged against main | yes | the file differs from main |
+| governor.build imports neither Slack nor ask | yes |  |
+| redact_error runs | yes |  |
+| no data value survives redaction | yes |  |
+| known identifiers survive | yes |  |
+| long numbers and DETAIL lines go | yes |  |
+| threat model exists, at most 80 lines | yes | 57 lines |
+| threat model has ASI01 | yes |  |
+| threat model has ASI02 | yes |  |
+| threat model has ASI03 | yes |  |
+| threat model has ASI06 | yes |  |
+| threat model has ASI09 | yes |  |
+| threat model has Open findings | yes |  |
+| threat model holds no marker or data value | yes |  |
+| pytest tests/build | yes | 171 passed, 12 skipped in 51.82s |
+| required tests present | yes | 9 found |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: The acceptance lines 'the file differs from main' are the failure string stored even when the check passes. ok true means git diff --quiet against main returned 0, so graph.py, design.py, repair.md and propose.md match main. Unquoted values on a kept error line are left as written; section 25 and the threat model both say so, and Postgres quotes the values it reports.
+
+## Additions for the next plan
+Batch 2d has no further code step; section 26 is the human planner sweep and must not change graph.py, design.py, or the frozen gold files. Redaction happens only inside silver.repair_prompt. Do not redact st['failures'] or the escalation error. Single-quoted spans, including ref('model'), always become '…'. A double-quoted span is kept only on an exact case-insensitive match to error_identifiers (design model and column names, staging raw tables and columns, schemas dev_governor and raw). Unquoted text on a kept line is unchanged. The five hijack shapes already fail validation (UNKNOWN_SOURCE_TABLE, UNKNOWN_SOURCE_COLUMN, KPI_UNKNOWN, PII_UNTAGGED, MAPPING_UNKNOWN_COLUMN); there is no strict xfail to keep. A mapping that is well typed but wrong is not a code finding.

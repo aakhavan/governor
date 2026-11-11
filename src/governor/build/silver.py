@@ -13,7 +13,8 @@
   test, column mismatch) goes back for repair (``prompts/repair.md``) with its error and SQL: at most
   :data:`WRITE_REPAIRS` repairs by the write model, then one by the plan model, then the build is ``escalated``.
   Only intermediate SQL is repaired: a failing staging model is the approved design, so it escalates at once with
-  the dbt error (the fix is a new design through the gate).
+  the dbt error (the fix is a new design through the gate). The error in the repair prompt goes through
+  :func:`~governor.build.redact.redact_error` first (batch2d section 25); the stored failure keeps it as it was.
 - :func:`prune_stale` runs first: model, yml and key-test files the approved design no longer contains are removed
   from staging, intermediate and marts, so stale models never reach dbt.
 
@@ -36,6 +37,7 @@ from sqlglot.errors import SqlglotError
 from governor.build.dbt import DbtResult, run_dbt
 from governor.build.llm import BuildLLM, LLMOutputError
 from governor.build.models import Proposal, SilverModel
+from governor.build.redact import redact_error
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
 SCHEMA = "dev_governor"
@@ -164,9 +166,34 @@ def intermediate_prompt(m: SilverModel, design: Proposal | dict) -> str:
     return _render("intermediate.md", _model_block(m, _proposal(design)))
 
 
+def _raw_columns(expr: str | None) -> set[str]:
+    """Column names a staging expression reads (empty when it does not parse)."""
+    try:
+        tree = sqlglot.parse_one(expr, read="postgres") if (expr or "").strip() else None
+    except SqlglotError:
+        return set()
+    return {c.name for c in tree.find_all(exp.Column) if c.name} if tree is not None else set()
+
+
+def error_identifiers(design: Proposal | dict) -> set[str]:
+    """Names an error may quote and the repair prompt keeps (batch2d section 25): the design's model and column
+    names, the raw tables and columns its staging models read, and the schema names in use."""
+    prop = _proposal(design)
+    names = {SCHEMA, "raw"}
+    for m in prop.silver_models:
+        names.add(m.name)
+        names.update(m.column_names())
+        if m.folder == STAGING and m.source_table:
+            names.add(m.source_table)
+            for c in m.columns:
+                names.update(_raw_columns(c.expr) if (c.expr or "").strip() else {c.name})
+    return names
+
+
 def repair_prompt(m: SilverModel, design: Proposal | dict, sql: str, error: str) -> str:
-    return _render("repair.md", {**_model_block(m, _proposal(design)), "sql": sql.strip() or "(no SQL yet)",
-                                 "error": error.strip()[-3000:]})
+    prop = _proposal(design)
+    shown = redact_error(error.strip(), error_identifiers(prop)).strip()[-3000:]
+    return _render("repair.md", {**_model_block(m, prop), "sql": sql.strip() or "(no SQL yet)", "error": shown})
 
 
 # --------------------------------------------------------------------------- yml and tests
