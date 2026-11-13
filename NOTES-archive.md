@@ -1447,3 +1447,38 @@ E2 adds python -m governor.ask.mcp_certified, server name governor-certified. GO
 ## E3 result (implementer notes)
 accept_e3: 15/15 checks pass (tests/testbed 15 passed, 7 skipped; tests/eval 153 passed). `testbed/perturb.py` maps each original column name to one new name in every table (customer_id -> cust_ref everywhere), so keys still join and the flat policy renames 1:1; orders split into `ord_hdr` and `ord_dlv` (both carry `ord_ref`; mapping.json maps `olist_orders_dataset.order_id` once, to `ord_hdr.ord_ref`). It imports `EXPECTED` and `validate_source` from load_olist and fails (exit 2, nothing written) on a header mismatch or a policy key that is not an Olist column. `testbed/load_csv_dir.py` drops `raw` tables without CASCADE, so a dependent object outside `raw` makes `--replace` fail instead of touching another schema. No live loader test: a round trip would drop `raw` on whatever stack it reaches. `build_eval --policy` builds `Hooks(policy=...)` only when given (missing file is a usage error); otherwise `hooks=None` as before.
 
+## Relocks
+- 13 Nov 2026 18:46: notes file -> NOTES.md (Claude via chat) (changed: plan-airflow.yaml)
+- 13 Nov 2026 19:07: allow tests/ui/test_profiles_page.py (a reasonable page test the implementer added); copied gitignored ../governor/artifacts into the worktree so the offline suite has its fixtures (via supervise, by Claude via chat (delegated by Amir)) (changed: plan-airflow.yaml)
+- 13 Nov 2026 19:40: accept_a1 runs the offline suite without GOVERNOR_PG_DSN/GOVERNOR_PG_ADMIN_DSN, like accept_e4; the inherited read-only DSN switched on test_load_sample_idempotent (environment, not A1 code). (via supervise, by Claude via chat (delegated by Amir)) (changed: plan/accept/accept_a1.py)
+
+## E3 result
+*Perturbed test bed for one holdout run, 11 Nov 2026 13:32.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass; 0 fix loop(s); branch `factory/E3`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| testbed/load_olist.py unchanged against main | yes | the file differs from main |
+| README has the perturbed holdout section | yes |  |
+| README states the Olist licence | yes |  |
+| no real data tracked | yes |  |
+| build_eval has --policy | yes |  |
+| perturb.py runs on the sample (a) | yes | {"cust": 6, "geo_zip": 5, "ord_line": 6, "ord_pay": 6, "ord_rvw": 4, "ord_hdr": 5, "ord_dlv": 5, "prod": 3, "slr": 2, "c |
+| perturb.py runs on the sample (b) | yes | {"cust": 6, "geo_zip": 5, "ord_line": 6, "ord_pay": 6, "ord_rvw": 4, "ord_hdr": 5, "ord_dlv": 5, "prod": 3, "slr": 2, "c |
+| mapping.json, policy.yaml and the junk table are written | yes | cat_xlat.csv, cust.csv, etl_audit_log.csv, geo_zip.csv, mapping.json, ord_dlv.csv, ord_hdr.csv, ord_line.csv, ord_pay.cs |
+| two runs give identical files | yes |  |
+| every sample table is renamed | yes |  |
+| pytest tests/testbed | yes | 15 passed, 7 skipped in 0.77s |
+| required tests present | yes | 8 found |
+| pytest tests/eval | yes | 153 passed in 8.15s |
+| required tests present | yes | 1 found |
+
+Review: E3 preserves every sample cell and row count, gives every table and column a new name (orders split into ord_hdr and ord_dlv), and writes a policy whose keys are exactly the renamed PII columns. load_csv_dir --replace drops only schema raw and refuses a non-empty raw. build_eval --policy only forwards the path; without it the shop policy stays. Acceptance tests cover those claims, and no real Olist data is tracked.
+
+For Amir: mapping.json records olist_orders_dataset.order_id only as ord_hdr.ord_ref; the same ids are also on ord_dlv. Tag values are still customer_id, location, and free_text, so the model sees the PII class on the new column names. The load_olist acceptance detail is the failure string stored on a passing check; the file matches main. Gold numbers are still the full dataset (99,441 orders). The holdout run is still yours.
+
+## Additions for E4
+E4 must leave src/governor/build/graph.py, src/governor/build/design.py, and evaluation/ unchanged. E3 added testbed/perturb.py, testbed/load_csv_dir.py, build_eval --policy, and the Perturbed holdout section in testbed/README.md. knowledge/shop/policy.yaml is still the original column names. A perturbed policy is an output of perturb.py: same tags (customer_id, location, free_text), keys renamed (cust_ref, cust_uid, cust_zip5, cust_town, cust_uf, geo_y, geo_x, slr_zip5, slr_town, rvw_ttl, rvw_txt). The profiler marks PII when the column name is a policy key, on every table that has that name. Orders are split into ord_hdr and ord_dlv; mapping.json points order_id only at ord_hdr.ord_ref, and ord_dlv also carries it. etl_audit_log (20 fixed rows) is not in the mapping. load_csv_dir touches only schema raw; --replace is required when raw is not empty. build_eval without --policy leaves hooks unset, and Hooks.policy stays the shop policy. The holdout run has not been executed.
+

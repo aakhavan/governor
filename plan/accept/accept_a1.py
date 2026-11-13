@@ -71,7 +71,9 @@ def workload():
 
 
 def tests():
-    r = run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-m", "not llm", "tests"], timeout=1800)
+    import os
+    env = {k: v for k, v in os.environ.items() if k not in ("GOVERNOR_PG_DSN", "GOVERNOR_PG_ADMIN_DSN")}  # like accept_e4: live-DB tests skip
+    r = run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-m", "not llm", "tests"], timeout=1800, env=env)
     summary = next((l for l in reversed(r.stdout.strip().splitlines()) if "passed" in l or "failed" in l or "error" in l), tail(r))
     check("full offline test suite green", r.returncode == 0, summary)
     c = run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "tests"], timeout=600)

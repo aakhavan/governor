@@ -99,5 +99,13 @@ class ApiClient:
     def get_trace(self, trace_id: str) -> dict:
         return self._request("GET", f"/v1/traces/{trace_id}")
 
+    def list_profiles(self) -> list[str]:
+        """``GET /profiles``: stored raw-profile run ids, newest first."""
+        return self._request("GET", "/profiles")["profiles"]
+
+    def get_profile(self, run_id: str) -> dict:
+        """``GET /profiles/{run_id}``: one stored raw profile, unchanged."""
+        return self._request("GET", f"/profiles/{run_id}")
+
 
 __all__ = ["ApiClient", "ApiError", "api_url"]
