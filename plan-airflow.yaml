@@ -2,7 +2,7 @@
 # Runs in the worktree ../governor-airflow on branch airflow-integration. Spec: ../airflow-platform/docs/spec.md §8.
 # Run: factory lock --plan plan-airflow.yaml ; factory run --plan plan-airflow.yaml --until-gate
 project: governor
-notes: NOTES-airflow.md
+notes: NOTES.md
 agents: AGENTS.md
 defaults:
   max_fix_loops: 2
