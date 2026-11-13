@@ -1,0 +1,23 @@
+# governor A1: the airflow-platform integration (manual profile DAG, profiles API route, Profiles page).
+# Runs in the worktree ../governor-airflow on branch airflow-integration. Spec: ../airflow-platform/docs/spec.md §8.
+# Run: factory lock --plan plan-airflow.yaml ; factory run --plan plan-airflow.yaml --until-gate
+project: governor
+notes: NOTES-airflow.md
+agents: AGENTS.md
+defaults:
+  max_fix_loops: 2
+  timeout_min: 60
+  run_budget_usd: 20
+  step_budget_usd: 15
+  review_budget_usd: {design: 2.0, mechanical: 0.75}
+roles:
+  design: {implementer: [claude-tc-opus, cursor-grok], reviewer: [claude-tc-fable, cursor-grok]}
+steps:
+  - id: A1
+    title: Airflow integration (manual profile DAG, profiles API route, Profiles page)
+    tier: design
+    prompt: plan/prompts/A1.md
+    accept: plan/accept/accept_a1.py
+    allowed_paths: [airflow/, src/governor/api/profiles.py, src/governor/api/app.py, apps/streamlit/pages/4_Profiles.py, apps/streamlit/client.py, tests/test_api_profiles.py, tests/test_airflow_dag.py, docs/airflow.md]
+    human_gate: true
+    review_focus: "existing files only gain lines (app.py: router import + include only; client.py: one additive method); profiles endpoints use the same auth dependency as the other routes; run_id is validated (no traversal) and JSON is returned unchanged; the DAG imports nothing from governor, has schedule=None, no literal password, and gets every connection value from Airflow Variables at run time; existing tests stay green"
