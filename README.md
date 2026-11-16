@@ -6,6 +6,8 @@ Starting from raw e-commerce tables, governor profiles the data, proposes a meda
 
 Turing College AI Engineering capstone, built in November 2026. `governor` is the code name.
 
+**Repos:** [governor](https://github.com/aakhavan/governor) (this one) · [olist-dbt](https://github.com/aakhavan/olist-dbt) (the dbt project governor generated) · [lineage-lab](https://github.com/aakhavan/lineage-lab) (catalogue and lineage) · [airflow-platform](https://github.com/aakhavan/airflow-platform) (orchestration)
+
 ---
 
 ## The problem
@@ -80,12 +82,13 @@ Separate logins: `governor_build` (reads `raw`, creates only in `dev_governor`),
 | `src/governor/core` | warehouse adapters (DuckDB, Postgres), KPI catalogue and blueprint loaders, serving schemas, harvester, lineage, LLM client with cost, input guard |
 | `src/governor/build` | build mode: profile, design and validation, silver, gold, dbt runner, redaction, publish, certify, events |
 | `src/governor/ask` | governor-ask graph, validator (sqlglot), policy, executor, `certified.py`, two MCP servers |
-| `src/governor/api` | FastAPI app: token → role, `/v1/ask`, `/v1/ask/certified`, traces |
+| `src/governor/api` | FastAPI app: token → role, `/v1/ask`, `/v1/ask/certified`, traces, `/profiles/{run_id}` |
 | `src/governor/integrations/slack` | Slack app (Socket Mode): build progress, design card with Approve / Reject, publish, `/governor ask` |
 | `src/governor/eval` | golden sets, harnesses (ask, build, certified, red team), reports |
 | `knowledge/` | human-owned standards: `kpis.yaml` (10 KPIs), `blueprint.md`, `approved.yaml`, access and PII policy (`shop/` for the Olist test bed) |
 | `testbed/` | Postgres 16 compose file, Olist loader, roles, perturbed copy for a holdout run |
-| `apps/streamlit` | the UI, a thin HTTP client of the API |
+| `apps/streamlit` | the UI, a thin HTTP client of the API (includes a Profiles page) |
+| `airflow/dags` | `governor_profile_raw`, a manual DAG loaded by airflow-platform ([`docs/airflow.md`](docs/airflow.md)) |
 | `evaluation/` | frozen ground truth (sha256-locked), reports |
 
 The generated dbt project lives in its own repository (`olist-dbt`), so the build's pull request is a real PR that a person reviews.
@@ -211,9 +214,11 @@ The agent wins on governance and loses to the baseline on join and time-grain qu
 - **Single tenant.** Shared role tokens, no user accounts or rate limiting, one instance (SQLite and DuckDB state).
 - **Postgres only** for build mode; the adapter seam is there for others, but none is built.
 
-## Companion module: catalogue and lineage (lineage-lab)
+## Companion modules
 
-The models governor builds are only useful if people can find them and see where a number comes from. A separate repo, `lineage-lab`, connects the generated dbt project to a data catalogue and a lineage graph.
+### Catalogue and lineage (lineage-lab)
+
+The models governor builds are only useful if people can find them and see where a number comes from. A separate repo, [lineage-lab](https://github.com/aakhavan/lineage-lab), connects the generated dbt project to a data catalogue and a lineage graph.
 
 | What | How | Result on the Olist build |
 |---|---|---|
@@ -223,9 +228,15 @@ The models governor builds are only useful if people can find them and see where
 
 Not done yet: an agent that reads this lineage for impact analysis ("which KPIs break if this column changes?"). That is the next step after the capstone.
 
+### Orchestration (airflow-platform)
+
+[airflow-platform](https://github.com/aakhavan/airflow-platform) is a reusable, self-hosted Airflow setup (local Docker stack, Terraform modules for AWS and GCP tested with mock providers, nothing applied to a cloud). It is a thin orchestrator: Airflow holds no project code, and each project's work runs in its own container image.
+
+governor is its first project. The manual DAG `governor_profile_raw` starts the `governor:local` image and profiles the raw schema (read-only). The result is served at `GET /profiles/{run_id}`, and the Airflow task link opens it on the Streamlit **Profiles** page. Running the full build from Airflow, with the design gate in between, comes later.
+
 ## What's next
 
-Rename (the product name is not final), check mode on an existing dbt project, a KPI research agent that proposes catalogue entries for a person to approve, and pushing the certified KPIs and PII tags into a data catalogue. A companion repo, `lineage-lab`, compares OpenMetadata and Marquez lineage views of the same dbt project as groundwork for that.
+Rename (the product name is not final), check mode on an existing dbt project, a KPI research agent that proposes catalogue entries for a person to approve, and pushing the certified KPIs and PII tags into a data catalogue. lineage-lab (above) is the groundwork for that.
 
 ## Provenance and licence
 
