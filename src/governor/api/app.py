@@ -32,6 +32,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from governor.api.profiles import make_router as make_profiles_router
 from governor.ask import certified, service
 from governor.ask.policy import roles
 
@@ -211,6 +212,7 @@ def create_app(tokens: str | None = None, llm: Any = "env", **graph_options: Any
     def trace(trace_id: str = Path(max_length=128), role: str = Depends(caller_role)) -> dict:
         return service.get_trace(trace_id, role)
 
+    app.include_router(make_profiles_router(caller_role))
     return app
 
 
