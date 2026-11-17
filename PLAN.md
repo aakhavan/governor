@@ -1,6 +1,6 @@
 # governor: an agentic data platform on one foundation (first module: governor-ask)
 
-*Spec written 22 Oct 2026 in the Turing College Project; revised the same day after an independent review by GPT-5.6 Sol (`docs/review/sol-review-2026-10-22.md`). Built by the code factory (`..\factory`). This file is the source of truth for this repo; step prompts never point here, they name files.*
+*Spec written 22 Oct 2026 in the Turing College Project; revised the same day after an independent review by GPT-5.6 Sol. Built by the code factory (`..\factory`). This file is the source of truth for this repo; step prompts never point here, they name files.*
 
 **Seed:** factory `PLAN.md` §10 (governor-ask brief), `platform-kernel-thesis.md` (kernel/product split), `idea1-deep-track-plan.md` §4 (build ladder R1–R7), Sprint 4 build spec §3–§6 (fixture, metadata store, tools, PII rule).
 

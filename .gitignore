@@ -17,5 +17,8 @@ fixture/billing_mart/.user.yml
 testbed/data/
 logs/
 
-# local copies for cross-model reviews (not part of this repo)
-docs/review/s4/
+# internal working docs (build contracts, gate walkthroughs, planning reviews): kept locally, not published
+docs/review/
+docs/walkthroughs/
+docs/capstone/design.md
+docs/capstone/batch2*.md

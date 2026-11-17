@@ -1,6 +1,6 @@
 # Slack app
 
-The Slack app moves the human design gate from the terminal to Slack (contract: `docs/capstone/batch2c.md` section 17). It is a thin client: every action calls the same build function as the CLI, and progress comes from the build events (`GOVERNOR_STATE_DIR/events.jsonl`). It runs in Socket Mode, so a laptop with no public URL is enough. `certify` stays a terminal command (it needs the admin login).
+The Slack app moves the human design gate from the terminal to Slack. It is a thin client: every action calls the same build function as the CLI, and progress comes from the build events (`GOVERNOR_STATE_DIR/events.jsonl`). It runs in Socket Mode, so a laptop with no public URL is enough. `certify` stays a terminal command (it needs the admin login).
 
 ## Setup in five steps
 
@@ -45,7 +45,7 @@ Only users in `GOVERNOR_SLACK_RUNNERS` can start a build; when it is not set, th
 
 ### Certified answers: `/governor ask`
 
-`/governor ask <question>` is a thin client of the certified answer path (`governor.ask.certified.answer`, contract: `docs/capstone/batch2d.md` section 22). The question is everything after `ask`, 3 to 300 characters. The app answers at once with an ephemeral "Looking that up...", then:
+`/governor ask <question>` is a thin client of the certified answer path (`governor.ask.certified.answer`). The question is everything after `ask`, 3 to 300 characters. The app answers at once with an ephemeral "Looking that up...", then:
 
 - an answer, a "not available" gap or an unanswerable question is posted in the channel: the question, the answer text with its citation or gap, and a context line `certified path · role <role> · KPI <id>`. No SQL is shown.
 - a refusal is shown only to the asker, without the question.
