@@ -10,6 +10,17 @@ Turing College AI Engineering capstone, built in November 2026. `governor` is th
 
 ---
 
+## How it works in 7 steps
+
+![governor in 7 steps](docs/showcase/00-cover.png)
+
+| | |
+|---|---|
+| ![1 Profile](docs/showcase/01-profile.png) | ![2 Propose and validate](docs/showcase/02-propose.png) |
+| ![3 Design gate](docs/showcase/03-design-gate.png) | ![4 Silver](docs/showcase/04-silver.png) |
+| ![5 Gold](docs/showcase/05-gold.png) | ![6 Pull request and certification](docs/showcase/06-pr-certify.png) |
+| ![7 Ask](docs/showcase/07-ask.png) | |
+
 ## The problem
 
 A small data team spends its time on two kinds of work that agents could take on: building the modelled layer (staging, intermediate, KPI marts) and answering the same business questions again and again. Agents are risky in both places:
@@ -26,7 +37,7 @@ governor gives the model as little authority as possible. The model proposes nam
 | **Build mode** | profile `raw` → propose a design (silver models, KPI mappings, declines) → validate in code → **design gate** (human) → write silver, repair failures → generate gold from catalogue templates → blueprint checks L1–L9 → branch and pull request → **review gate** (human merge) → `certify` deploys to `analytics` and writes the certified registry |
 | **Certified answers** | one model call picks the KPI, value column and period from the registry; code builds the SQL from the KPI's own table, validates it (allowlist = certified models) and runs it read-only through the caller's serving schema; Python writes the answer with a citation (KPI id, owner, source, who certified it and when) |
 | **Gaps** | a catalogue KPI the data cannot support is declined at design time and answered later as `not_available`, naming the missing data and the next step |
-| **Surfaces** | CLI, FastAPI (`/v1/ask/certified`), Slack (`/governor run`, `approve`, `publish`, `ask`), two read-only MCP servers, a Streamlit thin client |
+| **Surfaces** | CLI, FastAPI (`/v1/ask/certified`), Slack (`/governor run`, `approve`, `publish`, `ask`), two read-only MCP servers; a Streamlit thin client for governor-ask and the Profiles page (not the certified path) |
 | **governor-ask** | the earlier free-form NL-to-SQL agent over a synthetic billing mart in DuckDB (plan → draft → validate → dry-run → execute → repair, with clarify and refusals); see [governor-ask](#governor-ask-on-the-billing-mart) |
 
 ## Architecture
@@ -87,7 +98,7 @@ Separate logins: `governor_build` (reads `raw`, creates only in `dev_governor`),
 | `src/governor/eval` | golden sets, harnesses (ask, build, certified, red team), reports |
 | `knowledge/` | human-owned standards: `kpis.yaml` (10 KPIs), `blueprint.md`, `approved.yaml`, access and PII policy (`shop/` for the Olist test bed) |
 | `testbed/` | Postgres 16 compose file, Olist loader, roles, perturbed copy for a holdout run |
-| `apps/streamlit` | the UI, a thin HTTP client of the API (includes a Profiles page) |
+| `apps/streamlit` | a thin HTTP client of the API for governor-ask (ask, trace explorer, developer page) and the raw-profile Profiles page |
 | `airflow/dags` | `governor_profile_raw`, a manual DAG loaded by airflow-platform ([`docs/airflow.md`](docs/airflow.md)) |
 | `evaluation/` | frozen ground truth (sha256-locked), reports |
 
@@ -128,6 +139,24 @@ The baseline gets the same profile, blueprint and KPI definitions (no templates)
 25 attacks (PII extraction, scope, prompt injection, prompt extraction, inference) and 10 harmless near-misses: **0 leaks**, 1 false refusal (gate: 0 leaks, at most 1 false refusal). **PASS.** A leak is any output containing a person-level raw value or any executed SQL touching a relation outside the certified allowlist; the checker samples 452,516 person-level values in memory and never writes them.
 
 Total model cost of the capstone evaluation runs: $0.46.
+
+## How it maps to the capstone brief
+
+governor is **Case 2, an AI agent for task automation**, with a large part of **Case 5, code generation and debugging**: the agent writes dbt SQL, builds it, reads the errors and repairs it.
+
+| Brief | Where in governor |
+|---|---|
+| Agent purpose and capabilities | Builds a company's bronze, silver and gold dbt layers and certified KPIs from raw tables; declines what the data cannot support, with a gap report ([What it does](#what-it-does)) |
+| Tool integration | Postgres profiling and read-only queries, the dbt runner, git and GitHub pull requests, OpenRouter, Slack, MCP |
+| Memory | Short term: LangGraph checkpoints in SQLite, so a build pauses at the design gate and resumes after `approve`. Long term: the **approved decisions** for each company (column mappings, blueprint exceptions, corrections), written when a design is approved and reused by later builds |
+| Code execution | `dbt build` on the generated project; failures go to a bounded repair loop, with dbt errors redacted before the model sees them |
+| Multi-step reasoning | Two LangGraph `StateGraph`s in which code owns every edge: profile → propose → validate → design gate → write silver → repair → gold → blueprint checks → pull request |
+| Interactive prototype | Slack app (run, approve, open pull request, ask), CLI, API and MCP; Streamlit for governor-ask |
+| Prompt engineering and function calling | Prompts are files; every model call returns structured output against a JSON schema; the model proposes and code decides |
+| Evaluation | Frozen golden sets, a one-shot baseline and a red-team release gate ([Results](#results)) |
+| Ethics | [Responsible use](#responsible-use) and [`docs/capstone/ethics.md`](docs/capstone/ethics.md) |
+
+**Retrieval, and why there is no vector database.** Certified answers are exact numbers from certified tables, not passages from documents, so the certified path retrieves nothing: the model picks from the certified KPI registry and code writes the SQL. governor-ask finds its tables with hybrid retrieval over a few dozen catalogue cards: BM25 plus dense search over embeddings cached in a file, fused with reciprocal rank fusion ([`src/governor/ask/retrieval.py`](src/governor/ask/retrieval.py)). At that size a vector database would add a service to run without adding anything the cached index cannot do.
 
 ## Run it
 
