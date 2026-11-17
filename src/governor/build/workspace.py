@@ -143,9 +143,10 @@ def build_address() -> str:
     return f"{host}:{port}/{db}"
 
 
-def deploy_env() -> dict[str, str]:
-    """Env for ``dbt --target prod``: the deploy login, with the test-bed password default (laptop only)."""
-    env = dict(os.environ)
+def deploy_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Env for ``dbt --target prod``: the deploy login, with the test-bed password default (laptop only).
+    ``base`` (a tenant's ``dbt_env()``) replaces ``os.environ`` as the starting point."""
+    env = dict(os.environ if base is None else base)
     env["GOVERNOR_DEPLOY_USER"] = os.environ.get("GOVERNOR_DEPLOY_USER") or "governor_deploy"
     env["GOVERNOR_DEPLOY_PASSWORD"] = os.environ.get("GOVERNOR_DEPLOY_PASSWORD") or "governor_deploy_local"
     return env

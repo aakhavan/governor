@@ -1602,3 +1602,31 @@ F3 can rely on: graph.target_fingerprint(target) gives <target>/governor/profile
 ## F3 notes (implementer)
 Graph: profile -> compare -> (END when up_to_date | propose). compare returns {} without a readable fingerprint (29.3). Same hash plus build.json status built with the fingerprint's thread_id plus design.json, without force: writes drift.md, emits up_to_date (thread_id, last_build), status graph.UP_TO_DATE. Same hash otherwise: a full design from nothing (no drift note). Different hash: state drift = summary_lines, note = graph.drift_note(lines), proposal = design.json, so propose passes it as previous; repairs stay 0. _summary adds last_build/drift_report or drift. events.KINDS gained up_to_date. Slack: Command.force; build.start gets force=True only when forced; blocks.UP_TO_DATE is in TERMINAL, so supersede/interrupt skip it. Tests: tests/build/test_maintain.py, two at the end of tests/integrations/test_slack.py. Local pytest in a shell with GOVERNOR_ROOT set to another checkout fails the gate tests (wrong kpis.yaml); the acceptance script clears it.
 
+## F5 notes for F6
+- Events (`events_path()`) are still process-wide (GOVERNOR_STATE_DIR), not per tenant; contract 31 does not ask for it. Each event carries the thread id, and F6 maps threads to tenants via each tenant's checkpoints.
+- The project name is the tenant name verbatim; a name with `-` is not a valid dbt project name. Either restrict names in the registry or map `-` to `_` if that bites.
+- `Tenant.address` gives `host:port/db` for the F6 start-up line and footer.
+- Local shells may have GOVERNOR_ROOT set to another checkout; the acceptance script clears it, plain `pytest` does not (test_design then fails on a foreign catalogue).
+
+## F3 result
+*Up-to-date runs and drift-aware design, 17 Nov 2026 17:56.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F3`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| compare node | yes | missing in src/governor/build/graph.py |
+| force flag | yes | missing in src/governor/build/__main__.py |
+| drift section in report | yes | missing in src/governor/build/design.py |
+| pytest tests/build | yes | 187 passed, 12 skipped in 56.86s |
+| pytest tests/integrations | yes | 40 passed in 11.98s |
+| required tests present | yes | 8 found |
+
+Review: F3 does what section 29 asks. compare sits between profile and propose, requires hash + built build.json with the same thread + design.json, writes drift.md, emits up_to_date and ends with no model or dbt call (test snapshots models/ by bytes and mtime). force only skips that check; drift seeds the previous design through the existing proposal/note path with a names-only note and repairs stays 0. No-fingerprint targets return {} and run as before. Slack parses the literal force only, plain runs call start unchanged, up_to_date is terminal with no buttons or thread replies.
+
+For Amir: Clean step. Two cosmetic items only: the up_to_date Slack headline format differs slightly from the other terminal headers, and a stale drift.md can linger after a later full design of an unchanged schema.
+
+## Additions for F4
+graph.start now takes force=False and BuildState has force, drift and last_build keys; status UP_TO_DATE ends the graph after compare, before propose, so F5's tenant wiring must keep the profile and compare path tenant-aware (the fingerprint and build.json are read from the target, which is per tenant already). The drift note is in state['note'] and persists through repairs; a rejection replaces it. events.KINDS gained up_to_date. Slack: Command.force, GovernorSlack._run(target, thread_id, force=False) passes force only when True so plain calls stay byte-identical; blocks.UP_TO_DATE is in TERMINAL. Cosmetic leftovers: the up_to_date headline uses a newline before the build label unlike other states, and drift.md is not removed when a later run of an unchanged schema does a full design.
+

@@ -26,10 +26,11 @@ import os
 import secrets
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import psycopg
 from psycopg import sql
+from psycopg.conninfo import conninfo_to_dict
 
 from governor.build import publish as pub
 from governor.build.dbt import DbtResult, run_dbt
@@ -38,6 +39,9 @@ from governor.build.workspace import deploy_env
 from governor.core import paths
 from governor.core.catalogue import load_kpis
 from governor.core.pgconn import with_timeout
+
+if TYPE_CHECKING:
+    from governor.core.tenancy import Tenant
 
 SCHEMA = "analytics"
 DEFAULT_KPIS = paths.KNOWLEDGE / "kpis.yaml"
@@ -93,6 +97,27 @@ def _admin_dsn() -> str:
     if not dsn:
         raise CertifyError("set GOVERNOR_PG_ADMIN_DSN")
     return dsn
+
+
+_LOCAL = {"localhost", "127.0.0.1", "::1"}
+
+
+def _host(value: str | None) -> str:
+    host = (value or "localhost").strip().lower()
+    return "localhost" if host in _LOCAL else host
+
+
+def check_admin_dsn(dsn: str, tenant: Tenant) -> None:
+    """Refuse an admin DSN on another host, port or database than the tenant's (batch3.md section 31.3). The
+    message shows ``host:port/db`` only, never the DSN."""
+    try:
+        info = conninfo_to_dict(dsn)
+    except Exception:  # noqa: BLE001 (psycopg's message may echo the DSN)
+        raise CertifyError("GOVERNOR_PG_ADMIN_DSN is not a valid connection string") from None
+    host, port, db = info.get("host"), str(info.get("port") or "5432"), str(info.get("dbname") or "")
+    if (_host(host), port, db) != (_host(tenant.pg_host), str(tenant.pg_port), tenant.pg_db):
+        raise CertifyError(f"GOVERNOR_PG_ADMIN_DSN points at {host or 'localhost'}:{port}/{db or '?'}, not at the "
+                           f"database of tenant {tenant.name} ({tenant.address})")
 
 
 def _value_columns(conn: psycopg.Connection, model: str, grain: str | None) -> list[str]:
@@ -173,11 +198,12 @@ def prepare_registry(dsn: str) -> str:
     return salt_from
 
 
-def write_registry(target: Path, build: dict, *, by: str, commit: str, dsn: str) -> tuple[list[dict], list[dict]]:
+def write_registry(target: Path, build: dict, *, by: str, commit: str, dsn: str,
+                   kpis_path: Path = DEFAULT_KPIS) -> tuple[list[dict], list[dict]]:
     """Replace the rows of both registry tables in one transaction (after the serving views exist)."""
     with psycopg.connect(with_timeout(dsn), autocommit=False) as conn:
         certified, gaps = registry_rows(target, build, conn, by=by, commit=commit,
-                                        certified_at=dt.datetime.now(dt.timezone.utc))
+                                        certified_at=dt.datetime.now(dt.timezone.utc), kpis_path=kpis_path)
         _fill(conn, "governor_certified", certified)
         _fill(conn, "governor_gaps", gaps)
         conn.commit()
@@ -198,7 +224,10 @@ def _dbt_failures(res: DbtResult) -> list[str]:
             if (r.get("status") or "").lower() in ("error", "fail", "runtime error")]
 
 
-def certify(target: str | Path, by: str, *, dbt_runner: Callable[..., DbtResult] = run_dbt) -> dict:
+def certify(target: str | Path, by: str, *, dbt_runner: Callable[..., DbtResult] = run_dbt,
+            tenant: Tenant | None = None) -> dict:
+    """``tenant`` (batch3.md section 31.3): its target only, its catalogue, policy and access files, dbt on its
+    database, and an admin DSN that points at its database (checked before anything else runs)."""
     started = time.monotonic()
     target = Path(target).resolve()
     by = (by or "").strip()
@@ -206,6 +235,12 @@ def certify(target: str | Path, by: str, *, dbt_runner: Callable[..., DbtResult]
         raise CertifyError("certify needs --by <name>")
     if os.environ.get("GOVERNOR_PII_SALT") == "":
         raise CertifyError("GOVERNOR_PII_SALT is set but empty; unset it or give it a value")
+    kpis_path = policy = access = env = None
+    if tenant is not None:
+        if target != Path(tenant.target).resolve():
+            raise CertifyError(f"target {target} is not the target of tenant {tenant.name}")
+        check_admin_dsn(_admin_dsn(), tenant)
+        kpis_path, policy, access, env = tenant.kpis_path, tenant.policy_path, tenant.access_path, tenant.dbt_env()
     commit, reason = merge_check(target)
     if reason:
         return {"status": "not_merged", "reason": reason, "commit": commit}
@@ -214,7 +249,7 @@ def certify(target: str | Path, by: str, *, dbt_runner: Callable[..., DbtResult]
         return {"status": "not_built", "reason": f"governor/build.json on main says {(build or {}).get('status')!r}"}
 
     dsn = _admin_dsn()
-    res = dbt_runner(target, ["build", "--target", "prod"], timeout_s=2400, env=deploy_env())
+    res = dbt_runner(target, ["build", "--target", "prod"], timeout_s=2400, env=deploy_env(env))
     failures = _dbt_failures(res)
     if not res.ok or failures or not res.results:
         tail = "; ".join(failures[:5]) or (res.log_tail.strip().splitlines() or ["no results"])[-1]
@@ -223,8 +258,10 @@ def certify(target: str | Path, by: str, *, dbt_runner: Callable[..., DbtResult]
                 and (r.get("status") or "").lower() == "pass")
 
     salt_from = prepare_registry(dsn)
-    served = serve(dsn)  # a serving failure raises here, before any certified row is written
-    certified, gaps = write_registry(target, build, by=by, commit=commit, dsn=dsn)
+    # a serving failure raises here, before any certified row is written; no tenant: the calls of before
+    served = serve(dsn) if tenant is None else serve(dsn, policy, access)
+    extra = {} if tenant is None else {"kpis_path": kpis_path}
+    certified, gaps = write_registry(target, build, by=by, commit=commit, dsn=dsn, **extra)
     kpis = [c["kpi_id"] for c in certified]
     emit("certified", thread_id=build.get("thread_id"), by=by, commit=commit, kpis=kpis,
          gaps=[g["kpi_id"] for g in gaps], tests_passed=tests, views=served.get("views"),
@@ -234,4 +271,4 @@ def certify(target: str | Path, by: str, *, dbt_runner: Callable[..., DbtResult]
     return out
 
 
-__all__ = ["CertifyError", "certify", "merge_check", "registry_rows"]
+__all__ = ["CertifyError", "certify", "check_admin_dsn", "merge_check", "registry_rows"]

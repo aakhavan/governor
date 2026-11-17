@@ -37,6 +37,7 @@ budget). A second rejection ends the thread with status ``design_rejected``.
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import json
 import operator
 import os
@@ -44,7 +45,7 @@ import sqlite3
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, Any, Callable, Iterator, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, Callable, Iterator, TypedDict
 
 import yaml
 from langchain_core.runnables import RunnableConfig
@@ -59,6 +60,9 @@ from governor.build.llm import BuildLLM, LLMOutputError
 from governor.build.models import Finding, Proposal
 from governor.core import paths
 from governor.core.catalogue import load_approved, load_blueprint, load_kpis
+
+if TYPE_CHECKING:
+    from governor.core.tenancy import Tenant
 
 MAX_REPAIRS = 2
 MAX_REJECTIONS = 1
@@ -227,6 +231,37 @@ def default_profiler(policy_path: str) -> dict:
     from governor.build.workspace import build_dsn
 
     return profile_schema(build_dsn(), "raw", load_policy(policy_path))
+
+
+def tenant_profiler(dsn: str) -> Callable[[str], dict]:
+    """A profiler bound to one database (a tenant's ``build_dsn()``), not to the process environment."""
+
+    def profiler(policy_path: str) -> dict:
+        from governor.build.profile import load_policy, profile_schema
+
+        return profile_schema(dsn, "raw", load_policy(policy_path))
+
+    return profiler
+
+
+def tenant_graph_kwargs(tenant: Tenant) -> dict[str, Any]:
+    """The ``build_graph`` keyword arguments for one tenant (batch3.md section 31.2): its catalogue, blueprint and
+    default decisions, a profiler, inspector and row counter on its database, and dbt with its env. Nothing
+    process-wide is changed."""
+    dsn = tenant.build_dsn()
+    return {"profiler": tenant_profiler(dsn), "kpis_path": tenant.kpis_path, "blueprint_path": tenant.blueprint_path,
+            "default_approved": tenant.approved_default,
+            "dbt_runner": functools.partial(run_dbt, env=tenant.dbt_env()),
+            "inspector": functools.partial(silver.built_columns, dsn=dsn),
+            "row_counter": functools.partial(gold.kpi_rows, dsn=dsn)}
+
+
+def _for_tenant(tenant: Tenant | None, checkpoints: str | Path | None,
+                graph_kwargs: dict[str, Any]) -> tuple[str | Path | None, dict[str, Any]]:
+    """Checkpoints and graph kwargs with the tenant's filled in; explicit arguments win. No tenant: unchanged."""
+    if tenant is None:
+        return checkpoints, graph_kwargs
+    return checkpoints or tenant.checkpoints, {**tenant_graph_kwargs(tenant), **graph_kwargs}
 
 
 def _policy(path: str | None) -> dict[str, str]:
@@ -571,9 +606,18 @@ def _summary(graph, config: dict) -> dict:
 
 def start(target: str | Path, project_name: str, llm: BuildLLM, *, policy: str | Path | None = DEFAULT_POLICY,
           profile: dict | None = None, thread_id: str | None = None, checkpoints: str | Path | None = None,
-          force: bool = False, **graph_kwargs: Any) -> dict:
+          force: bool = False, tenant: Tenant | None = None, **graph_kwargs: Any) -> dict:
     """Run a new build thread to the design gate (or to design_invalid, or ``up_to_date`` when nothing changed since
-    the last approved build). ``profile`` skips profiling raw; ``force`` skips only the up-to-date check."""
+    the last approved build). ``profile`` skips profiling raw; ``force`` skips only the up-to-date check.
+
+    ``tenant`` (batch3.md section 31.2): the tenant's knowledge, checkpoints, database and dbt env; the default
+    policy becomes the tenant's, and ``target`` must be the tenant's target."""
+    if tenant is not None:
+        if Path(target).resolve() != Path(tenant.target).resolve():
+            raise BuildError(f"target {target} is not the target of tenant {tenant.name}")
+        if policy is not None and Path(policy) == DEFAULT_POLICY:
+            policy = tenant.policy_path
+    checkpoints, graph_kwargs = _for_tenant(tenant, checkpoints, graph_kwargs)
     thread_id = thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
     state: dict[str, Any] = {"target": str(Path(target).resolve()), "project_name": project_name,
@@ -602,15 +646,19 @@ def _resume(thread_id: str, decision: dict, llm: BuildLLM, checkpoints: str | Pa
         return _summary(graph, config)
 
 
-def approve(thread_id: str, by: str, llm: BuildLLM, *, checkpoints: str | Path | None = None, **graph_kwargs: Any) -> dict:
+def approve(thread_id: str, by: str, llm: BuildLLM, *, checkpoints: str | Path | None = None,
+            tenant: Tenant | None = None, **graph_kwargs: Any) -> dict:
     if not (by or "").strip():
         raise BuildError("approve needs --by <name>")
+    checkpoints, graph_kwargs = _for_tenant(tenant, checkpoints, graph_kwargs)
     return _resume(thread_id, {"action": "approve", "by": by.strip()}, llm, checkpoints, **graph_kwargs)
 
 
-def reject(thread_id: str, note: str, llm: BuildLLM, *, checkpoints: str | Path | None = None, **graph_kwargs: Any) -> dict:
+def reject(thread_id: str, note: str, llm: BuildLLM, *, checkpoints: str | Path | None = None,
+           tenant: Tenant | None = None, **graph_kwargs: Any) -> dict:
     if not (note or "").strip():
         raise BuildError("reject needs --note \"<what to change>\"")
+    checkpoints, graph_kwargs = _for_tenant(tenant, checkpoints, graph_kwargs)
     return _resume(thread_id, {"action": "reject", "note": note.strip()}, llm, checkpoints, **graph_kwargs)
 
 
@@ -618,4 +666,5 @@ SILVER_BUILT = silver.BUILT
 BUILT, ESCALATED, BLUEPRINT_FAILED = gold.BUILT, gold.ESCALATED, gold.BLUEPRINT_FAILED
 
 __all__ = ["APPROVED", "AWAITING", "BLUEPRINT_FAILED", "BUILT", "ESCALATED", "SILVER_BUILT", "INVALID", "REJECTED", "UP_TO_DATE", "BuildError",
-           "approve", "build_graph", "drift_note", "record_decisions", "reject", "start", "target_fingerprint", "write_fingerprint"]
+           "approve", "build_graph", "drift_note", "record_decisions", "reject", "start", "target_fingerprint",
+           "tenant_graph_kwargs", "tenant_profiler", "write_fingerprint"]
