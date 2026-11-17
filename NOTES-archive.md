@@ -1630,3 +1630,28 @@ For Amir: Clean step. Two cosmetic items only: the up_to_date Slack headline for
 ## Additions for F4
 graph.start now takes force=False and BuildState has force, drift and last_build keys; status UP_TO_DATE ends the graph after compare, before propose, so F5's tenant wiring must keep the profile and compare path tenant-aware (the fingerprint and build.json are read from the target, which is per tenant already). The drift note is in state['note'] and persists through repairs; a rejection replaces it. events.KINDS gained up_to_date. Slack: Command.force, GovernorSlack._run(target, thread_id, force=False) passes force only when True so plain calls stay byte-identical; blocks.UP_TO_DATE is in TERMINAL. Cosmetic leftovers: the up_to_date headline uses a newline before the build label unlike other states, and drift.md is not removed when a later run of an unchanged schema does a full design.
 
+## F4 result
+*Publish against a stale main, nothing to publish, 17 Nov 2026 18:10.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F4`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| no empty commits | yes | missing in src/governor/build/publish.py |
+| diverged main refused | yes | missing in src/governor/build/publish.py |
+| --allow-empty removed | yes | still in src/governor/build/publish.py |
+| pytest tests/build | yes | 191 passed, 12 skipped in 84.11s (0:01:24) |
+| pytest tests/integrations | yes | 40 passed in 12.75s |
+| required tests present | yes | 4 found |
+
+Review: F4 does what section 30 asks. sync_main fetches origin/main before any branch exists, fast-forwards only a main that is behind with no own commits (guarded update-ref), and raises the exact DIVERGED line otherwise with main, origin/main and the working tree untouched. An unchanged build makes no commit, returns to main, deletes the branch and emits no event; --allow-empty is gone. Targets without origin run no sync or push. The four tests use a local bare origin and a clone under tmp_path only; CLI and Slack show a plain message.
+
+For Amir: Two cosmetic items for later: plan/accept/_common.check prints the failure detail string even when ok is true, which makes the acceptance JSON read oddly; and sync_main runs one 'git status' per changed upstream file, so a very large merged PR will be slow but correct. The reviewer could not rerun pytest (command not permitted) and relied on the acceptance output.
+
+## Additions for F5
+publish() now runs sync_main(target) before 'checkout -B'. With an origin that has main it does ls-remote + fetch (network) up front, so a stub publisher or a monkeypatched pub.git is the way to keep later tests offline (see test_publish_without_remote_unchanged for the call-log pattern). publish() can return {'status': 'nothing_to_publish', 'reason': 'the build matches main'}: callers must treat it as a non-error (CLI prints 'Nothing to publish: ...' and exits 0; Slack _say's the same). No 'published' event and no .git/governor_published.json write happen in that case, so read_published(target) may still return the previous publish. sync_main is exported in __all__ and returns 'fast_forwarded' or None. Helpers: _generated(path) and ORIGIN_MAIN / DIVERGED constants in publish.py. The status --porcelain loop is per file; fine for now, batch it if a later step touches large upstream merges.
+
+## F6 result (implementer notes; the factory adds the reviewed result)
+One Slack bot for several tenants (section 32). SlackConfig.from_env loads GOVERNOR_TENANTS (TenantError -> ConfigError naming the variable): targets = tenant name -> tenant.target, config.tenants, and config.warnings carries TARGETS_IGNORED when GOVERNOR_SLACK_TARGETS is also set (printed by __main__). notifier.TenantThreads lists threads per tenant from each tenant's checkpoints (known_threads(tenant.checkpoints)) and reads a thread's state from its tenant's file; GovernorSlack takes tenant_threads= for tests. parse_command(..., tenant_threads=) puts the tenant on Command; resolve_tenant_thread raises UsageError naming both tenants when a token matches threads in two. Buttons and the reject modal resolve the tenant the same way. graph.start/approve/reject get tenant=<Tenant> only in multi-tenant mode (single-tenant calls unchanged); publish uses tenant.target; init_target gets dbt_project_name(name) ('-' -> '_', leading digit -> 't_'), the build's project name stays the tenant name. Messages: progress header '(tenant <name>)', design card title, every Notifier.reply gets a 'tenant <name>' context line (blocks.with_tenant); start line and usage footer list '<name>: host:port/db'. ask is refused before parsing. Docs: docs/tenants.md, docs/slack.md 'Several tenants'. Acceptance 7/7: tests/integrations 46, tests 549 (+21 skipped), tests/build 197 (+12 skipped). Limit: the message store, events and the channel stay process-wide; the build CLI still passes the raw tenant name to init_target (outside F6 paths).
+

@@ -12,6 +12,9 @@
 - ``GOVERNOR_SLACK_ASKERS``: comma-separated Slack user ids allowed to ``/governor ask``, or ``*`` for everyone
   (default: the runners)
 - ``GOVERNOR_SLACK_ASK_LLM``: the model for ``/governor ask`` (``openrouter`` default, or ``fake:<script>``)
+- ``GOVERNOR_TENANTS`` (batch3.md section 32): the tenant registry file. When set, the targets are the tenant names
+  (each run, approve, reject and publish goes to its tenant) and ``GOVERNOR_SLACK_TARGETS`` is ignored with a
+  start-up warning. Unset: single-tenant, exactly as before.
 """
 
 from __future__ import annotations
@@ -24,12 +27,15 @@ from typing import Mapping
 
 from governor.core import paths
 from governor.core.serving import READER_ROLES
+from governor.core.tenancy import ENV_TENANTS, Tenant, TenantError, load_tenants
 
 DEFAULT_CHANNEL = "governor"
 DEFAULT_ASK_ROLE = "analyst"
 EVERYONE = "*"
 NOTIFIER_SPEC = "governor.integrations.slack.notifier:notify"
 TARGET_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
+TARGETS_IGNORED = (f"GOVERNOR_SLACK_TARGETS is ignored: {ENV_TENANTS} is set, so the targets are the tenant names "
+                   "of the registry")
 
 
 class ConfigError(ValueError):
@@ -71,6 +77,8 @@ class SlackConfig:
     ask_role: str = DEFAULT_ASK_ROLE
     askers: frozenset[str] | None = None  # None: the runners; {"*"}: everyone
     ask_llm: str = "openrouter"
+    tenants: dict[str, Tenant] = field(default_factory=dict)  # GOVERNOR_TENANTS (empty: single-tenant)
+    warnings: tuple[str, ...] = ()  # printed at start-up (never the value of a setting)
 
     def __post_init__(self) -> None:
         if self.ask_role not in READER_ROLES:
@@ -79,11 +87,24 @@ class SlackConfig:
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "SlackConfig":
         env = os.environ if env is None else env
-        targets = {}
-        for name, raw in _pairs(env.get("GOVERNOR_SLACK_TARGETS"), "GOVERNOR_SLACK_TARGETS").items():
-            if not TARGET_NAME.match(name):
-                raise ConfigError("GOVERNOR_SLACK_TARGETS: target names use letters, digits, _ and - only")
-            targets[name] = _target_path(raw)
+        targets: dict[str, Path] = {}
+        tenants: dict[str, Tenant] = {}
+        warnings: list[str] = []
+        raw_tenants = (env.get(ENV_TENANTS) or "").strip()
+        if raw_tenants:
+            # batch3 section 32.1: the registry names the targets; GOVERNOR_SLACK_TARGETS is ignored
+            try:
+                tenants = load_tenants(raw_tenants)
+            except TenantError as exc:
+                raise ConfigError(f"{ENV_TENANTS}: {exc}") from None
+            targets = {name: t.target for name, t in tenants.items()}
+            if (env.get("GOVERNOR_SLACK_TARGETS") or "").strip():
+                warnings.append(TARGETS_IGNORED)
+        else:
+            for name, raw in _pairs(env.get("GOVERNOR_SLACK_TARGETS"), "GOVERNOR_SLACK_TARGETS").items():
+                if not TARGET_NAME.match(name):
+                    raise ConfigError("GOVERNOR_SLACK_TARGETS: target names use letters, digits, _ and - only")
+                targets[name] = _target_path(raw)
         approvers = _ids(env.get("GOVERNOR_SLACK_APPROVERS"))
         raw_runners = env.get("GOVERNOR_SLACK_RUNNERS")
         runners = _ids(raw_runners) if raw_runners and raw_runners.strip() else None
@@ -94,7 +115,8 @@ class SlackConfig:
                    approvers=approvers, runners=runners, names=_pairs(env.get("GOVERNOR_SLACK_NAMES"), "GOVERNOR_SLACK_NAMES"),
                    targets=targets, llm=(env.get("GOVERNOR_SLACK_LLM") or "openrouter").strip(),
                    ask_role=(env.get("GOVERNOR_SLACK_ASK_ROLE") or DEFAULT_ASK_ROLE).strip(),
-                   askers=askers, ask_llm=(env.get("GOVERNOR_SLACK_ASK_LLM") or "openrouter").strip())
+                   askers=askers, ask_llm=(env.get("GOVERNOR_SLACK_ASK_LLM") or "openrouter").strip(),
+                   tenants=tenants, warnings=tuple(warnings))
 
     def is_approver(self, user_id: str) -> bool:
         return user_id in self.approvers
@@ -122,8 +144,16 @@ def workspace() -> tuple[Path, str]:
     return paths.KNOWLEDGE, build_address()
 
 
+def tenant_list(tenants: Mapping[str, Tenant]) -> str:
+    """``<name>: <host>:<port>/<db>`` per tenant (batch3 section 32.3); never a user, password or full DSN."""
+    return ", ".join(f"{name}: {tenants[name].address}" for name in sorted(tenants))
+
+
 def start_line(config: SlackConfig) -> str:
-    """The one line printed before connecting: channel, targets, knowledge folder and build database."""
+    """The one line printed before connecting: channel, targets, knowledge folder and build database; with a
+    tenant registry, each tenant and its database instead."""
+    if config.tenants:
+        return f"governor slack: Socket Mode, channel #{config.channel}, tenants {tenant_list(config.tenants)}"
     knowledge, database = workspace()
     return (f"governor slack: Socket Mode, channel #{config.channel}, targets {sorted(config.targets) or 'none'}, "
             f"knowledge {knowledge}, database {database}")
@@ -137,5 +167,5 @@ def ensure_notifier_registered(env: dict | None = None) -> None:
         env["GOVERNOR_BUILD_NOTIFIERS"] = ",".join(specs + [NOTIFIER_SPEC])
 
 
-__all__ = ["ConfigError", "DEFAULT_ASK_ROLE", "DEFAULT_CHANNEL", "EVERYONE","NOTIFIER_SPEC", "SlackConfig", "ensure_notifier_registered",
-           "start_line", "workspace"]
+__all__ = ["ConfigError", "DEFAULT_ASK_ROLE", "DEFAULT_CHANNEL", "EVERYONE","NOTIFIER_SPEC", "SlackConfig", "TARGETS_IGNORED",
+           "ensure_notifier_registered", "start_line", "tenant_list", "workspace"]

@@ -90,6 +90,17 @@ An ended run reads as ended in its progress message:
 
 The message state (build thread id to message timestamp) is kept in `GOVERNOR_STATE_DIR/slack_messages.json`. If Slack fails, the failure is logged and the build carries on.
 
+### Several tenants
+
+With `GOVERNOR_TENANTS` set to a tenant registry (see `docs/tenants.md`), one bot serves every tenant in it:
+
+- The targets are the tenant names: `/governor run acme` builds tenant `acme` (its knowledge, checkpoints, database and target). `GOVERNOR_SLACK_TARGETS` is ignored, with a warning at start-up.
+- `approve`, `reject`, `publish` and the buttons find the tenant from the build thread, in each tenant's own checkpoints. A short id that matches threads in two tenants is a usage error naming both; give the full id.
+- The progress message, the design card and every reply name the tenant. The start-up line and the usage footer list each tenant as `<name>: <host>:<port>/<db>`.
+- `/governor ask` stays single-tenant: it replies `ask serves one tenant only; it is not available in multi-tenant mode yet` and runs nothing.
+
+Without `GOVERNOR_TENANTS` the bot works as described above.
+
 ## Manifest
 
 ```yaml

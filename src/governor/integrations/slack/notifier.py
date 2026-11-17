@@ -34,7 +34,7 @@ import logging
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable, Mapping
 
 from governor.build import graph
 from governor.integrations.slack import blocks
@@ -86,6 +86,34 @@ def known_threads(checkpoints: str | Path | None = None) -> list[str]:
         return []
     finally:
         conn.close()
+
+
+class TenantThreads:
+    """Build threads per tenant (batch3.md section 32.2), read from each tenant's own checkpoints. Events are
+    process-wide, so a thread's tenant comes from the checkpoints, never from the event log."""
+
+    def __init__(self, tenants: Mapping[str, Any],
+                 threads: Callable[[], Mapping[str, Iterable[str]]] | None = None):
+        self.tenants = dict(tenants)
+        self._threads = threads
+
+    def by_tenant(self) -> dict[str, list[str]]:
+        if self._threads is not None:
+            return {name: list(ts) for name, ts in self._threads().items()}
+        return {name: known_threads(t.checkpoints) for name, t in self.tenants.items()}
+
+    def tenants_of(self, thread_id: str) -> list[str]:
+        """Every tenant whose checkpoints hold the thread (more than one is ambiguous)."""
+        return sorted(name for name, ts in self.by_tenant().items() if thread_id in ts)
+
+    def tenant_of(self, thread_id: str) -> str | None:
+        names = self.tenants_of(thread_id)
+        return names[0] if len(names) == 1 else None
+
+    def values(self, thread_id: str) -> dict | None:
+        """The thread's checkpointed state from its tenant's checkpoints; None when no single tenant holds it."""
+        name = self.tenant_of(thread_id)
+        return thread_values(thread_id, self.tenants[name].checkpoints) if name else None
 
 
 # --------------------------------------------------------------------------- message state
@@ -215,12 +243,28 @@ def _apply(rec: dict, event: dict) -> dict:
 
 class Notifier:
     def __init__(self, client: Any, channel: str, store: MessageStore | None = None,
-                 values: Callable[[str], dict | None] = thread_values, targets: dict[str, Any] | None = None):
+                 values: Callable[[str], dict | None] = thread_values, targets: dict[str, Any] | None = None,
+                 tenant_of: Callable[[str], str | None] | None = None):
         self.client = client
         self.channel = channel
         self.store = store or MessageStore()
         self.values = values
         self.targets = dict(targets or {})  # GOVERNOR_SLACK_TARGETS: project name -> target path
+        # batch3 section 32.3: with tenants, every message names the thread's tenant; None: single-tenant, unchanged
+        self.tenant_of = tenant_of
+
+    def tenant(self, thread_id: str, rec: dict | None = None) -> str | None:
+        """The thread's tenant (multi-tenant mode only): stored on the record, else from the tenants' checkpoints."""
+        if self.tenant_of is None:
+            return None
+        rec = self.store.get(thread_id) if rec is None else rec
+        if (rec or {}).get("tenant"):
+            return str(rec["tenant"])
+        try:
+            return self.tenant_of(thread_id)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("slack: cannot find the tenant of %s: %s", blocks.short(thread_id), type(exc).__name__)
+            return None
 
     # ---- posting
 
@@ -232,6 +276,9 @@ class Notifier:
         """A detail line under the thread's message (or in the channel when there is none yet). Returns Slack's
         response (its ``ts`` names the reply)."""
         channel, ts = self._thread(thread_id)
+        tenant = self.tenant(thread_id)
+        if tenant:
+            text, block_list = blocks.with_tenant(text, block_list, tenant)
         kwargs: dict[str, Any] = {"channel": channel, "text": text}
         if block_list:
             kwargs["blocks"] = block_list
@@ -271,7 +318,8 @@ class Notifier:
         self._save(thread_id, card_decided=True)
         values = self._values(thread_id)
         text, block_list = blocks.design_card(thread_id, values.get("proposal"), values.get("findings"),
-                                              str(values.get("status") or ""), decided=decision)
+                                              str(values.get("status") or ""), decided=decision,
+                                              tenant=self.tenant(thread_id, rec))
         self.client.chat_update(channel=rec.get("channel") or self.channel, ts=rec["card_ts"], text=text,
                                 blocks=block_list)
         return True
@@ -284,6 +332,12 @@ class Notifier:
             failure = self.failure(thread_id, event)
             event = {**event, "_failure": failure, "_reason": failure["reason"]}
         rec = _apply(self.store.get(thread_id) or {"done": []}, event)
+        if self.tenant_of is not None and not rec.get("tenant"):
+            # run_started comes before the first checkpoint: its project is the tenant name (batch3 section 32.1)
+            rec["tenant"] = (event.get("project") if event.get("kind") == "run_started" else None) \
+                or self.tenant(thread_id, rec)
+            if not rec["tenant"]:
+                rec.pop("tenant")
         self._render(thread_id, rec)
         extra = getattr(self, f"_on_{event.get('kind')}", None)
         if extra is not None:
@@ -376,7 +430,8 @@ class Notifier:
     def _on_design_gate(self, thread_id: str, event: dict, rec: dict) -> None:
         values = self.values(thread_id) or {}
         text, block_list = blocks.design_card(thread_id, values.get("proposal"), values.get("findings"),
-                                              str(event.get("status") or values.get("status")))
+                                              str(event.get("status") or values.get("status")),
+                                              tenant=self.tenant(thread_id, rec))
         resp = self.client.chat_postMessage(channel=rec["channel"], thread_ts=rec["ts"], text=text, blocks=block_list)
         if resp and resp.get("ts"):
             # the open card: its buttons are replaced once the design is decided (a new card after a reject)
@@ -428,6 +483,9 @@ class Notifier:
             text, block_list = blocks.built_reply(thread_id, stored.get("built_summary") or "Built.", certify,
                                                   published_link=blocks.published_link(event.get("pr_url"),
                                                                                        event.get("branch")))
+            tenant = self.tenant(thread_id, stored)
+            if tenant:  # the updated reply keeps its tenant line
+                text, block_list = blocks.with_tenant(text, block_list, tenant)
             try:
                 self.client.chat_update(channel=stored.get("channel") or self.channel, ts=stored["built_ts"],
                                         text=text, blocks=block_list)
@@ -460,7 +518,12 @@ def _from_env() -> Notifier | None:
                 return None
             from slack_sdk import WebClient
 
-            _default = Notifier(WebClient(token=cfg.bot_token), cfg.channel, targets=cfg.targets)
+            if cfg.tenants:  # batch3 section 32: the thread's state and tenant from the tenants' checkpoints
+                registry = TenantThreads(cfg.tenants)
+                _default = Notifier(WebClient(token=cfg.bot_token), cfg.channel, targets=cfg.targets,
+                                    values=registry.values, tenant_of=registry.tenant_of)
+            else:
+                _default = Notifier(WebClient(token=cfg.bot_token), cfg.channel, targets=cfg.targets)
         return _default
 
 
@@ -475,5 +538,5 @@ def notify(event: dict) -> None:
         log.warning("slack notifier failed on %s: %s", kind, type(exc).__name__)
 
 
-__all__ = ["MESSAGES_FILE", "MessageStore", "Notifier", "configure", "is_open", "known_threads", "notify",
+__all__ = ["MESSAGES_FILE", "MessageStore", "Notifier", "TenantThreads", "configure", "is_open", "known_threads", "notify",
            "read_run_results", "thread_values"]

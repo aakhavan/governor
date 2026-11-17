@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-F5 is implemented and reviewed as pass on branch factory/F5 (uncommitted). core/tenancy.py provides Tenant, load_tenants, tenants_path and TenantError; graph.start/approve/reject accept tenant= and build the graph from tenant_graph_kwargs (catalogue, blueprint, approved defaults, profiler/inspector/row counter bound to tenant.build_dsn(), run_dbt with tenant.dbt_env()) with explicit kwargs winning and checkpoints defaulting to tenant.checkpoints; start swaps the default policy for the tenant's and refuses a foreign target. certify(…, tenant=) checks GOVERNOR_PG_ADMIN_DSN against the tenant's host:port/db first and uses the tenant's kpis, policy and access files with deploy_env(tenant.dbt_env()). CLI --tenant on run/approve/reject/publish/certify fills --target and --project-name and refuses a mismatched --target (exit 2). No module-level path or os.environ is mutated per tenant. Known limits: events stay process-wide; registry does not alias localhost/127.0.0.1 in its shared-database check; policy/access existence is not validated at registry load. Acceptance: tests/core 120 passed, tests/build 197 passed.
+F6 (one Slack bot for several tenants) is implemented on branch factory/F6, uncommitted, and reviewed as pass. SlackConfig.from_env loads GOVERNOR_TENANTS into config.tenants with targets = tenant name -> tenant.target and a start-up warning when GOVERNOR_SLACK_TARGETS is also set. notifier.TenantThreads lists threads per tenant from each tenant's checkpoints; parse_command(tenant_threads=) and _button_tenant put exactly one tenant on each Command and raise a UsageError naming both tenants on an ambiguous short id. graph.start/approve/reject receive tenant=<Tenant> only in multi-tenant mode; publish uses the tenant's registered target. Progress header, design card title, every thread reply, the start line and the usage footer name the tenant (host:port/db only). ask is refused with the spec's text and runs nothing. Known limits: events and the Slack message store stay process-wide; the build CLI still passes the raw tenant name to init_target. Acceptance 7/7: tests/integrations 46, tests 549 passed and 21 skipped, tests/build 197 passed and 12 skipped.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,28 +20,6 @@ F5 is implemented and reviewed as pass on branch factory/F5 (uncommitted). core/
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## F4 result
-*Publish against a stale main, nothing to publish, 17 Nov 2026 18:10.*
-
-Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F4`.
-
-| check | ok | detail |
-|---|---|---|
-| capstone ground truth unchanged | yes | capstone ground truth unchanged |
-| no empty commits | yes | missing in src/governor/build/publish.py |
-| diverged main refused | yes | missing in src/governor/build/publish.py |
-| --allow-empty removed | yes | still in src/governor/build/publish.py |
-| pytest tests/build | yes | 191 passed, 12 skipped in 84.11s (0:01:24) |
-| pytest tests/integrations | yes | 40 passed in 12.75s |
-| required tests present | yes | 4 found |
-
-Review: F4 does what section 30 asks. sync_main fetches origin/main before any branch exists, fast-forwards only a main that is behind with no own commits (guarded update-ref), and raises the exact DIVERGED line otherwise with main, origin/main and the working tree untouched. An unchanged build makes no commit, returns to main, deletes the branch and emits no event; --allow-empty is gone. Targets without origin run no sync or push. The four tests use a local bare origin and a clone under tmp_path only; CLI and Slack show a plain message.
-
-For Amir: Two cosmetic items for later: plan/accept/_common.check prints the failure detail string even when ok is true, which makes the acceptance JSON read oddly; and sync_main runs one 'git status' per changed upstream file, so a very large merged PR will be slow but correct. The reviewer could not rerun pytest (command not permitted) and relied on the acceptance output.
-
-## Additions for F5
-publish() now runs sync_main(target) before 'checkout -B'. With an origin that has main it does ls-remote + fetch (network) up front, so a stub publisher or a monkeypatched pub.git is the way to keep later tests offline (see test_publish_without_remote_unchanged for the call-log pattern). publish() can return {'status': 'nothing_to_publish', 'reason': 'the build matches main'}: callers must treat it as a non-error (CLI prints 'Nothing to publish: ...' and exits 0; Slack _say's the same). No 'published' event and no .git/governor_published.json write happen in that case, so read_published(target) may still return the previous publish. sync_main is exported in __all__ and returns 'fast_forwarded' or None. Helpers: _generated(path) and ORIGIN_MAIN / DIVERGED constants in publish.py. The status --porcelain loop is per file; fine for now, batch it if a later step touches large upstream merges.
 
 ## F5 result
 *Tenants (registry, per-tenant build, CLI --tenant), 17 Nov 2026 18:29.*
@@ -64,3 +42,25 @@ For Amir: No code changes needed. Two small inconsistencies worth a later tidy: 
 
 ## Additions for F6
 For F6: (1) Use graph.start/approve/reject with tenant=<Tenant>; checkpoints default to tenant.checkpoints (root/artifacts/build_checkpoints.sqlite), so listing threads per tenant means opening each tenant's checkpoint file via graph.open_checkpointer(tenant.checkpoints). (2) Events (events_path) are still process-wide in GOVERNOR_STATE_DIR; map thread ids to tenants via checkpoints, not via events. (3) Tenant.address gives host:port/db for the start-up line and footer; never log build_dsn(). (4) Project name is the tenant name verbatim; names may contain '-', which dbt rejects as a project name, so either restrict names in the registry or map '-' to '_' when calling init_target. (5) load_tenants raises TenantError (a ValueError) naming the tenant; tenants_path() returns None when GOVERNOR_TENANTS is unset or empty. (6) The registry's shared-database check compares host strings lowercased only; certify's admin DSN check treats localhost/127.0.0.1/::1 as one host, so two entries differing only by localhost vs 127.0.0.1 are accepted by the registry. (7) The registry does not check policy.yaml/access.yaml exist; a tenant missing knowledge/shop/policy.yaml fails at profile time with a FileNotFoundError surfaced as 'build run failed'.
+
+## F6 result
+*One Slack bot for several tenants, 17 Nov 2026 20:44.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass, `cursor-grok`: pass; 0 fix loop(s); branch `factory/F6`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| registry in Slack config | yes | missing in src/governor/integrations/slack/config.py |
+| tenants doc | yes | missing in docs/tenants.md |
+| pytest tests/integrations | yes | 46 passed in 10.04s |
+| pytest tests | yes | 549 passed, 21 skipped in 134.99s (0:02:14) |
+| pytest tests/build | yes | 197 passed, 12 skipped in 87.95s (0:01:27) |
+| required tests present | yes | 6 found |
+
+Review: claude-tc-fable: pass | cursor-grok: pass
+
+For Amir: Two non-blocking notes. The CLI --tenant path (F5) still gives init_target the raw tenant name, so a tenant like globex-eu started first from the CLI gets an invalid dbt project name; the Slack path maps it to globex_eu. Worth a one-line fix in build/__main__.py when convenient. Also, the reviewer's pytest run was blocked by the permission policy, so the green result is the acceptance script's.
+
+## Additions for the next plan
+Multi-tenant Slack: GovernorSlack takes tenant_threads= (callable returning tenant -> thread ids) for tests; config.tenants non-empty switches every path. Notifier gets tenant_of= and records rec['tenant'] from the run_started project name, then from the tenants' checkpoints; every Notifier.reply appends a 'tenant <name>' context block via blocks.with_tenant, so any new reply type gets it for free, but a chat_update that rebuilds blocks must re-apply with_tenant (see _on_published). dbt_project_name(name) in app.py maps '-' to '_' and prefixes a leading digit with 't_'; the build CLI --tenant still hands init_target the raw tenant name, so a hyphenated tenant created from the CLI gets an invalid dbt project name unless Slack created the target first (init_target never overwrites). ask remains single-tenant and is refused before parse_command. The reviewer's pytest invocation was blocked by the permission policy; acceptance reported tests/integrations 46 passed and the full suite 549 passed, 21 skipped.

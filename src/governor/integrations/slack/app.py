@@ -19,6 +19,11 @@ proposes again.
 
 ``ask <question>`` (batch2d section 22) is a thin client of ``governor.ask.certified.answer`` with the role fixed by
 ``GOVERNOR_SLACK_ASK_ROLE``: answers go to the channel, refusals and errors are ephemeral to the asker.
+
+Tenants (batch3.md section 32): with ``GOVERNOR_TENANTS`` set, the targets are the tenant names and every run,
+approve, reject and publish (command or button) goes to one tenant: ``graph.start/approve/reject`` get
+``tenant=<Tenant>``. A thread's tenant comes from each tenant's checkpoints; a short id that matches threads in two
+tenants is a usage error naming both. ``ask`` stays single-tenant and is refused. Without a registry nothing changes.
 """
 
 from __future__ import annotations
@@ -29,13 +34,13 @@ import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 from governor.build import events, graph
 from governor.build import publish as build_publish
 from governor.integrations.slack import blocks
-from governor.integrations.slack.config import SlackConfig, ensure_notifier_registered, workspace
-from governor.integrations.slack.notifier import Notifier, known_threads, thread_values
+from governor.integrations.slack.config import SlackConfig, ensure_notifier_registered, tenant_list, workspace
+from governor.integrations.slack.notifier import Notifier, TenantThreads, known_threads, thread_values
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +65,31 @@ class Command:
     note: str | None = None
     question: str | None = None
     force: bool = False  # ``run <target> force``: skip the up-to-date check (batch3.md section 29)
+    tenant: str | None = None  # multi-tenant mode (batch3.md section 32): the tenant the command goes to
+
+
+def resolve_tenant_thread(token: str, tenant_threads: Mapping[str, Iterable[str]]) -> tuple[str | None, str | None]:
+    """``(tenant, thread id)`` for a full id or a short id (batch3 section 32.2), ``(None, None)`` when no tenant
+    holds it. A token that matches threads of two or more tenants raises :class:`UsageError` naming them."""
+    by_tenant = {name: list(ts) for name, ts in tenant_threads.items()}
+    exact = sorted(name for name, ts in by_tenant.items() if token in ts)
+    if len(exact) == 1:
+        return exact[0], token
+    hits = exact or (sorted(name for name, ts in by_tenant.items() if any(t.startswith(token) for t in ts))
+                     if len(token) >= MIN_PREFIX else [])
+    if len(hits) > 1:
+        raise UsageError(f"Build thread `{blocks.safe_text(token, 40)}` matches threads of tenants "
+                         f"{' and '.join(f'`{n}`' for n in hits)}; give the full thread id.")
+    if not hits:
+        return None, None
+    thread_id = resolve_thread(token, by_tenant[hits[0]])
+    return (hits[0], thread_id) if thread_id else (None, None)
+
+
+def dbt_project_name(tenant: str) -> str:
+    """dbt project names allow letters, digits and ``_`` and start with a letter or ``_``: ``-`` becomes ``_``."""
+    name = tenant.replace("-", "_")
+    return name if not name[:1].isdigit() else f"t_{name}"
 
 
 def resolve_thread(token: str, threads: Iterable[str]) -> str | None:
@@ -73,8 +103,12 @@ def resolve_thread(token: str, threads: Iterable[str]) -> str | None:
     return hits[0] if len(hits) == 1 else None
 
 
-def parse_command(text: str, targets: Iterable[str], threads: Iterable[str]) -> Command:
-    """Strict parsing of the ``/governor`` text. Raises :class:`UsageError` for anything else."""
+def parse_command(text: str, targets: Iterable[str], threads: Iterable[str], *,
+                  tenant_threads: Mapping[str, Iterable[str]] | None = None) -> Command:
+    """Strict parsing of the ``/governor`` text. Raises :class:`UsageError` for anything else.
+
+    ``tenant_threads`` (multi-tenant mode: tenant name -> its build threads) puts the tenant on the command: the
+    target for ``run``, the thread's tenant for ``approve``, ``reject`` and ``publish``; ``threads`` is unused then."""
     targets = set(targets)
     head = (text or "").strip().split(maxsplit=1)
     if head and head[0] == "ask":
@@ -93,11 +127,17 @@ def parse_command(text: str, targets: Iterable[str], threads: Iterable[str]) -> 
     if verb == "run":
         if not args or args[0] not in targets or (len(args) == 2 and args[1] != "force"):
             raise UsageError("`run` needs exactly one known target name, optionally followed by `force`.")
+        if tenant_threads is not None:
+            return Command("run", target=args[0], force=len(args) == 2, tenant=args[0])
         return Command("run", target=args[0], force=len(args) == 2)
     if verb in ("approve", "publish", "reject"):
         if not args:
             raise UsageError(f"`{verb}` needs a build thread id.")
-        thread_id = resolve_thread(args[0], threads)
+        tenant = None
+        if tenant_threads is not None:
+            tenant, thread_id = resolve_tenant_thread(args[0], tenant_threads)
+        else:
+            thread_id = resolve_thread(args[0], threads)
         if thread_id is None:
             raise UsageError(f"Unknown build thread `{blocks.safe_text(args[0], 40)}`.")
         if verb == "reject":
@@ -106,10 +146,10 @@ def parse_command(text: str, targets: Iterable[str], threads: Iterable[str]) -> 
                 raise UsageError("`reject` needs a note: `/governor reject <thread> <what to change>`.")
             if len(note) > MAX_NOTE:
                 raise UsageError(f"The note is longer than {MAX_NOTE} characters.")
-            return Command("reject", thread_id=thread_id, note=note)
+            return Command("reject", thread_id=thread_id, note=note, tenant=tenant)
         if len(args) != 1:
             raise UsageError(f"`{verb}` takes only a build thread id.")
-        return Command(verb, thread_id=thread_id)
+        return Command(verb, thread_id=thread_id, tenant=tenant)
     raise UsageError(f"Unknown command `{blocks.safe_text(verb, 40)}`.")
 
 
@@ -156,10 +196,20 @@ class GovernorSlack:
                  threads: Callable[[], Iterable[str]] = known_threads,
                  values: Callable[[str], dict | None] = thread_values,
                  build: Any = graph, publisher: Callable[..., dict] = build_publish.publish,
-                 asker: Callable[[str, str], Any] | None = None):
+                 asker: Callable[[str, str], Any] | None = None,
+                 tenant_threads: Callable[[], Mapping[str, Iterable[str]]] | None = None):
         self.config = config
         self.client = client
-        self.notifier = notifier or Notifier(client, config.channel, values=values, targets=config.targets)
+        # batch3 section 32: with tenants, threads and their state come from each tenant's own checkpoints
+        self.tenants = dict(config.tenants)
+        self.registry = TenantThreads(self.tenants, tenant_threads) if self.tenants else None
+        if self.registry is not None:
+            if values is thread_values:
+                values = self.registry.values
+            if threads is known_threads:
+                threads = lambda: [t for ts in self.registry.by_tenant().values() for t in ts]  # noqa: E731
+        self.notifier = notifier or Notifier(client, config.channel, values=values, targets=config.targets,
+                                             tenant_of=self.registry.tenant_of if self.registry else None)
         self.runner = runner
         self.llm_factory = llm_factory
         self.threads = threads
@@ -185,13 +235,45 @@ class GovernorSlack:
 
     # ---- entry points (each answers at once; long work goes to the runner)
 
+    def _usage(self, error: str | None) -> str:
+        if self.tenants:  # batch3 section 32.3: the footer lists each tenant and its database
+            return blocks.usage(self.config.targets, error, tenants=tenant_list(self.tenants))
+        knowledge, database = workspace()
+        return blocks.usage(self.config.targets, error, (knowledge.name, database))
+
+    def _of(self, tenant: str | None) -> str:
+        """`` (tenant <name>)`` for replies in multi-tenant mode; empty otherwise."""
+        return f" (tenant {tenant})" if tenant else ""
+
+    def _tenant_kw(self, cmd: Command) -> dict:
+        """``tenant=<Tenant>`` for the build calls in multi-tenant mode; nothing otherwise (the call is unchanged)."""
+        return {"tenant": self.tenants[cmd.tenant]} if cmd.tenant else {}
+
+    def _button_tenant(self, thread_id: str) -> str | None:
+        """The tenant of a button's thread (multi-tenant mode). Raises :class:`UsageError` when no tenant or more
+        than one tenant holds the thread."""
+        if self.registry is None:
+            return None
+        names = self.registry.tenants_of(thread_id)
+        if len(names) > 1:
+            raise UsageError(f"Build thread `{blocks.short(thread_id)}` is in tenants "
+                             f"{' and '.join(f'`{n}`' for n in names)}. Nothing changed.")
+        if not names:
+            raise UsageError(f"Build thread `{blocks.short(thread_id)}` is in no tenant. Nothing changed.")
+        return names[0]
+
     def handle_command(self, user_id: str, text: str, respond: Callable[..., Any]) -> None:
+        if self.tenants and (text or "").strip().split(maxsplit=1)[:1] == ["ask"]:
+            # batch3 section 32.4: ask stays single-tenant; nothing runs
+            respond(text=blocks.ASK_MULTI_TENANT, response_type="ephemeral")
+            return
         try:
-            cmd = parse_command(text, self.config.targets, self.threads())
+            if self.registry is not None:
+                cmd = parse_command(text, self.config.targets, (), tenant_threads=self.registry.by_tenant())
+            else:
+                cmd = parse_command(text, self.config.targets, self.threads())
         except UsageError as exc:
-            knowledge, database = workspace()
-            respond(text=blocks.usage(self.config.targets, str(exc), (knowledge.name, database)),
-                    response_type="ephemeral")
+            respond(text=self._usage(str(exc)), response_type="ephemeral")
             return
         if cmd.action == "status":
             respond(text=blocks.status_list(recent_threads()), response_type="ephemeral")
@@ -212,7 +294,8 @@ class GovernorSlack:
             return
         if cmd.action == "run":
             thread_id = str(uuid.uuid4())
-            respond(text=f"Starting build `{blocks.short(thread_id)}` for `{cmd.target}`; progress in #{self.config.channel}.",
+            what = f"tenant `{cmd.tenant}`" if cmd.tenant else f"`{cmd.target}`"
+            respond(text=f"Starting build `{blocks.short(thread_id)}` for {what}; progress in #{self.config.channel}.",
                     response_type="ephemeral")
             self.runner(lambda: self._run(cmd.target, thread_id, force=cmd.force))
             return
@@ -248,15 +331,25 @@ class GovernorSlack:
         if not self.config.is_approver(user_id):
             respond(text=REFUSAL.format(action="approve"), response_type="ephemeral", replace_original=False)
             return
+        try:
+            tenant = self._button_tenant(thread_id)
+        except UsageError as exc:
+            respond(text=str(exc), response_type="ephemeral", replace_original=False)
+            return
         if self._card_stale(thread_id, message_ts):
             self._stale(thread_id, respond, "is not waiting for this design decision")
             return
-        self._start(Command("approve", thread_id=thread_id), user_id, respond)
+        self._start(Command("approve", thread_id=thread_id, tenant=tenant), user_id, respond)
 
     def handle_reject_button(self, user_id: str, thread_id: str, trigger_id: str, respond: Callable[..., Any],
                              message_ts: str | None = None) -> None:
         if not self.config.is_approver(user_id):
             respond(text=REFUSAL.format(action="reject"), response_type="ephemeral", replace_original=False)
+            return
+        try:
+            self._button_tenant(thread_id)
+        except UsageError as exc:
+            respond(text=str(exc), response_type="ephemeral", replace_original=False)
             return
         if self._card_stale(thread_id, message_ts):
             self._stale(thread_id, respond, "is not waiting for this design decision")
@@ -267,15 +360,24 @@ class GovernorSlack:
         if not self.config.is_approver(user_id):
             respond(text=REFUSAL.format(action="publish"), response_type="ephemeral", replace_original=False)
             return
+        try:
+            tenant = self._button_tenant(thread_id)
+        except UsageError as exc:
+            respond(text=str(exc), response_type="ephemeral", replace_original=False)
+            return
         if self._publish_stale(thread_id):
             self._stale(thread_id, respond, "is not waiting to be published")
             return
-        self._start(Command("publish", thread_id=thread_id), user_id, respond)
+        self._start(Command("publish", thread_id=thread_id, tenant=tenant), user_id, respond)
 
     def handle_reject_submit(self, user_id: str, thread_id: str, note: str) -> dict | None:
         """Returns a Bolt ``ack`` payload with input errors, or None when the rejection was started."""
         if not self.config.is_approver(user_id):
             return {"response_action": "errors", "errors": {blocks.NOTE_BLOCK: REFUSAL.format(action="reject")}}
+        try:
+            tenant = self._button_tenant(thread_id)
+        except UsageError as exc:
+            return {"response_action": "errors", "errors": {blocks.NOTE_BLOCK: str(exc)}}
         if self._card_stale(thread_id):
             return {"response_action": "errors",
                     "errors": {blocks.NOTE_BLOCK: "This design was already decided. Nothing changed."}}
@@ -284,7 +386,7 @@ class GovernorSlack:
             return {"response_action": "errors", "errors": {blocks.NOTE_BLOCK: "Write what should change."}}
         if len(note) > MAX_NOTE:
             return {"response_action": "errors", "errors": {blocks.NOTE_BLOCK: f"At most {MAX_NOTE} characters."}}
-        self._start(Command("reject", thread_id=thread_id, note=note), user_id, None)
+        self._start(Command("reject", thread_id=thread_id, note=note, tenant=tenant), user_id, None)
         return None
 
     # ---- work
@@ -299,7 +401,7 @@ class GovernorSlack:
                 return
             self._busy.add(tid)
         if respond:
-            respond(text=f"{cmd.action.capitalize()} build `{blocks.short(tid)}`: working on it.",
+            respond(text=f"{cmd.action.capitalize()} build `{blocks.short(tid)}`{self._of(cmd.tenant)}: working on it.",
                     response_type="ephemeral", replace_original=False)
 
         def work() -> None:
@@ -331,11 +433,15 @@ class GovernorSlack:
             from governor.build.publish import ensure_on_main
             from governor.build.workspace import init_target
 
-            ensure_on_main(self.config.targets[target])  # publish branches from main (same as the CLI run)
-            init_target(self.config.targets[target], target)
+            tenant = self.tenants.get(target)  # batch3 section 32.1: the run goes to its tenant
+            path = tenant.target if tenant else self.config.targets[target]
+            ensure_on_main(path)  # publish branches from main (same as the CLI run)
+            init_target(path, dbt_project_name(target) if tenant else target)
             # The outcome is the progress message (and the design card or escalation reply): no extra reply here.
-            extra = {"force": True} if force else {}  # without force, the call is exactly as before
-            self.build.start(self.config.targets[target], target, self._llm(), thread_id=thread_id, **extra)
+            extra: dict[str, Any] = {"force": True} if force else {}  # without force, the call is exactly as before
+            if tenant is not None:
+                extra["tenant"] = tenant
+            self.build.start(path, target, self._llm(), thread_id=thread_id, **extra)
         except Exception as exc:  # noqa: BLE001
             self._say(thread_id, f":warning: run failed: {_error_line(exc)}")
 
@@ -373,7 +479,7 @@ class GovernorSlack:
             return []
 
     def _approve(self, cmd: Command, user_id: str) -> None:
-        out = self.build.approve(cmd.thread_id, self.config.name_for(user_id), self._llm())
+        out = self.build.approve(cmd.thread_id, self.config.name_for(user_id), self._llm(), **self._tenant_kw(cmd))
         self._say(str(cmd.thread_id), f"Approved by {self.config.name_for(user_id)}; the build ended at "
                                       f"`{out.get('status')}`.")
 
@@ -384,17 +490,20 @@ class GovernorSlack:
                                                                               note=cmd.note))
         except Exception as exc:  # noqa: BLE001
             log.warning("slack: cannot replace the design card buttons: %s", type(exc).__name__)
-        out = self.build.reject(cmd.thread_id, cmd.note, self._llm())
+        out = self.build.reject(cmd.thread_id, cmd.note, self._llm(), **self._tenant_kw(cmd))
         self._say(str(cmd.thread_id), f"Rejected by {self.config.name_for(user_id)}; the thread is at "
                                       f"`{out.get('status')}`.")
 
     def _publish(self, cmd: Command, user_id: str) -> None:
         tid = str(cmd.thread_id)
-        values = self.values(tid) or {}
-        if not values.get("target"):
-            self._say(tid, f"Build `{blocks.short(tid)}` has no target folder in its state.")
-            return
-        target = Path(values["target"])
+        if cmd.tenant:  # batch3 section 32.2: a tenant's build publishes its own target, nothing else
+            target = Path(self.tenants[cmd.tenant].target)
+        else:
+            values = self.values(tid) or {}
+            if not values.get("target"):
+                self._say(tid, f"Build `{blocks.short(tid)}` has no target folder in its state.")
+                return
+            target = Path(values["target"])
         out = self.publisher(target, open_pr=_has_origin(target))
         if out.get("status") == "nothing_to_publish":  # batch3 section 30.3: a plain message, not an error
             self._say(tid, f"Nothing to publish: {blocks.safe_text(out.get('reason'), 300)}.")
@@ -461,4 +570,5 @@ def create_app(config: SlackConfig, gov: GovernorSlack | None = None):
     return app
 
 
-__all__ = ["Command", "GovernorSlack", "UsageError", "create_app", "parse_command", "recent_threads", "resolve_thread"]
+__all__ = ["Command", "GovernorSlack", "UsageError", "create_app", "dbt_project_name", "parse_command", "recent_threads",
+           "resolve_tenant_thread", "resolve_thread"]
