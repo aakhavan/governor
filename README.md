@@ -110,7 +110,7 @@ All ground truth was written and hash-frozen (`evaluation/FROZEN_CAPSTONE.sha256
 
 ### Build: agent vs one-shot baseline (Olist, 99,441 orders, 3 runs each)
 
-The baseline gets the same profile, blueprint and KPI definitions (no templates) and writes every silver and gold file in one call, built once and never validated or repaired. The planner for both is `openai/gpt-6.1-sol`; the agent writes its silver SQL with `openai/gpt-5-mini`.
+The baseline gets the same profile, blueprint and KPI definitions (no templates) and writes every silver and gold file in one call, built once and never validated or repaired. The planner for both is `openai/gpt-6.1-sol`; the agent writes its silver SQL with `openai/gpt-5-mini`. The baseline makes its one call with the planner; the write-model column in the full report shows the configured model, which the baseline never calls.
 
 | | agent | baseline |
 |---|---:|---:|
@@ -212,7 +212,7 @@ Build runs, the sweep, the holdout and the Slack app all use schema `dev_governo
 
 governor handles business data that includes personal data, and it asks people to trust numbers an AI helped produce. The full write-up is [`docs/capstone/ethics.md`](docs/capstone/ethics.md); the threat model (OWASP agentic risks ASI01, 02, 03, 06 and 09, each with its control and the test that proves it) is [`docs/capstone/threat-model.md`](docs/capstone/threat-model.md). In short:
 
-- **No data values in prompts.** Models see table and column names, types, null rates and counts; never min, max or sample values; PII columns as name and count only. dbt errors are redacted before a repair prompt sees them.
+- **No data values in build or certified prompts.** Models see table and column names, types, null rates and counts; never min, max or sample values; PII columns as name and count only. dbt errors are redacted before a repair prompt sees them. The one exception is governor-ask on the billing mart: its answer step sees the first result rows so it can word the answer, but it writes placeholders and code fills in every value.
 - **People decide.** Nothing reaches production without a design approval and a merged pull request; "certified" records who certified what and when.
 - **Personal data stays in the database.** Analysts get salted hashes, finance_admin a mask; person-level questions are refused. Hashing is pseudonymisation, not anonymisation, so the serving views are still personal data under GDPR.
 - **Known limit:** a mapping that is well typed but wrong (freight mapped as price) passes every code check. Only the design-gate reviewer and the gold checks catch it.
@@ -236,6 +236,7 @@ The agent wins on governance and loses to the baseline on join and time-grain qu
 
 ## Limitations
 
+- **No outside users yet.** I tested governor myself, as the target user (a data engineer), on the Olist data and end to end through Slack. The automated evaluation and the red team carry the evidence; testing with two or three outside users is the first next step.
 - **One dataset, few runs.** Build results are 3 runs per system on Olist; the certified set is 20 questions; no confidence intervals. Model output varies between runs.
 - **Clean data.** Olist is tidy. Check mode for messy, existing platforms is not built.
 - **The catalogue is small:** 10 KPIs (8 buildable on Olist, 2 declined: conversion rate and gross margin).
@@ -271,4 +272,4 @@ Rename (the product name is not final), check mode on an existing dbt project, a
 
 The foundation (billing fixture, harvester, lineage, LLM client, input guard, trace) was imported from my Sprint 4 project; [`PROVENANCE.md`](PROVENANCE.md) lists every file and what changed. The repo was built step by step by my own code factory (an orchestrator running implement → review loops over CLI coding agents, with human gates); `plan.yaml` and `plan/accept/` hold the specs and acceptance checks.
 
-Code: MIT ([`LICENSE`](LICENSE)). The Olist dataset is CC BY-NC-SA 4.0 (credit: Olist, "Brazilian E-Commerce Public Dataset by Olist"); it is not in this repository, and tables derived from it stay under its licence.
+Code: MIT ([`LICENSE`](LICENSE)). The Olist dataset is CC BY-NC-SA 4.0 (credit: Olist, "Brazilian E-Commerce Public Dataset by Olist"); it is not in this repository, and tables derived from it stay under its licence. That includes the expected values in [`evaluation/build_gold/olist_gold.yaml`](evaluation/build_gold/NOTICE.md) and [`evaluation/shop_golden/`](evaluation/shop_golden/NOTICE.md), which are CC BY-NC-SA 4.0, not MIT.

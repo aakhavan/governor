@@ -1,6 +1,8 @@
-# Deploying governor-ask
+# Running and deploying governor's API
 
-This is a **single-tenant portfolio deployment**: one container, one fixed
+**Status for the capstone: runs locally only, not hosted.** Build mode needs the Postgres test bed and a GitHub login, so the capstone demo runs on a laptop (README, "Run it"). This page covers the API: governor-ask on the billing mart, certified answers and stored profiles. Hosting is a plan, at the end.
+
+It is a **single-tenant portfolio deployment**: one container, one fixed
 warehouse built into the image, a handful of role tokens shared by people you
 trust. It is not a multi-tenant service. There are no user accounts or token
 rotation endpoints, and there is no rate limiting beyond the query limits in
@@ -13,10 +15,13 @@ One FastAPI app, `governor.api.app:app` (uvicorn, port 8000):
 | route | auth | what |
 |---|---|---|
 | `GET /health` | none | `{status, as_of, version}` |
-| `POST /v1/ask` | bearer | body `{question, thread_id?}` -> AskResult |
+| `POST /v1/ask` | bearer | governor-ask on the billing mart; body `{question, thread_id?}` -> AskResult |
+| `POST /v1/ask/certified` | bearer | certified answers on the shop; body `{question}` -> CertifiedAnswer. Needs the Postgres test bed and a certified registry from a build; without them it returns 503 `registry_unavailable` |
 | `POST /v1/threads/{thread_id}/resume` | bearer | body `{answer}` -> AskResult |
 | `GET /v1/traces?outcome=&limit=` | bearer | the caller's decision traces, newest first |
 | `GET /v1/traces/{trace_id}` | bearer | one of the caller's traces |
+| `GET /profiles` | bearer | stored raw-profile run ids, newest first |
+| `GET /profiles/{run_id}` | bearer | one stored raw profile |
 
 AskResult: `status` (answered, clarify, refused, unanswerable, error),
 `answer`, `result_columns`, `result_rows`, `clarify_question`, `sql`,
@@ -75,7 +80,8 @@ docker compose up --build api
 The image build runs `fixture/build_green.py`, the harvester and
 `python -m governor.ask.catalog build`, so the warehouse, metadata store and
 catalog cards are baked into the image and opened read-only. The `ui` service
-(Streamlit, port 8501) is a placeholder until G8.
+(Streamlit, port 8501) is the governor-ask client and the Profiles page;
+start both with `docker compose up --build`.
 
 ## State volume
 
@@ -105,7 +111,7 @@ Treat the volume as sensitive anyway.
   app starts.
 * `GOVERNOR_THREAD_TTL_H`: hours a paused (clarify) thread is kept (default 24).
 
-## Where to host it (choice waits for the capstone brief)
+## Hosting (not done)
 
 Any host that runs one container with a small persistent disk works. The
 service keeps state in SQLite and DuckDB files, so it must run as **one
@@ -118,5 +124,7 @@ instance**; it cannot scale out across replicas.
 | Render | persistent disk (paid plans) | low; deploy from the repo | a disk blocks zero-downtime deploys; free tier has no disk |
 | Cloud Run | volume via Cloud Storage FUSE or NFS | pay per request, scales to zero | file locks on FUSE are unreliable for SQLite/DuckDB; set max instances to 1 |
 
-Leaning: a VM or Fly.io (real block storage, one instance). Cloud Run fits
-only if traces move to a managed database. Decide once the brief is known.
+For the capstone, governor is not hosted: it runs locally. If it is hosted
+later, one small VM with Docker Compose fits best: real block storage, one
+instance, and the Postgres test bed can run beside it. Fly.io works for the
+API alone. Cloud Run fits only if traces move to a managed database.

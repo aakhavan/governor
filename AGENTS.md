@@ -9,7 +9,7 @@ This repo is **governor** (core + ask modules), built step by step by the code f
 - Never read the Turing College folders. Everything from Sprint 4 is already in this repo (see `PROVENANCE.md`).
 - `knowledge/access.yaml` and `knowledge/policy.yaml` are human-owned policy. Code reads them; prompts never restate them.
 - Python 3.12 + uv. LangChain v1 / LangGraph v1 only: no `AgentExecutor`, no `langchain_classic`, no `create_react_agent`.
-- Prompts live in `src/governor/ask/prompts/*.md`, never in code strings. Pydantic for every model output and tool argument.
+- Prompts live in `prompts/` folders next to the code that uses them (`src/governor/ask/prompts/`, `ask/certified_prompts/`, `build/prompts/`, `eval/prompts/`), never in code strings. Pydantic for every model output and tool argument.
 - Time: resolve relative dates against `artifacts/green/as_of.txt`. Never `now()`, `current_date` or `datetime.now()` in data logic.
 - Tests run offline: fake or scripted LLMs, no network. Only the G10a/G10b evaluation calls real models.
 - DuckDB: open the warehouse `read_only=True`; close every connection (Windows file locks).
@@ -46,4 +46,4 @@ This repo is **governor** (core + ask modules), built step by step by the code f
 
 - Contract: `docs/capstone/batch2d.md`. `src/governor/build/graph.py`, `src/governor/build/design.py` and everything under `evaluation/` do not change in this batch.
 - `governor.integrations` may import `governor.ask` and `governor.build`; those two never import each other or `governor.integrations`.
-- No data value from the warehouse goes into a prompt, a log line, a Slack message or a file in the repo. Tests use a marker string to prove it.
+- No data value from the warehouse goes into a prompt, a log line, a Slack message or a file in the repo. Tests use a marker string to prove it. This holds for build mode and the certified path. The one existing exception is governor-ask's answer step (`ask/prompts/answer.md`), which sees the first result rows to word the answer; it writes placeholders and `fill_answer` puts the values in.

@@ -1,7 +1,7 @@
 [project]
 name = "governor"
 version = "0.0.1"
-description = "governor: an agentic data platform on one foundation (core + ask)"
+description = "governor: an agent that builds a governed dbt KPI layer under human gates and answers questions only from certified KPIs"
 requires-python = ">=3.12"
 dependencies = [           # G1 adds the foundation deps; later steps add theirs (each with a reason in NOTES)
     "dbt-core~=1.12",
