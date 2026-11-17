@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from governor.build import graph
 from governor.build.llm import FakeBuildLLM
@@ -169,3 +170,10 @@ def _raw_ready() -> bool:
 @pytest.mark.skipif(not _raw_ready(), reason="needs GOVERNOR_BUILD_PASSWORD and Olist tables in raw")
 def test_live_gate_across_processes(tmp_path, good):
     _gate_cycle(tmp_path, good, [], _env(tmp_path))
+
+
+def test_run_on_a_fresh_target_writes_sources(tmp_path, profile, good):
+    """17 Nov: every entry point (CLI run, Slack, eval) goes through the profile node, which writes sources.yml."""
+    out, _ = _start(tmp_path, profile, [good])
+    sources = yaml.safe_load((tmp_path / "target" / "models" / "sources.yml").read_text(encoding="utf-8"))
+    assert {t["name"] for t in sources["sources"][0]["tables"]} == {t["name"] for t in profile["tables"]}

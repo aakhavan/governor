@@ -344,6 +344,33 @@ def test_schema_prefixed_source_table_is_normalised(profile, good, policy):
             [("UNKNOWN_SOURCE_TABLE", "stg_orders")], bad
 
 
+def test_model_qualified_kpi_inputs_are_normalised(profile, good, policy):
+    """17 Nov: inputs written as ``<mapped model>.<column>`` become the bare column (code, not a repair)."""
+    qualified = json.loads(json.dumps(good))
+    gmv = _kpi(qualified, "gmv")["mapping"]
+    gmv["item_price"] = "int_order_lines.item_price"
+    gmv["freight"] = '"int_order_lines"."freight_value"'
+    boolean = gmv["valid_order"]
+    # unnormalised, validation refuses both inputs, as it did in the failed build
+    assert sorted((f.code, f.subject) for f in _codes(qualified, profile, policy)) == \
+        [("MAPPING_UNKNOWN_COLUMN", "kpi.gmv")] * 2
+    p = design.propose(profile, CATALOGUE, BLUEPRINT, [], FakeBuildLLM({"propose": [json.dumps(qualified)]}))
+    mapping = next(k for k in p.kpis if k.id == "gmv").mapping
+    assert mapping["item_price"] == "item_price" and mapping["freight"] == "freight_value"
+    assert mapping["valid_order"] == boolean  # boolean inputs are SQL and stay as written
+    assert design.validate(p, profile, CATALOGUE, policy) == []
+    assert design.normalise_kpi_mappings(good, CATALOGUE).model_dump() == Proposal.model_validate(good).model_dump()
+
+
+def test_other_prefixes_on_kpi_inputs_stay_findings(profile, good, policy):
+    for bad in ("stg_orders.item_price", "int_order_lines.no_such_column", "raw.int_order_lines.item_price"):
+        doc = json.loads(json.dumps(good))
+        _kpi(doc, "gmv")["mapping"]["item_price"] = bad
+        normalised = design.normalise_kpi_mappings(doc, CATALOGUE)
+        found = design.validate(normalised, profile, CATALOGUE, policy)
+        assert [(f.code, f.subject) for f in found] == [("MAPPING_UNKNOWN_COLUMN", "kpi.gmv")], bad
+
+
 # ---- the report ----
 
 SECTIONS = ["## Silver models", "## KPIs", "## Gap report", "## Assumptions", "## Validation findings", "## Commands"]

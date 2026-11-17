@@ -53,15 +53,16 @@ def test_built_message_shows_next_step_and_pr_button(tmp_path, fake):
     progress = _progress(fake, n)
     text = json.dumps(progress)
     assert progress[0]["text"]["text"].startswith(":large_green_circle: built")
-    assert "*Next:* Open the pull request: `/governor publish aaaaaaaa`" in text
+    assert "*Next:* press *Open pull request* below" in text and "/governor publish" not in text
     assert _actions(progress) == [(blocks.PUBLISH_ACTION, TA, "Open pull request")]
     # the thread's Built reply: the summary, the three steps with the certify line, the same button
     built = _replies(fake, n)[-1]
     reply = "\n".join(b["text"]["text"] for b in built["blocks"] if b["type"] == "section")
     assert reply.startswith("Built: 8 KPIs, 40 tests passed, gaps: `conversion_rate`.")
-    assert "① open the pull request: `/governor publish aaaaaaaa`" in reply
+    assert "① press *Open pull request* below" in reply and "/governor publish" not in reply
     assert "② review and merge it on GitHub" in reply
-    assert f"③ certify in a terminal: `{_certify(tmp_path)}`" in reply
+    # the certify command alone on its own line in a code block, so it copies cleanly (17 Nov)
+    assert f"③ certify in a terminal:\n```{_certify(tmp_path)}```" in reply
     assert _actions(built["blocks"]) == [(blocks.PUBLISH_ACTION, TA, "Open pull request")]
     assert n.store.get(TA)["built_ts"]
 
@@ -88,7 +89,7 @@ def test_published_header_links_pr_and_says_certify(tmp_path, fake):
     n.handle({"kind": "published", "thread_id": TA, "branch": BRANCH, "pr": True, "pr_url": URL})
     progress = _progress(fake, n)
     assert progress[0]["text"]["text"].startswith(f":large_green_circle: published: <{URL}>")
-    nxt = f"*Next:* Review and merge on GitHub, then certify: `{_certify(tmp_path)}`"
+    nxt = f"*Next:* Review and merge on GitHub, then certify in a terminal:\n```{_certify(tmp_path)}```"
     assert nxt in _texts(progress)
     assert _actions(progress) == []  # the button is gone from the channel message
     # the Built reply's button is replaced by the link
@@ -107,7 +108,7 @@ def test_published_without_pr_url_names_branch(tmp_path, fake):
     head = progress[0]["text"]["text"]
     assert head.startswith(f":large_green_circle: published: branch `{BRANCH}`") and "http" not in head
     text = _texts(progress)
-    assert f"merge branch `{BRANCH}` into `main` locally, then certify: `{_certify(tmp_path)}`" in text
+    assert f"merge branch `{BRANCH}` into `main` locally, then certify in a terminal:\n```{_certify(tmp_path)}```" in text
     last = _replies(fake, n)[-1]
     assert f"merge branch `{BRANCH}` into `main` locally" in last["blocks"][1]["text"]["text"]
     assert _actions(progress) == []

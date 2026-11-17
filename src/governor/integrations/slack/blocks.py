@@ -154,8 +154,7 @@ def progress(thread_id: str, rec: dict, certify: str | None = None) -> tuple[str
     out = [_section(head), _section("\n".join(_checklist(rec)))]
     outcome = rec.get("outcome")
     if outcome == BUILT:
-        out += [_section(f"*Next:* Open the pull request: `/governor publish {short(thread_id)}`"),
-                publish_actions(thread_id)]
+        out += [_section("*Next:* press *Open pull request* below"), publish_actions(thread_id)]
     elif outcome == PUBLISHED:
         out.append(_section(f"*Next:* {after_publish(rec.get('pr_url'), rec.get('branch'), certify)}"))
     return text.replace("`", ""), out + [_context(facts)]
@@ -173,14 +172,20 @@ def certify_command(target: Any = None, name: Any = None) -> str:
     return f'python -m governor.build certify --target {path} --by "{by}"'
 
 
+def copyable(command: str) -> str:
+    """A command on its own line as a Slack code block, so it is selected and copied whole (17 Nov: inline code in
+    a sentence could not be copied cleanly)."""
+    return f"\n```{command}```"
+
+
 def after_publish(pr_url: str | None, branch: Any, certify: str | None) -> str:
     """The step after a publish: merge the pull request on GitHub, or (no ``origin``) the branch locally; then
     certify in a terminal (it needs the admin login)."""
-    cmd = f"`{certify or certify_command()}`"
+    cmd = copyable(certify or certify_command())
     if pr_url:
-        return f"Review and merge on GitHub, then certify: {cmd}"
+        return f"Review and merge on GitHub, then certify in a terminal:{cmd}"
     where = f"branch `{branch}`" if branch else "the publish branch"
-    return f"No pull request (the target has no `origin`): merge {where} into `main` locally, then certify: {cmd}"
+    return f"No pull request (the target has no `origin`): merge {where} into `main` locally, then certify in a terminal:{cmd}"
 
 
 def publish_actions(thread_id: str) -> dict:
@@ -194,9 +199,9 @@ def built_reply(thread_id: str, summary: str, certify: str | None = None,
                 published_link: str | None = None) -> tuple[str, list[dict]]:
     """The thread's "Built" reply: the summary, the three next steps and the **Open pull request** button. Once
     published, the button gives way to the link (``published_link``)."""
-    steps = (f"*Next*\n① open the pull request: `/governor publish {short(thread_id)}`\n"
-             f"② review and merge it on GitHub\n"
-             f"③ certify in a terminal: `{certify or certify_command()}`")
+    steps = ("*Next*\n① press *Open pull request* below\n"
+             "② review and merge it on GitHub (or locally when the target has no `origin`)\n"
+             f"③ certify in a terminal:{copyable(certify or certify_command())}")
     out = [_section(summary), _section(steps)]
     out.append(_section(published_link) if published_link else publish_actions(thread_id))
     return summary.replace("`", ""), out
@@ -445,7 +450,7 @@ def usage(targets: Iterable[str], error: str | None = None) -> str:
 
 
 __all__ = ["ASK_ACK", "ASK_ERROR", "ASK_REFUSAL", "ask_answer", "ask_context", "ask_error", "slack_escape",
-           "PUBLISH_ACTION","after_publish", "built_reply", "certify_command", "decided_line", "publish_actions",
+           "PUBLISH_ACTION","after_publish", "copyable", "built_reply", "certify_command", "decided_line", "publish_actions",
            "published_link", "BUILT", "FAILED", "INTERRUPTED", "MAPPINGS_OMITTED", "PUBLISHED", "SUPERSEDED", "TERMINAL",
            "design_without_mappings", "failing_tests", "first_line", "node_name", "reason_line",
            "run_results_failures", "tests_reason", "APPROVE_ACTION","NOTE_ACTION", "NOTE_BLOCK", "REJECT_ACTION", "REJECT_MODAL", "STAGES", "design_card",

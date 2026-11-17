@@ -9,7 +9,7 @@ import yaml
 
 from governor.build import __main__ as build_cli
 from governor.build.dbt import run_dbt
-from governor.build.workspace import build_dsn, init_target, write_sources
+from governor.build.workspace import build_dsn, init_target, sync_sources, write_sources
 
 TABLES = {"orders": ["order_id", "status"], "items": ["order_id", "price"]}
 
@@ -99,3 +99,25 @@ def test_live_init_and_parse(tmp_path, monkeypatch, capsys):
     assert (target / "models" / "sources.yml").is_file()
     result = run_dbt(target, ["parse"])
     assert result.ok, result.log_tail
+
+
+def _profile(tables: dict[str, list[str]]) -> dict:
+    return {"schema": "raw", "tables": [{"name": t, "columns": [{"name": c} for c in cols]} for t, cols in tables.items()]}
+
+
+def test_sync_sources_writes_missing_and_changed_files_only(tmp_path):
+    """17 Nov: a Slack run on a target never given ``init`` had no sources.yml, so silver failed to compile."""
+    path = tmp_path / "models" / "sources.yml"
+    assert sync_sources(tmp_path, _profile(TABLES)) is True  # missing: written
+    tables = yaml.safe_load(path.read_text())["sources"][0]["tables"]
+    assert [t["name"] for t in tables] == ["items", "orders"]
+    assert [c["name"] for c in tables[1]["columns"]] == ["order_id", "status"]
+    # written by init with the load column the profile leaves out: same tables, so left alone
+    write_sources(tmp_path, {t: cols + ["_loaded_at"] for t, cols in TABLES.items()})
+    before = path.read_text()
+    assert sync_sources(tmp_path, _profile(TABLES)) is False and path.read_text() == before
+    # a new raw table: rewritten from the profile
+    assert sync_sources(tmp_path, _profile(TABLES | {"payments": ["order_id", "value"]})) is True
+    assert "payments" in path.read_text()
+    # an empty profile never wipes the file
+    assert sync_sources(tmp_path, {"tables": []}) is False and "payments" in path.read_text()

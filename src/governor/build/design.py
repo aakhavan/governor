@@ -125,7 +125,8 @@ def propose(profile, catalogue: KpiCatalogue, blueprint: Blueprint, approved, ll
     The model answers in :class:`ProposalReply` (each KPI mapping as ``mapping_pairs``, batch2b section 11); the
     pairs become the ``mapping`` dict here, before validation."""
     prompt = build_prompt(profile, catalogue, blueprint, approved, findings, previous=previous, note=note)
-    return normalise_source_tables(llm.structured("propose", prompt, ProposalReply, role="plan").to_proposal(), profile)
+    proposal = llm.structured("propose", prompt, ProposalReply, role="plan").to_proposal()
+    return normalise_kpi_mappings(normalise_source_tables(proposal, profile), catalogue)
 
 
 # --------------------------------------------------------------------------- validation
@@ -156,6 +157,41 @@ def normalise_source_tables(proposal: Proposal | dict, profile: Profile | dict) 
             m, changed = m.model_copy(update={"source_table": bare}), True
         models.append(m)
     return prop.model_copy(update={"silver_models": models}) if changed else prop
+
+
+def _bare_column(value: str, model: str) -> str:
+    """``<model>.<column>`` (quotes allowed) -> ``<column>`` when the prefix is ``model``; anything else unchanged."""
+    prefix, sep, rest = value.strip().partition(".")
+    if sep and prefix.strip('"').lower() == model.lower() and rest.strip('"') and "." not in rest:
+        return rest.strip('"')
+    return value
+
+
+def normalise_kpi_mappings(proposal: Proposal | dict, catalogue: KpiCatalogue) -> Proposal:
+    """A non-boolean KPI input mapped as ``<model>.<column>`` (``int_sales_lines.unit_price``), where ``<model>`` is
+    the silver model its relation maps to, becomes the bare ``<column>`` (found 17 Nov on a second dataset: the plan
+    model qualified all 13 inputs and two repairs did not fix it). Code, not a repair, like
+    :func:`normalise_source_tables`. Boolean inputs are SQL expressions and stay as written; any other value stays and
+    validation reports it as ``MAPPING_UNKNOWN_COLUMN``."""
+    prop = proposal if isinstance(proposal, Proposal) else Proposal.model_validate(proposal)
+    known = {k.id: k for k in catalogue.kpis}
+    decisions = []
+    changed = False
+    for d in prop.kpis:
+        kpi = known.get(d.id)
+        if d.decision != "build" or kpi is None or not d.mapping:
+            decisions.append(d)
+            continue
+        mapping = dict(d.mapping)
+        for name, inp in kpi.inputs.items():
+            value, model = mapping.get(name), mapping.get(inp.relation)
+            if inp.type == "boolean" or not value or not model:
+                continue
+            bare = _bare_column(value, model)
+            if bare != value:
+                mapping[name], changed = bare, True
+        decisions.append(d.model_copy(update={"mapping": mapping}) if mapping != d.mapping else d)
+    return prop.model_copy(update={"kpis": decisions}) if changed else prop
 
 
 def _finding(f: Finding | dict) -> Finding:

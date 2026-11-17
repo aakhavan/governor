@@ -93,6 +93,33 @@ def write_sources(target: Path, tables: dict[str, list[str]]) -> Path:
     return path
 
 
+def _source_table_names(path: Path) -> set[str] | None:
+    """Table names of source ``raw`` in an existing sources.yml; ``None`` when unreadable or another layout."""
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = next(s for s in doc.get("sources") or [] if s.get("name") == "raw")
+        return {str(t["name"]) for t in raw.get("tables") or []}
+    except Exception:  # noqa: BLE001 (any unreadable file is rewritten from the profile)
+        return None
+
+
+def sync_sources(target: Path, profile: dict) -> bool:
+    """Make ``models/sources.yml`` match the profiled raw tables, for every entry point (CLI, Slack, eval).
+
+    Written when missing (a target never given ``init``, found on 17 Nov with a Slack run on a fresh target) or
+    when the set of raw tables changed since it was written. Left alone when the tables match, so a file written by
+    ``init`` (which also lists ``_``-prefixed load columns the profile leaves out) stays as it is. Returns whether
+    the file was written."""
+    tables = {str(t["name"]): [str(c["name"]) for c in t.get("columns") or []] for t in profile.get("tables") or []}
+    if not tables:
+        return False
+    path = Path(target) / "models" / "sources.yml"
+    if path.is_file() and _source_table_names(path) == set(tables):
+        return False
+    write_sources(Path(target), tables)
+    return True
+
+
 def build_dsn() -> str:
     """The build login as a libpq connection string, from env (test-bed password default, laptop only)."""
     return make_conninfo(

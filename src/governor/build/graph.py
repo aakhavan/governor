@@ -215,6 +215,9 @@ def build_graph(
 
     def profile(state: BuildState, config: RunnableConfig) -> dict:
         prof = state.get("profile") or profiler(state["policy"])
+        from governor.build.workspace import sync_sources
+
+        sync_sources(Path(state["target"]), prof)  # every entry point gets sources.yml for the tables just profiled
         emit("profiled", thread_id=_tid(config), tables=len(prof.get("tables") or []),
              relationships=len(prof.get("relationships") or []), saved=bool(state.get("profile")))
         return {} if state.get("profile") else {"profile": prof}
