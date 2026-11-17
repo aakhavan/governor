@@ -27,7 +27,9 @@ steps:
     tier: design
     prompt: plan/prompts/F2.md
     accept: plan/accept/accept_f2.py
-    allowed_paths: [src/governor/build/drift.py, src/governor/build/graph.py, src/governor/build/publish.py, tests/build/, tests/fixtures/build/]
+    # tests/core/test_build_drift.py: a re-export the F2 implementer added to work around an acceptance bug (since fixed);
+    # allowed only so the run can continue. Amir deletes it at review.
+    allowed_paths: [src/governor/build/drift.py, src/governor/build/graph.py, src/governor/build/publish.py, tests/build/, tests/fixtures/build/, tests/core/test_build_drift.py]
     human_gate: false
     review_focus: "the fingerprint holds only names, inferred types, PII flags and candidate keys, never rows, rates, distinct counts, min or max; the hash is order-independent; diff names changes only; the fingerprint is written at approval and published with the other generated files; nothing else in the graph changes"
   - id: F3

@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-F1 (safety rails) is implemented on branch factory/F1 and passes acceptance 9/9. core/pgconn.py provides connect_timeout_s and with_timeout; the timeout is applied to build_dsn, profile, silver, gold, certify and core/serving, and to the dbt profile template's dev and prod outputs. The Slack app prints a start-up line with channel, targets, knowledge folder and host:port/db, and the usage text ends with a workspace footer; neither shows a user, password or DSN. src/governor/eval is untouched. Six new offline tests live in tests/core/test_pgconn.py and tests/integrations/test_slack_workspace.py; docs/slack.md has the new paragraph. Reviewer verdict: pass with no required fixes.
+F1 and F2 are implemented and reviewed on branch factory/F2. src/governor/build/drift.py provides fingerprint, fingerprint_hash, diff and the Drift model; the build graph's record node writes governor/profile_fingerprint.json at approval and publish.GENERATED includes it. tests/build/test_drift.py holds the six required tests and the F2 acceptance passes (181 passed, 12 skipped on tests/build). The acceptance scripts for F1 to F6 were relocked to collect test folders by explicit path because pytest skips folders named build. One leftover, tests/core/test_build_drift.py, duplicates the drift tests and awaits deletion by Amir, after which the extra allowed_paths entry in plan-batch3.yaml can be reverted. F3 to F6 are pending.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,38 +20,6 @@ F1 (safety rails) is implemented on branch factory/F1 and passes acceptance 9/9.
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## E4 result
-*Injection tests, error redaction and the threat model, 11 Nov 2026 14:24.*
-
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 1 fix loop(s); branch `factory/E4`.
-
-| check | ok | detail |
-|---|---|---|
-| capstone ground truth unchanged | yes | capstone ground truth unchanged |
-| src/governor/build/graph.py unchanged against main | yes | the file differs from main |
-| src/governor/build/design.py unchanged against main | yes | the file differs from main |
-| src/governor/build/prompts/repair.md unchanged against main | yes | the file differs from main |
-| src/governor/build/prompts/propose.md unchanged against main | yes | the file differs from main |
-| governor.build imports neither Slack nor ask | yes |  |
-| redact_error runs | yes |  |
-| no data value survives redaction | yes |  |
-| known identifiers survive | yes |  |
-| long numbers and DETAIL lines go | yes |  |
-| threat model exists, at most 80 lines | yes | 57 lines |
-| threat model has ASI01 | yes |  |
-| threat model has ASI02 | yes |  |
-| threat model has ASI03 | yes |  |
-| threat model has ASI06 | yes |  |
-| threat model has ASI09 | yes |  |
-| threat model has Open findings | yes |  |
-| threat model holds no marker or data value | yes |  |
-| pytest tests/build | yes | 171 passed, 12 skipped in 51.82s |
-| required tests present | yes | 9 found |
-
-Review: cursor-grok: pass | claude-tc-fable: pass
-
-For Amir: The acceptance lines 'the file differs from main' are the failure string stored even when the check passes. ok true means git diff --quiet against main returned 0, so graph.py, design.py, repair.md and propose.md match main. Unquoted values on a kept error line are left as written; section 25 and the threat model both say so, and Postgres quotes the values it reports.
 
 ## A1 result
 *Airflow integration (manual profile DAG, profiles API route, Profiles page), 13 Nov 2026 20:56.*
@@ -84,3 +52,25 @@ Profiles API: GET /profiles (newest first by mtime, max 100) and GET /profiles/{
 
 ## Additions for F2
 governor.core.pgconn.with_timeout(dsn) and connect_timeout_s() exist; any new psycopg.connect under build/ or core/ must wrap its DSN with with_timeout (eval/ stays raw by contract). workspace.build_address() returns host:port/db for messages; slack.config.workspace() returns (paths.KNOWLEDGE, address) and start_line(config) builds the start-up line; blocks.usage() takes an optional (knowledge_name, address) tuple for the footer. The dbt profile template only affects newly written profiles.yml files; existing targets keep theirs. Pytest's default norecursedirs skips tests/build/ when collecting from 'tests', so required tests must live in tests/core/ or tests/integrations/. The unreachable-database test has no hard timeout guard, so a regression of with_timeout in profile_schema would hang the suite instead of failing; consider adding a lower-bound elapsed check or OperationalError match if that test is touched again.
+
+## F2 result
+*Profile fingerprint and drift, 17 Nov 2026 17:23.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F2`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| drift module exists | yes | missing in src/governor/build/drift.py |
+| diff exists | yes | missing in src/governor/build/drift.py |
+| fingerprint written at approval | yes | missing in src/governor/build/graph.py |
+| fingerprint published | yes | missing in src/governor/build/publish.py |
+| pytest tests/build | yes | 181 passed, 12 skipped in 58.46s |
+| required tests present | yes | 6 found |
+
+Review: F2 does what section 28 asks. The fingerprint holds only names, inferred types, PII flags, candidate keys, version and schema name; tables, columns and keys are sorted so the sha256 over canonical JSON is order-independent. diff reports names and type pairs only. The record node writes governor/profile_fingerprint.json with thread_id, approved_on, hash and fingerprint next to approved.yaml, and publish.GENERATED names it. The graph changes nowhere else. Tests inject distinctive values and sample cells and prove none leak.
+
+For Amir: Delete tests/core/test_build_drift.py and remove it from F2's allowed_paths in plan-batch3.yaml; it re-runs the six drift tests under a second module name whenever pytest is invoked on tests, and the relocked acceptance scripts no longer need it. The extra 'governor/profile_fingerprint.json' entry in publish.GENERATED is redundant with 'governor' but harmless.
+
+## Additions for F3
+F3 can rely on: graph.target_fingerprint(target) gives <target>/governor/profile_fingerprint.json; its JSON has keys thread_id, approved_on (ISO date), hash, fingerprint. drift.fingerprint accepts a Profile or the section 5 dict (it validates with Profile, extra='forbid', so pass exactly the profiler's dict). drift.fingerprint_hash(fp) is sha256 of json.dumps(fp, sort_keys=True, separators=(',',':')). drift.diff(old_fp, new_fp) returns Drift with .empty and .summary_lines() (sorted plain lines, names and type pairs only). The compare node should read the file through target_fingerprint and compare doc['hash'] with fingerprint_hash(fingerprint(state['profile'])). Note pytest's default norecursedirs skips tests/build when invoked on 'tests'; acceptance scripts now collect tests/build explicitly, so no re-export shim is needed. tests/core/test_build_drift.py is a workaround slated for deletion; do not depend on it.

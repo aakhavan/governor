@@ -31,7 +31,8 @@ def static():
 
 
 def required_present(names: list[str]) -> None:
-    c = run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "tests"], timeout=300)
+    # Collect the step's folders by name: pytest skips folders called "build" when collecting from "tests".
+    c = run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "tests/build"], timeout=300)
     found = set(re.findall(r"::(test_[A-Za-z0-9_]+)", c.stdout))
     missing = [t for t in names if t not in found]
     check("required tests present", not missing, f"missing: {missing}" if missing else f"{len(names)} found")

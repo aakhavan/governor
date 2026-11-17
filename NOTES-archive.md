@@ -1507,3 +1507,38 @@ Review: F1 does what section 27 asks. with_timeout is applied to build_dsn and e
 
 For Amir: STATUS.md in the working tree still says F1 is stopped on lock_mismatch; that is factory state from before the run, not something the implementer changed. Optional hardening: give test_unreachable_database_fails_within_timeout a lower elapsed bound or match psycopg.OperationalError so a future regression fails fast instead of hanging.
 
+## Relocks
+- 17 Nov 2026 17:20: acceptance bug fixed: required tests are now collected from the step's own folders (pytest skips folders named build when collecting from tests); F2 allowed_paths gains tests/core/test_build_drift.py, the implementer's workaround, to be deleted at review (via supervise, by Claude, delegated by Amir via chat 17 Nov) (changed: plan-batch3.yaml, plan/accept/accept_f1.py, plan/accept/accept_f2.py, plan/accept/accept_f3.py, plan/accept/accept_f4.py, plan/accept/accept_f5.py, plan/accept/accept_f6.py)
+
+## E4 result
+*Injection tests, error redaction and the threat model, 11 Nov 2026 14:24.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 1 fix loop(s); branch `factory/E4`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| src/governor/build/graph.py unchanged against main | yes | the file differs from main |
+| src/governor/build/design.py unchanged against main | yes | the file differs from main |
+| src/governor/build/prompts/repair.md unchanged against main | yes | the file differs from main |
+| src/governor/build/prompts/propose.md unchanged against main | yes | the file differs from main |
+| governor.build imports neither Slack nor ask | yes |  |
+| redact_error runs | yes |  |
+| no data value survives redaction | yes |  |
+| known identifiers survive | yes |  |
+| long numbers and DETAIL lines go | yes |  |
+| threat model exists, at most 80 lines | yes | 57 lines |
+| threat model has ASI01 | yes |  |
+| threat model has ASI02 | yes |  |
+| threat model has ASI03 | yes |  |
+| threat model has ASI06 | yes |  |
+| threat model has ASI09 | yes |  |
+| threat model has Open findings | yes |  |
+| threat model holds no marker or data value | yes |  |
+| pytest tests/build | yes | 171 passed, 12 skipped in 51.82s |
+| required tests present | yes | 9 found |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: The acceptance lines 'the file differs from main' are the failure string stored even when the check passes. ok true means git diff --quiet against main returned 0, so graph.py, design.py, repair.md and propose.md match main. Unquoted values on a kept error line are left as written; section 25 and the threat model both say so, and Postgres quotes the values it reports.
+

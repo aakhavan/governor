@@ -29,7 +29,8 @@ def static():
 
 
 def required_present(names: list[str]) -> None:
-    c = run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "tests"], timeout=300)
+    # Collect the step's folders by name: pytest skips folders called "build" when collecting from "tests".
+    c = run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "tests/integrations"], timeout=300)
     found = set(re.findall(r"::(test_[A-Za-z0-9_]+)", c.stdout))
     missing = [t for t in names if t not in found]
     check("required tests present", not missing, f"missing: {missing}" if missing else f"{len(names)} found")
@@ -38,5 +39,6 @@ def required_present(names: list[str]) -> None:
 guarded("static", static)
 pytest_check("tests/integrations")
 pytest_check("tests")
+pytest_check("tests/build")  # not reached by "tests": pytest skips folders named build
 required_present(['test_targets_come_from_tenant_registry', 'test_run_routes_to_its_tenant', 'test_approve_resolves_tenant_from_thread', 'test_thread_in_two_tenants_is_a_usage_error', 'test_ask_refused_in_multi_tenant_mode', 'test_messages_name_the_tenant'])
 finish("F6")

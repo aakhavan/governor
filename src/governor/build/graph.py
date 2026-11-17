@@ -50,7 +50,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from governor.build import design, docs, gold, silver
+from governor.build import design, docs, drift, gold, silver
 from governor.build.dbt import run_dbt
 from governor.build.events import emit
 from governor.build.llm import BuildLLM, LLMOutputError
@@ -171,6 +171,22 @@ def record_decisions(target: str | Path, proposal: Proposal, approved_by: str, a
             doc["decisions"].append(d)
     path.write_text(_APPROVED_HEADER + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
     load_approved(path)
+    return path
+
+
+def target_fingerprint(target: str | Path) -> Path:
+    return Path(target) / "governor" / "profile_fingerprint.json"
+
+
+def write_fingerprint(target: str | Path, profile: dict, approved_on: dt.date, thread_id: str) -> Path:
+    """Write ``<target>/governor/profile_fingerprint.json`` for the profile the design was approved on (batch3.md
+    section 28): names, types, PII flags and candidate keys only."""
+    fp = drift.fingerprint(profile)
+    path = target_fingerprint(target)
+    governor_dir(target)
+    doc = {"thread_id": thread_id, "approved_on": approved_on.isoformat(), "hash": drift.fingerprint_hash(fp),
+           "fingerprint": fp}
+    path.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
 
 
@@ -302,6 +318,8 @@ def build_graph(
     def record(state: BuildState, config: RunnableConfig) -> dict:
         path = record_decisions(state["target"], Proposal.model_validate(state["proposal"]), state["approved_by"],
                                 today(), config["configurable"]["thread_id"])
+        if state.get("profile"):
+            write_fingerprint(state["target"], state["profile"], today(), config["configurable"]["thread_id"])
         return {"status": APPROVED, "approved_file": str(path)}
 
     def _silver_update(st: dict, before: int) -> dict:
@@ -532,4 +550,4 @@ SILVER_BUILT = silver.BUILT
 BUILT, ESCALATED, BLUEPRINT_FAILED = gold.BUILT, gold.ESCALATED, gold.BLUEPRINT_FAILED
 
 __all__ = ["APPROVED", "AWAITING", "BLUEPRINT_FAILED", "BUILT", "ESCALATED", "SILVER_BUILT", "INVALID", "REJECTED", "BuildError", "approve",
-           "build_graph", "record_decisions", "reject", "start"]
+           "build_graph", "record_decisions", "reject", "start", "target_fingerprint", "write_fingerprint"]

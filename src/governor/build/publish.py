@@ -33,7 +33,8 @@ GOVERNOR = ("governor", "governor@localhost")
 MAIN = "main"
 GITIGNORE = "target/\nlogs/\ndbt_packages/\nprofiles/.user.yml\n"
 SCAFFOLD = (".gitignore", "dbt_project.yml", "profiles/profiles.yml", "models/sources.yml")
-GENERATED = ("models", "tests", "governor")
+# governor/ already covers it; named so the fingerprint written at approval (batch3.md section 28) is always committed.
+GENERATED = ("models", "tests", "governor", "governor/profile_fingerprint.json")
 PUBLISHED_FILE = "governor_published.json"
 
 
