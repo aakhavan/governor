@@ -34,6 +34,7 @@ from governor.build.dbt import DbtResult, run_dbt
 from governor.build.models import KpiDecision, Proposal
 from governor.core import paths
 from governor.core.catalogue import Blueprint, Kpi, KpiCatalogue, load_blueprint, render
+from governor.core.pgconn import with_timeout
 
 DEFAULT_BLUEPRINT = paths.KNOWLEDGE / "blueprint.md"
 MARTS = "marts"
@@ -496,7 +497,7 @@ def kpi_rows(names: list[str], dsn: str | None = None) -> dict[str, int]:
     from governor.build.workspace import build_dsn
 
     out: dict[str, int] = {}
-    with psycopg.connect(dsn or build_dsn()) as conn:
+    with psycopg.connect(with_timeout(dsn or build_dsn())) as conn:
         for n in names:
             q = sql.SQL("select count(*) from {}.{}").format(sql.Identifier(SCHEMA), sql.Identifier(n))
             out[n] = int(conn.execute(q).fetchone()[0])

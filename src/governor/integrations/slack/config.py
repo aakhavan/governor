@@ -114,6 +114,21 @@ class SlackConfig:
         return self.names.get(user_id) or user_id
 
 
+def workspace() -> tuple[Path, str]:
+    """The knowledge folder this process serves and the build database as ``host:port/db`` (batch3 section 27).
+    Never a user name, password or full DSN."""
+    from governor.build.workspace import build_address
+
+    return paths.KNOWLEDGE, build_address()
+
+
+def start_line(config: SlackConfig) -> str:
+    """The one line printed before connecting: channel, targets, knowledge folder and build database."""
+    knowledge, database = workspace()
+    return (f"governor slack: Socket Mode, channel #{config.channel}, targets {sorted(config.targets) or 'none'}, "
+            f"knowledge {knowledge}, database {database}")
+
+
 def ensure_notifier_registered(env: dict | None = None) -> None:
     """Add the Slack notifier to ``GOVERNOR_BUILD_NOTIFIERS`` (builds started from the app report to Slack)."""
     env = os.environ if env is None else env
@@ -122,4 +137,5 @@ def ensure_notifier_registered(env: dict | None = None) -> None:
         env["GOVERNOR_BUILD_NOTIFIERS"] = ",".join(specs + [NOTIFIER_SPEC])
 
 
-__all__ = ["ConfigError", "DEFAULT_ASK_ROLE", "DEFAULT_CHANNEL", "EVERYONE","NOTIFIER_SPEC", "SlackConfig", "ensure_notifier_registered"]
+__all__ = ["ConfigError", "DEFAULT_ASK_ROLE", "DEFAULT_CHANNEL", "EVERYONE","NOTIFIER_SPEC", "SlackConfig", "ensure_notifier_registered",
+           "start_line", "workspace"]

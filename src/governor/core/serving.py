@@ -35,6 +35,7 @@ import yaml
 from psycopg import sql
 
 from governor.core import paths
+from governor.core.pgconn import with_timeout
 
 ENV_ADMIN_DSN = "GOVERNOR_PG_ADMIN_DSN"
 ENV_SALT = "GOVERNOR_PII_SALT"
@@ -122,7 +123,7 @@ def apply(source: str, policy: ServingPolicy, *, dsn: str, salt: str) -> dict:
         raise ServingError(f"{ENV_SALT} is empty")
     if source.startswith(SERVING_PREFIX) or source == SALT_SCHEMA:
         raise ServingError(f"source schema {source!r} cannot be a serving or private schema")
-    with psycopg.connect(dsn, autocommit=False) as connection:
+    with psycopg.connect(with_timeout(dsn), autocommit=False) as connection:
         tables = _source_columns(connection, source)
         if not tables:
             raise ServingError(f"source schema {source!r} has no tables")

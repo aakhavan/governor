@@ -34,7 +34,7 @@ from typing import Any, Callable, Iterable
 from governor.build import events, graph
 from governor.build import publish as build_publish
 from governor.integrations.slack import blocks
-from governor.integrations.slack.config import SlackConfig, ensure_notifier_registered
+from governor.integrations.slack.config import SlackConfig, ensure_notifier_registered, workspace
 from governor.integrations.slack.notifier import Notifier, known_threads, thread_values
 
 log = logging.getLogger(__name__)
@@ -188,7 +188,9 @@ class GovernorSlack:
         try:
             cmd = parse_command(text, self.config.targets, self.threads())
         except UsageError as exc:
-            respond(text=blocks.usage(self.config.targets, str(exc)), response_type="ephemeral")
+            knowledge, database = workspace()
+            respond(text=blocks.usage(self.config.targets, str(exc), (knowledge.name, database)),
+                    response_type="ephemeral")
             return
         if cmd.action == "status":
             respond(text=blocks.status_list(recent_threads()), response_type="ephemeral")

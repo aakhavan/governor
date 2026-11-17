@@ -444,9 +444,13 @@ def ask_error(reason: Any) -> str:
     return ASK_ERROR.format(reason=safe_text(reason, 200) or "unknown error")
 
 
-def usage(targets: Iterable[str], error: str | None = None) -> str:
+def usage(targets: Iterable[str], error: str | None = None, workspace: tuple[str, str] | None = None) -> str:
+    """The usage text; ``workspace`` (knowledge folder name, ``host:port/db``) adds the footer line."""
     names = ", ".join(f"`{t}`" for t in sorted(targets)) or "none configured"
-    return (f"{error}\n" if error else "") + USAGE.format(targets=names)
+    text = (f"{error}\n" if error else "") + USAGE.format(targets=names)
+    if workspace:
+        text += f"\nworkspace: knowledge {workspace[0]} · database {workspace[1]}"
+    return text
 
 
 __all__ = ["ASK_ACK", "ASK_ERROR", "ASK_REFUSAL", "ask_answer", "ask_context", "ask_error", "slack_escape",

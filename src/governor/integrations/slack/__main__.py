@@ -9,7 +9,7 @@ import logging
 import sys
 
 from governor.integrations.slack.app import create_app
-from governor.integrations.slack.config import ConfigError, SlackConfig
+from governor.integrations.slack.config import ConfigError, SlackConfig, start_line
 
 
 def main() -> int:
@@ -28,8 +28,7 @@ def main() -> int:
     from slack_bolt.adapter.socket_mode import SocketModeHandler
 
     app = create_app(config)
-    print(f"governor slack: Socket Mode, channel #{config.channel}, targets {sorted(config.targets) or 'none'}",
-          file=sys.stderr)
+    print(start_line(config), file=sys.stderr)
     SocketModeHandler(app, config.app_token).start()
     return 0
 

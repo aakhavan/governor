@@ -38,6 +38,7 @@ from governor.build.dbt import DbtResult, run_dbt
 from governor.build.llm import BuildLLM, LLMOutputError
 from governor.build.models import Proposal, SilverModel
 from governor.build.redact import redact_error
+from governor.core.pgconn import with_timeout
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
 SCHEMA = "dev_governor"
@@ -381,7 +382,7 @@ def built_columns(names: list[str], dsn: str | None = None) -> dict[str, list[st
 
     from governor.build.workspace import build_dsn
 
-    with psycopg.connect(dsn or build_dsn()) as conn:
+    with psycopg.connect(with_timeout(dsn or build_dsn())) as conn:
         rows = conn.execute(
             "select table_name, column_name from information_schema.columns "
             "where table_schema = %s and table_name = any(%s) order by table_name, ordinal_position",

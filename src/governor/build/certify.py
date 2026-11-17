@@ -37,6 +37,7 @@ from governor.build.events import emit
 from governor.build.workspace import deploy_env
 from governor.core import paths
 from governor.core.catalogue import load_kpis
+from governor.core.pgconn import with_timeout
 
 SCHEMA = "analytics"
 DEFAULT_KPIS = paths.KNOWLEDGE / "kpis.yaml"
@@ -163,7 +164,7 @@ def _salt(conn: psycopg.Connection) -> tuple[str, str]:
 def prepare_registry(dsn: str) -> str:
     """Create both registry tables when missing (so the serving views cover them) and resolve the salt.
     Returns where the salt came from; the salt itself goes to this process's environment only."""
-    with psycopg.connect(dsn, autocommit=False) as conn:
+    with psycopg.connect(with_timeout(dsn), autocommit=False) as conn:
         _ensure(conn, "governor_certified", CERTIFIED_DDL)
         _ensure(conn, "governor_gaps", GAPS_DDL)
         salt, salt_from = _salt(conn)
@@ -174,7 +175,7 @@ def prepare_registry(dsn: str) -> str:
 
 def write_registry(target: Path, build: dict, *, by: str, commit: str, dsn: str) -> tuple[list[dict], list[dict]]:
     """Replace the rows of both registry tables in one transaction (after the serving views exist)."""
-    with psycopg.connect(dsn, autocommit=False) as conn:
+    with psycopg.connect(with_timeout(dsn), autocommit=False) as conn:
         certified, gaps = registry_rows(target, build, conn, by=by, commit=commit,
                                         certified_at=dt.datetime.now(dt.timezone.utc))
         _fill(conn, "governor_certified", certified)

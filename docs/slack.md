@@ -28,6 +28,8 @@ The Slack app moves the human design gate from the terminal to Slack. It is a th
 4. **Invite the bot.** In the channel (default `#governor`) run `/invite @governor`.
 5. **Start the app.** Run `uv run python -m governor.integrations.slack`. It registers its notifier for the builds it starts. Terminal builds report to Slack when `GOVERNOR_BUILD_NOTIFIERS` names the notifier, as above.
 
+Before connecting, the app prints one start-up line: the channel, the targets, the knowledge folder it serves and the build database as `host:port/db` (never a user name, password or full DSN). The usage text in Slack ends with the same workspace, so you can check which knowledge folder and database the bot is on. Every database connection gives up after `GOVERNOR_PG_CONNECT_TIMEOUT` seconds (default 10), and the dbt profile uses the same setting. A database that is down or unreachable fails the build with an error instead of hanging at profiling.
+
 ## Use
 
 | command | who | what |

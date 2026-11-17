@@ -28,7 +28,7 @@ DEFAULT_POLICY = KNOWLEDGE / "shop" / "policy.yaml"
 def raw_tables() -> dict[str, list[str]]:
     """Tables and columns of schema ``raw``, read as the build login."""
     tables: dict[str, list[str]] = {}
-    with psycopg.connect(build_dsn()) as conn:
+    with psycopg.connect(build_dsn()) as conn:  # build_dsn() carries connect_timeout
         rows = conn.execute(
             "select c.table_name, c.column_name from information_schema.columns c "
             "join information_schema.tables t using (table_schema, table_name) "

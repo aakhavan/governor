@@ -8,6 +8,8 @@ from pathlib import Path
 import yaml
 from psycopg.conninfo import make_conninfo
 
+from governor.core.pgconn import with_timeout
+
 DIRS = ("models/staging", "models/intermediate", "models/marts", "tests", "governor", "profiles")
 
 # Every connection setting is an env_var(...) call. The password has no default in the file:
@@ -24,6 +26,7 @@ governor:
       user: "{{ env_var('GOVERNOR_BUILD_USER', 'governor_build') }}"
       password: "{{ env_var('GOVERNOR_BUILD_PASSWORD') }}"
       schema: dev_governor
+      connect_timeout: "{{ env_var('GOVERNOR_PG_CONNECT_TIMEOUT', '10') | as_number }}"
       threads: 4
 """
 
@@ -37,6 +40,7 @@ _PROD = """\
       user: "{{ env_var('GOVERNOR_DEPLOY_USER', 'governor_deploy') }}"
       password: "{{ env_var('GOVERNOR_DEPLOY_PASSWORD') }}"
       schema: analytics
+      connect_timeout: "{{ env_var('GOVERNOR_PG_CONNECT_TIMEOUT', '10') | as_number }}"
       threads: 4
 """
 
@@ -122,13 +126,21 @@ def sync_sources(target: Path, profile: dict) -> bool:
 
 def build_dsn() -> str:
     """The build login as a libpq connection string, from env (test-bed password default, laptop only)."""
-    return make_conninfo(
+    return with_timeout(make_conninfo(
         host=os.environ.get("GOVERNOR_PG_HOST") or "localhost",
         port=os.environ.get("GOVERNOR_PG_PORT") or "55432",
         dbname=os.environ.get("GOVERNOR_PG_DB") or "shop",
         user=os.environ.get("GOVERNOR_BUILD_USER") or "governor_build",
         password=os.environ.get("GOVERNOR_BUILD_PASSWORD") or "governor_build_local",
-    )
+    ))
+
+
+def build_address() -> str:
+    """The build database as ``host:port/db`` for messages: never a user, password or full DSN."""
+    host = os.environ.get("GOVERNOR_PG_HOST") or "localhost"
+    port = os.environ.get("GOVERNOR_PG_PORT") or "55432"
+    db = os.environ.get("GOVERNOR_PG_DB") or "shop"
+    return f"{host}:{port}/{db}"
 
 
 def deploy_env() -> dict[str, str]:

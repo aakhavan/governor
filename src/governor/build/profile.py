@@ -16,6 +16,7 @@ import yaml
 from psycopg import sql
 
 from governor.build.models import ColumnProfile, Profile, Relationship, TableProfile
+from governor.core.pgconn import with_timeout
 
 # One set of patterns for the server (Postgres ARE) and the offline check (Python re). No backslashes,
 # so the literals need no escaping. Leading zeros make a value a code (zip prefixes), not a number.
@@ -204,7 +205,7 @@ def profile_schema(dsn: str, schema: str = "raw", policy: dict[str, str] | None 
     """Profile every base table of ``schema`` (section 5 structure)."""
     policy = policy or {}
     tables: list[TableProfile] = []
-    with psycopg.connect(dsn, autocommit=True) as conn:
+    with psycopg.connect(with_timeout(dsn), autocommit=True) as conn:
         conn.read_only = True
         conn.execute("set work_mem = '128MB'")  # distinct counts hash in memory; this session only
         layout = _tables(conn, schema)

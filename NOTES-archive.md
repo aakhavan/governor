@@ -1482,3 +1482,28 @@ For Amir: mapping.json records olist_orders_dataset.order_id only as ord_hdr.ord
 ## Additions for E4
 E4 must leave src/governor/build/graph.py, src/governor/build/design.py, and evaluation/ unchanged. E3 added testbed/perturb.py, testbed/load_csv_dir.py, build_eval --policy, and the Perturbed holdout section in testbed/README.md. knowledge/shop/policy.yaml is still the original column names. A perturbed policy is an output of perturb.py: same tags (customer_id, location, free_text), keys renamed (cust_ref, cust_uid, cust_zip5, cust_town, cust_uf, geo_y, geo_x, slr_zip5, slr_town, rvw_ttl, rvw_txt). The profiler marks PII when the column name is a policy key, on every table that has that name. Orders are split into ord_hdr and ord_dlv; mapping.json points order_id only at ord_hdr.ord_ref, and ord_dlv also carries it. etl_audit_log (20 fixed rows) is not in the mapping. load_csv_dir touches only schema raw; --replace is required when raw is not empty. build_eval without --policy leaves hooks unset, and Hooks.policy stays the shop policy. The holdout run has not been executed.
 
+## Relocks
+- 17 Nov 2026 16:45: Batch 3: maintain mode and tenants (docs/capstone/batch3.md, ADR 0004) (changed: plan-batch3.yaml, plan.yaml, plan/accept/accept_a1.py, plan/accept/accept_f1.py, plan/accept/accept_f2.py, plan/accept/accept_f3.py, plan/accept/accept_f4.py, plan/accept/accept_f5.py, plan/accept/accept_f6.py, plan/prompts/C1.md, plan/prompts/C2.md, plan/prompts/C3.md, plan/prompts/C4.md, plan/prompts/C5.md, plan/prompts/C6.md, plan/prompts/D1.md, plan/prompts/D10.md, plan/prompts/D11.md, plan/prompts/D12.md, plan/prompts/D14.md, plan/prompts/D2.md, plan/prompts/D3.md, plan/prompts/D4.md, plan/prompts/D5.md, plan/prompts/D6.md, plan/prompts/D7.md, plan/prompts/D8a.md, plan/prompts/D8b.md, plan/prompts/D9.md, plan/prompts/D9b.md, plan/prompts/D9c.md, plan/prompts/E1.md, plan/prompts/E2.md, plan/prompts/E3.md, plan/prompts/E4.md, plan/prompts/F1.md, plan/prompts/F2.md, plan/prompts/F3.md, plan/prompts/F4.md, plan/prompts/F5.md, plan/prompts/F6.md, plan/prompts/G1.md, plan/prompts/G10a.md, plan/prompts/G10b.md, plan/prompts/G2a.md, plan/prompts/G2b.md, plan/prompts/G3.md, plan/prompts/G4.md, plan/prompts/G5a.md, plan/prompts/G5b.md, plan/prompts/G6a.md, plan/prompts/G6b.md, plan/prompts/G7.md, plan/prompts/G8.md, plan/prompts/G9.md)
+- 17 Nov 2026 16:46: spec fix (via supervise, by human) (changed: nothing)
+
+## F1 result
+*Safety rails (database connection timeout, active workspace in the bot), 17 Nov 2026 16:58.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F1`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| pgconn helper exists | yes | missing in src/governor/core/pgconn.py |
+| build_dsn uses the timeout | yes | missing in src/governor/build/workspace.py |
+| dbt profile template has connect_timeout | yes | missing in src/governor/build/workspace.py |
+| src/governor/eval untouched | yes |  |
+| pytest tests/core | yes | 100 passed, 12 skipped in 12.56s |
+| pytest tests/build | yes | 175 passed, 12 skipped in 58.91s |
+| pytest tests/integrations | yes | 38 passed in 9.39s |
+| required tests present | yes | 6 found |
+
+Review: F1 does what section 27 asks. with_timeout is applied to build_dsn and every psycopg.connect in build/ and core/serving.py, keeps an existing connect_timeout for URI and key-value DSNs, and the dbt template sets connect_timeout for dev and prod. src/governor/eval has no diff. The start line and usage footer show knowledge folder and host:port/db only; tests assert a fake password, user name and 'user=' never appear. The unreachable test is offline and finishes in about 2 s. Six required tests present, 313 tests pass.
+
+For Amir: STATUS.md in the working tree still says F1 is stopped on lock_mismatch; that is factory state from before the run, not something the implementer changed. Optional hardening: give test_unreachable_database_fails_within_timeout a lower elapsed bound or match psycopg.OperationalError so a future regression fails fast instead of hanging.
+
