@@ -4,6 +4,8 @@
 
 ![The model proposes. Code checks. People decide.](docs/showcase/00-cover.png)
 
+**Goal.** Small data teams spend much of their time building the modelled layer of their warehouse and answering the same business questions again and again; agents could take both jobs, but a one-shot model ignores the team's rules, leaks personal data and invents numbers. governor lets an agent do the work while keeping it governed: the model only proposes a design and picks KPIs, code validates everything against a written blueprint and KPI catalogue, people approve at two gates, and answers come only from certified KPIs, computed by SQL that code writes.
+
 governor profiles raw tables, proposes a medallion design against a written layer blueprint, writes and tests the dbt project, declines the KPIs the data cannot support (naming the missing data), and opens a pull request. After a person merges it and certifies the KPIs, questions from Slack, MCP or the API are answered by running the certified SQL: the model picks the KPI and the period, code writes the SQL and fills in every number.
 
 Turing College AI Engineering capstone, November 2026. The 7-step walkthrough is in [`docs/showcase/`](docs/showcase/).
@@ -73,6 +75,19 @@ Design decisions, with the options considered, are in [`docs/adr/`](docs/adr/):
 3. **Writes go through a branch and two gates** ([ADR 0003](docs/adr/0003-build-writes-through-branch-and-two-gates.md)). Separate logins: `governor_build` creates only in `dev_governor`, `governor_deploy` only in `analytics`, `governor_ask` is read-only with `SET ROLE` taken from the token, never from the request.
 4. **Build mode rebuilds from raw on every run.** A rerun is safe, because nothing reaches a stakeholder without a design approval, a merged pull request and certification, but it is not incremental. Maintain mode (compare the new profile with the last one, skip the model call when nothing changed, open a pull request with only the diff) is the next module.
 
+### How it applies the course
+
+| Technique | In governor |
+|---|---|
+| Agent orchestration | LangGraph `StateGraph`s where code owns every edge; `interrupt()` for the human gate; SQLite checkpoints, so approval survives a restart |
+| Structured output | every model call returns JSON-schema-validated output (Pydantic); no free-text parsing |
+| Prompt engineering | prompts are versioned files; the model sees names, types and counts, never data values; validation findings are fed back for a bounded repair (at most 2) |
+| Model routing | a strong planner model for the design, a small model for writing silver SQL |
+| Memory | short term: graph checkpoints; long term: approved decisions per company, reused by later builds |
+| Tools | Postgres profiling, dbt runner, git and GitHub pull requests, Slack, MCP servers, OpenRouter |
+| Retrieval | governor-ask: hybrid BM25 + dense search with reciprocal rank fusion; the certified path needs none, because answers are exact numbers from certified tables |
+| Evaluation | frozen golden sets, a one-shot baseline, a red-team release gate |
+
 | path | what |
 |---|---|
 | `src/governor/build` | build mode: profile, design and validation, silver, gold, dbt runner, publish, certify |
@@ -82,6 +97,10 @@ Design decisions, with the options considered, are in [`docs/adr/`](docs/adr/):
 | `src/governor/eval` | golden sets, harnesses, reports |
 | `knowledge/` | human-owned standards: KPI catalogue, layer blueprint, approved decisions, PII and access policy |
 | `testbed/` | Postgres compose file, loaders, roles |
+
+## Data
+
+The test bed is the public Olist Brazilian e-commerce dataset (real, anonymised; 9 related tables), loaded unchanged into a `raw` schema as text, so typing and cleaning happen in the silver layer governor builds. Tests use a small synthetic sample with the same tables and the edge cases that matter (duplicate customers, cancelled orders, split payments). Data never enters the repository or a prompt.
 
 ## Results
 
