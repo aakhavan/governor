@@ -5,9 +5,12 @@
 - makes ``<target>`` a git repo if it is not one, and makes a first commit on ``main`` when the repo has none yet
   (the scaffold: ``dbt_project.yml``, ``profiles/profiles.yml``, ``models/sources.yml`` and a ``.gitignore`` with
   ``target/``, ``logs/``, ``dbt_packages/``);
+- with an ``origin`` that has ``main``: fetches it, fast-forwards a local ``main`` that is behind, refuses one that
+  has diverged (batch3 section 30.1);
 - creates branch ``governor/build-<id8>`` from ``main``, writes ``governor/pr.md`` and commits the generated
   ``models/``, ``tests/`` and ``governor/`` files as ``governor <governor@localhost>`` with the message
-  ``governor: build <id8> (<n> KPIs, <m> gaps)``;
+  ``governor: build <id8> (<n> KPIs, <m> gaps)``; when the staged files match ``main`` there is no commit: the branch
+  is deleted, the target goes back to ``main`` and the result is ``nothing_to_publish`` (batch3 section 30.2);
 - pushes the branch (and ``main`` when the remote has none) when ``origin`` exists; with ``open_pr`` runs
   ``gh pr create``.
 
@@ -121,6 +124,55 @@ def ensure_on_main(target: str | Path) -> str | None:
                            f"them and switch to '{MAIN}' before a new build")
     git(target, "checkout", MAIN)
     return branch
+
+
+DIVERGED = "local main has diverged from origin/main; pull and resolve, then publish again"
+ORIGIN_MAIN = f"refs/remotes/origin/{MAIN}"
+
+
+def _generated(path: str) -> bool:
+    return any(path == d or path.startswith(d + "/") for d in GENERATED)
+
+
+def sync_main(target: Path) -> str | None:
+    """Before branching (batch3 section 30.1), when the target has an ``origin`` with a ``main``: fetch it; a local
+    ``main`` that is only behind is fast-forwarded; one with commits of its own as well is refused with
+    :class:`PublishError` (``diverged``) and nothing changes. Returns ``"fast_forwarded"`` or ``None``.
+
+    The fast-forward moves the ``main`` ref without touching the generated files in the working tree (they are the
+    new build, and the branch made next stages them over the new ``main``). When ``main`` is checked out, the index
+    follows the new ``main`` and the files outside the generated folders that the fast-forward changed are updated
+    when the working tree still had them as on the old ``main``."""
+    if not _has_remote(target):
+        return None
+    if not git(target, "ls-remote", "--heads", "origin", MAIN, timeout=120).stdout.strip():
+        return None  # an empty origin: publish pushes main itself
+    git(target, "fetch", "origin", f"+refs/heads/{MAIN}:{ORIGIN_MAIN}", timeout=600)
+    counts = git(target, "rev-list", "--left-right", "--count", f"{MAIN}...{ORIGIN_MAIN}").stdout.split()
+    ahead, behind = int(counts[0]), int(counts[1])
+    if behind == 0:
+        return None
+    if ahead > 0:
+        raise PublishError(DIVERGED)
+    old = git(target, "rev-parse", MAIN).stdout.strip()
+    new = git(target, "rev-parse", ORIGIN_MAIN).stdout.strip()
+    on_main = git(target, "symbolic-ref", "--quiet", "HEAD", check=False).stdout.strip() == f"refs/heads/{MAIN}"
+    if not on_main:
+        git(target, "update-ref", f"refs/heads/{MAIN}", new, old)
+        return "fast_forwarded"
+    changed = [p for p in git(target, "diff", "--name-only", "-z", old, new).stdout.split("\0")
+               if p and not _generated(p)]
+    clean = [p for p in changed if not git(target, "status", "--porcelain", "--", p).stdout.strip()]
+    in_new = set(git(target, "ls-tree", "-r", "-z", "--name-only", new, "--", *clean).stdout.split("\0")) \
+        if clean else set()
+    git(target, "update-ref", f"refs/heads/{MAIN}", new, old)
+    git(target, "reset", "-q")  # index = the new main; the working tree is left as it is
+    for p in clean:
+        if p in in_new:
+            git(target, "checkout", "--", p)
+        elif (target / p).is_file():
+            (target / p).unlink()
+    return "fast_forwarded"
 
 
 # --------------------------------------------------------------------------- pr.md
@@ -244,12 +296,17 @@ def publish(target: str | Path, *, open_pr: bool = False) -> dict:
     n_kpis, n_gaps = len(build.get("kpis_built") or []), len(build.get("gaps") or [])
 
     scaffold = ensure_repo(target)
+    sync_main(target)
     git(target, "checkout", "-B", branch, MAIN)
     pr = target / "governor" / "pr.md"
     pr.write_bytes(render_pr(target, build, branch).encode("utf-8"))
     git(target, "add", "-A", "--", *[d for d in GENERATED if (target / d).exists()])
+    if git(target, "diff", "--cached", "--quiet", MAIN, "--", check=False).returncode == 0:
+        git(target, "checkout", MAIN)
+        git(target, "branch", "-D", branch)
+        return {"status": "nothing_to_publish", "reason": "the build matches main"}
     message = f"governor: build {id8} ({n_kpis} KPIs, {n_gaps} gaps)"
-    git(target, "commit", "--allow-empty", "-m", message)
+    git(target, "commit", "-m", message)
     commit = git(target, "rev-parse", "HEAD").stdout.strip()
     published_path(target).write_text(json.dumps({"commit": commit, "branch": branch, "thread_id": thread_id}),
                                       encoding="utf-8")
@@ -275,4 +332,5 @@ def publish(target: str | Path, *, open_pr: bool = False) -> dict:
     return out
 
 
-__all__ = ["PublishError", "ensure_on_main", "kpi_meta", "load_build", "publish", "read_published", "render_pr"]
+__all__ = ["PublishError", "ensure_on_main", "kpi_meta", "load_build", "publish", "read_published", "render_pr",
+           "sync_main"]

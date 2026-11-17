@@ -1577,3 +1577,28 @@ Profiles API: GET /profiles (newest first by mtime, max 100) and GET /profiles/{
 ## Additions for F2
 governor.core.pgconn.with_timeout(dsn) and connect_timeout_s() exist; any new psycopg.connect under build/ or core/ must wrap its DSN with with_timeout (eval/ stays raw by contract). workspace.build_address() returns host:port/db for messages; slack.config.workspace() returns (paths.KNOWLEDGE, address) and start_line(config) builds the start-up line; blocks.usage() takes an optional (knowledge_name, address) tuple for the footer. The dbt profile template only affects newly written profiles.yml files; existing targets keep theirs. Pytest's default norecursedirs skips tests/build/ when collecting from 'tests', so required tests must live in tests/core/ or tests/integrations/. The unreachable-database test has no hard timeout guard, so a regression of with_timeout in profile_schema would hang the suite instead of failing; consider adding a lower-bound elapsed check or OperationalError match if that test is touched again.
 
+## F2 result
+*Profile fingerprint and drift, 17 Nov 2026 17:23.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F2`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| drift module exists | yes | missing in src/governor/build/drift.py |
+| diff exists | yes | missing in src/governor/build/drift.py |
+| fingerprint written at approval | yes | missing in src/governor/build/graph.py |
+| fingerprint published | yes | missing in src/governor/build/publish.py |
+| pytest tests/build | yes | 181 passed, 12 skipped in 58.46s |
+| required tests present | yes | 6 found |
+
+Review: F2 does what section 28 asks. The fingerprint holds only names, inferred types, PII flags, candidate keys, version and schema name; tables, columns and keys are sorted so the sha256 over canonical JSON is order-independent. diff reports names and type pairs only. The record node writes governor/profile_fingerprint.json with thread_id, approved_on, hash and fingerprint next to approved.yaml, and publish.GENERATED names it. The graph changes nowhere else. Tests inject distinctive values and sample cells and prove none leak.
+
+For Amir: Delete tests/core/test_build_drift.py and remove it from F2's allowed_paths in plan-batch3.yaml; it re-runs the six drift tests under a second module name whenever pytest is invoked on tests, and the relocked acceptance scripts no longer need it. The extra 'governor/profile_fingerprint.json' entry in publish.GENERATED is redundant with 'governor' but harmless.
+
+## Additions for F3
+F3 can rely on: graph.target_fingerprint(target) gives <target>/governor/profile_fingerprint.json; its JSON has keys thread_id, approved_on (ISO date), hash, fingerprint. drift.fingerprint accepts a Profile or the section 5 dict (it validates with Profile, extra='forbid', so pass exactly the profiler's dict). drift.fingerprint_hash(fp) is sha256 of json.dumps(fp, sort_keys=True, separators=(',',':')). drift.diff(old_fp, new_fp) returns Drift with .empty and .summary_lines() (sorted plain lines, names and type pairs only). The compare node should read the file through target_fingerprint and compare doc['hash'] with fingerprint_hash(fingerprint(state['profile'])). Note pytest's default norecursedirs skips tests/build when invoked on 'tests'; acceptance scripts now collect tests/build explicitly, so no re-export shim is needed. tests/core/test_build_drift.py is a workaround slated for deletion; do not depend on it.
+
+## F3 notes (implementer)
+Graph: profile -> compare -> (END when up_to_date | propose). compare returns {} without a readable fingerprint (29.3). Same hash plus build.json status built with the fingerprint's thread_id plus design.json, without force: writes drift.md, emits up_to_date (thread_id, last_build), status graph.UP_TO_DATE. Same hash otherwise: a full design from nothing (no drift note). Different hash: state drift = summary_lines, note = graph.drift_note(lines), proposal = design.json, so propose passes it as previous; repairs stay 0. _summary adds last_build/drift_report or drift. events.KINDS gained up_to_date. Slack: Command.force; build.start gets force=True only when forced; blocks.UP_TO_DATE is in TERMINAL, so supersede/interrupt skip it. Tests: tests/build/test_maintain.py, two at the end of tests/integrations/test_slack.py. Local pytest in a shell with GOVERNOR_ROOT set to another checkout fails the gate tests (wrong kpis.yaml); the acceptance script clears it.
+

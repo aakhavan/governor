@@ -396,7 +396,9 @@ class GovernorSlack:
             return
         target = Path(values["target"])
         out = self.publisher(target, open_pr=_has_origin(target))
-        if out.get("status") != "published":
+        if out.get("status") == "nothing_to_publish":  # batch3 section 30.3: a plain message, not an error
+            self._say(tid, f"Nothing to publish: {blocks.safe_text(out.get('reason'), 300)}.")
+        elif out.get("status") != "published":
             self._say(tid, f"Not published: {blocks.safe_text(out.get('reason'), 300)}")
         # published: the event carries pr_url and the notifier posts the link
 

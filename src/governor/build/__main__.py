@@ -130,6 +130,9 @@ def _publish(args: argparse.Namespace) -> int:
         out = publish(args.target, open_pr=args.open_pr)
     except Exception as e:  # noqa: BLE001
         return _fail("publish failed", e)
+    if out.get("status") == "nothing_to_publish":  # batch3 section 30.3: a plain message, not an error
+        print(f"Nothing to publish: {out.get('reason')}.")
+        return 0
     print(json.dumps(out))
     return 0 if out.get("status") == "published" else 1
 

@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-F3 reviewed and passed. The build graph has a compare node between profile and propose: a target whose profile fingerprint hash matches, whose build.json is built under the same thread, and whose design.json exists ends as up_to_date with drift.md, an up_to_date event and no model or dbt call; force skips only that check; a changed hash routes to propose with the last approved design as previous and a names-only drift note, the report gets a drift section, and the first drift proposal is not a repair; no fingerprint means unchanged behaviour. CLI has run --force, Slack accepts run <target> force strictly and renders up_to_date as a terminal header without buttons. 187 build tests and 40 integration tests pass; the eight required tests exist in tests/build/test_maintain.py and tests/integrations/test_slack.py. Next: F4 publish against stale main.
+F4 is implemented and accepted on branch factory/F4 (uncommitted). publish.py gained sync_main (fetch, fast-forward a behind-only main, refuse a diverged one with the exact one-line message, before any branch is created), a staged-diff check that returns nothing_to_publish without a commit and with the branch deleted, and no --allow-empty. __main__.py and the Slack app surface nothing_to_publish as a plain message. tests/build/test_publish.py has the four section-30 tests using a local bare origin and a clone under tmp_path, all offline. Acceptance: tests/build 191 passed 12 skipped, tests/integrations 40 passed, capstone ground truth unchanged.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,31 +20,6 @@ F3 reviewed and passed. The build graph has a compare node between profile and p
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## F2 result
-*Profile fingerprint and drift, 17 Nov 2026 17:23.*
-
-Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F2`.
-
-| check | ok | detail |
-|---|---|---|
-| capstone ground truth unchanged | yes | capstone ground truth unchanged |
-| drift module exists | yes | missing in src/governor/build/drift.py |
-| diff exists | yes | missing in src/governor/build/drift.py |
-| fingerprint written at approval | yes | missing in src/governor/build/graph.py |
-| fingerprint published | yes | missing in src/governor/build/publish.py |
-| pytest tests/build | yes | 181 passed, 12 skipped in 58.46s |
-| required tests present | yes | 6 found |
-
-Review: F2 does what section 28 asks. The fingerprint holds only names, inferred types, PII flags, candidate keys, version and schema name; tables, columns and keys are sorted so the sha256 over canonical JSON is order-independent. diff reports names and type pairs only. The record node writes governor/profile_fingerprint.json with thread_id, approved_on, hash and fingerprint next to approved.yaml, and publish.GENERATED names it. The graph changes nowhere else. Tests inject distinctive values and sample cells and prove none leak.
-
-For Amir: Delete tests/core/test_build_drift.py and remove it from F2's allowed_paths in plan-batch3.yaml; it re-runs the six drift tests under a second module name whenever pytest is invoked on tests, and the relocked acceptance scripts no longer need it. The extra 'governor/profile_fingerprint.json' entry in publish.GENERATED is redundant with 'governor' but harmless.
-
-## Additions for F3
-F3 can rely on: graph.target_fingerprint(target) gives <target>/governor/profile_fingerprint.json; its JSON has keys thread_id, approved_on (ISO date), hash, fingerprint. drift.fingerprint accepts a Profile or the section 5 dict (it validates with Profile, extra='forbid', so pass exactly the profiler's dict). drift.fingerprint_hash(fp) is sha256 of json.dumps(fp, sort_keys=True, separators=(',',':')). drift.diff(old_fp, new_fp) returns Drift with .empty and .summary_lines() (sorted plain lines, names and type pairs only). The compare node should read the file through target_fingerprint and compare doc['hash'] with fingerprint_hash(fingerprint(state['profile'])). Note pytest's default norecursedirs skips tests/build when invoked on 'tests'; acceptance scripts now collect tests/build explicitly, so no re-export shim is needed. tests/core/test_build_drift.py is a workaround slated for deletion; do not depend on it.
-
-## F3 notes (implementer)
-Graph: profile -> compare -> (END when up_to_date | propose). compare returns {} without a readable fingerprint (29.3). Same hash plus build.json status built with the fingerprint's thread_id plus design.json, without force: writes drift.md, emits up_to_date (thread_id, last_build), status graph.UP_TO_DATE. Same hash otherwise: a full design from nothing (no drift note). Different hash: state drift = summary_lines, note = graph.drift_note(lines), proposal = design.json, so propose passes it as previous; repairs stay 0. _summary adds last_build/drift_report or drift. events.KINDS gained up_to_date. Slack: Command.force; build.start gets force=True only when forced; blocks.UP_TO_DATE is in TERMINAL, so supersede/interrupt skip it. Tests: tests/build/test_maintain.py, two at the end of tests/integrations/test_slack.py. Local pytest in a shell with GOVERNOR_ROOT set to another checkout fails the gate tests (wrong kpis.yaml); the acceptance script clears it.
 
 ## F3 result
 *Up-to-date runs and drift-aware design, 17 Nov 2026 17:56.*
@@ -67,3 +42,25 @@ For Amir: Clean step. Two cosmetic items only: the up_to_date Slack headline for
 
 ## Additions for F4
 graph.start now takes force=False and BuildState has force, drift and last_build keys; status UP_TO_DATE ends the graph after compare, before propose, so F5's tenant wiring must keep the profile and compare path tenant-aware (the fingerprint and build.json are read from the target, which is per tenant already). The drift note is in state['note'] and persists through repairs; a rejection replaces it. events.KINDS gained up_to_date. Slack: Command.force, GovernorSlack._run(target, thread_id, force=False) passes force only when True so plain calls stay byte-identical; blocks.UP_TO_DATE is in TERMINAL. Cosmetic leftovers: the up_to_date headline uses a newline before the build label unlike other states, and drift.md is not removed when a later run of an unchanged schema does a full design.
+
+## F4 result
+*Publish against a stale main, nothing to publish, 17 Nov 2026 18:10.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F4`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| no empty commits | yes | missing in src/governor/build/publish.py |
+| diverged main refused | yes | missing in src/governor/build/publish.py |
+| --allow-empty removed | yes | still in src/governor/build/publish.py |
+| pytest tests/build | yes | 191 passed, 12 skipped in 84.11s (0:01:24) |
+| pytest tests/integrations | yes | 40 passed in 12.75s |
+| required tests present | yes | 4 found |
+
+Review: F4 does what section 30 asks. sync_main fetches origin/main before any branch exists, fast-forwards only a main that is behind with no own commits (guarded update-ref), and raises the exact DIVERGED line otherwise with main, origin/main and the working tree untouched. An unchanged build makes no commit, returns to main, deletes the branch and emits no event; --allow-empty is gone. Targets without origin run no sync or push. The four tests use a local bare origin and a clone under tmp_path only; CLI and Slack show a plain message.
+
+For Amir: Two cosmetic items for later: plan/accept/_common.check prints the failure detail string even when ok is true, which makes the acceptance JSON read oddly; and sync_main runs one 'git status' per changed upstream file, so a very large merged PR will be slow but correct. The reviewer could not rerun pytest (command not permitted) and relied on the acceptance output.
+
+## Additions for F5
+publish() now runs sync_main(target) before 'checkout -B'. With an origin that has main it does ls-remote + fetch (network) up front, so a stub publisher or a monkeypatched pub.git is the way to keep later tests offline (see test_publish_without_remote_unchanged for the call-log pattern). publish() can return {'status': 'nothing_to_publish', 'reason': 'the build matches main'}: callers must treat it as a non-error (CLI prints 'Nothing to publish: ...' and exits 0; Slack _say's the same). No 'published' event and no .git/governor_published.json write happen in that case, so read_published(target) may still return the previous publish. sync_main is exported in __all__ and returns 'fast_forwarded' or None. Helpers: _generated(path) and ORIGIN_MAIN / DIVERGED constants in publish.py. The status --porcelain loop is per file; fine for now, batch it if a later step touches large upstream merges.
