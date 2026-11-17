@@ -37,7 +37,7 @@ steps:
     tier: design
     prompt: plan/prompts/F3.md
     accept: plan/accept/accept_f3.py
-    allowed_paths: [src/governor/build/graph.py, src/governor/build/design.py, src/governor/build/drift.py, src/governor/build/__main__.py, src/governor/build/prompts/propose.md, src/governor/integrations/slack/, tests/build/, tests/integrations/, tests/fixtures/build/, docs/slack.md]
+    allowed_paths: [src/governor/build/events.py, src/governor/build/graph.py, src/governor/build/design.py, src/governor/build/drift.py, src/governor/build/__main__.py, src/governor/build/prompts/propose.md, src/governor/integrations/slack/, tests/build/, tests/integrations/, tests/fixtures/build/, docs/slack.md]
     human_gate: false
     review_focus: "an up-to-date run makes zero model calls and touches no dbt model or file under models/; all three conditions are required (hash, built build.json with the same thread, design.json); force skips only that check; a drift run seeds previous with the last approved design and the note lists names only; targets without a fingerprint behave exactly as before; Slack parses force strictly and shows up_to_date as a terminal state without buttons"
   - id: F4
@@ -53,7 +53,7 @@ steps:
     tier: design
     prompt: plan/prompts/F5.md
     accept: plan/accept/accept_f5.py
-    allowed_paths: [src/governor/core/tenancy.py, src/governor/core/pgconn.py, src/governor/build/graph.py, src/governor/build/__main__.py, src/governor/build/certify.py, src/governor/build/silver.py, src/governor/build/gold.py, src/governor/build/workspace.py, src/governor/build/publish.py, tests/core/, tests/build/, tests/fixtures/]
+    allowed_paths: [src/governor/core/tenancy.py, src/governor/core/pgconn.py, src/governor/build/profile.py, src/governor/build/dbt.py, src/governor/build/graph.py, src/governor/build/__main__.py, src/governor/build/certify.py, src/governor/build/silver.py, src/governor/build/gold.py, src/governor/build/workspace.py, src/governor/build/publish.py, tests/core/, tests/build/, tests/fixtures/]
     human_gate: false
     review_focus: "a tenant run reads only its own knowledge, writes only its own state and target and connects only to its own database (the isolation tests prove each); no tenant means identical behaviour; the registry refuses shared roots, targets or databases; certify refuses an admin DSN for another tenant's database; no module-level state is mutated per tenant"
   - id: F6

@@ -1,6 +1,7 @@
 """D9 Slack app (batch2c section 17), offline: a fake Slack client, the fake build LLM, the sample design."""
 import json
 import uuid
+from datetime import date
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
@@ -260,3 +261,48 @@ def test_no_data_values_in_slack_payloads(tmp_path, monkeypatch, fake, profile, 
     for value in ("SENTINEL_MIN_7731", "SENTINEL_MAX_8842", "SENTINEL_REASON_5519", "SENTINEL_LITERAL_4410",
                   "SENTINEL_DQ_6627", "SENTINEL_KEY_9921", "123456789", "'delivered'", "unavailable", "'canceled'"):
         assert value not in payload, value
+
+
+# ---- batch3 section 29: force and up-to-date runs
+
+def test_slack_run_force_parses(tmp_path, fake):
+    targets, threads = {"olist"}, [TID]
+    plain = parse_command("run olist", targets, threads)
+    assert (plain.action, plain.target, plain.force) == ("run", "olist", False)
+    forced = parse_command("run olist force", targets, threads)
+    assert (forced.action, forced.target, forced.force) == ("run", "olist", True)
+    for bad in ("run olist FORCE", "run olist --force", "run olist force now", "run force", "run olist forced"):
+        with pytest.raises(UsageError):
+            parse_command(bad, targets, threads)
+
+    started, calls = [], []
+    gov = GovernorSlack(_config(tmp_path), fake, runner=lambda fn: started.append(fn), threads=lambda: threads,
+                        llm_factory=lambda spec: object(),
+                        build=SimpleNamespace(start=lambda *a, **k: calls.append(k) or {"status": "up_to_date"}))
+    gov.handle_command(APPROVER, "run olist force", Responder())
+    gov.handle_command(APPROVER, "run olist", Responder())
+    for fn in started:
+        fn()
+    assert [k.get("force") for k in calls] == [True, None]  # a plain run calls start exactly as before
+
+
+def test_slack_up_to_date_message(tmp_path, monkeypatch, fake, profile, good):
+    last = _to_gate(tmp_path, profile, good)
+    target = tmp_path / "target"
+    graph.write_fingerprint(target, profile, date(2026, 11, 17), last)
+    (target / "governor" / "build.json").write_text(json.dumps({"status": "built", "thread_id": last}),
+                                                    encoding="utf-8")
+    _wire(monkeypatch, fake)
+    llm = FakeBuildLLM({})
+    out = graph.start(target, "olist", llm, profile=profile, dbt_runner=_no_dbt)
+    assert out["status"] == graph.UP_TO_DATE and llm.calls == []
+    posts = fake.named("chat_postMessage")
+    assert len(posts) == 1 and "thread_ts" not in posts[0]  # the one message, no thread replies
+    assert fake.named("files_upload_v2") == []
+    final = fake.named("chat_update")[-1]
+    assert final["blocks"][0]["text"]["text"].startswith(
+        f":white_check_mark: up to date: no change since build {last[:8]}")
+    assert not any(b.get("type") == "actions" for b in final["blocks"])  # no buttons
+    rec = notifier.MessageStore().get(out["thread_id"])
+    assert rec["outcome"] == blocks.UP_TO_DATE and not notifier.is_open(rec)
+    assert notifier.Notifier(fake, "governor").supersede("olist", "newer") == []  # terminal: never superseded

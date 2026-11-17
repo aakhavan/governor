@@ -31,7 +31,8 @@ STAGES: tuple[tuple[str, str], ...] = (
 )
 
 USAGE = ("Usage:\n"
-         "• `/governor run <target>`: start a build (targets: {targets})\n"
+         "• `/governor run <target> [force]`: start a build (targets: {targets}); `force` designs again even "
+         "when nothing changed\n"
          "• `/governor status`: recent build threads\n"
          "• `/governor approve <thread>`: approve the design at the gate\n"
          "• `/governor reject <thread> <note>`: send the design back with a note\n"
@@ -96,7 +97,8 @@ def _cost(value: Any) -> str:
 
 
 FAILED, BUILT, PUBLISHED, SUPERSEDED, INTERRUPTED = "failed", "built", "published", "superseded", "interrupted"
-TERMINAL = (FAILED, BUILT, PUBLISHED, SUPERSEDED, INTERRUPTED)
+UP_TO_DATE = "up_to_date"  # batch3.md section 29: nothing changed since the last approved build
+TERMINAL = (FAILED, BUILT, PUBLISHED, SUPERSEDED, INTERRUPTED, UP_TO_DATE)
 _LABELS = dict(STAGES)
 
 
@@ -105,7 +107,7 @@ def _checklist(rec: dict) -> list[str]:
     done = set(rec.get("done") or [])
     outcome = rec.get("outcome")
     failed = rec.get("failed_stage") if outcome == FAILED else None
-    ended = outcome in (FAILED, SUPERSEDED, INTERRUPTED)
+    ended = outcome in (FAILED, SUPERSEDED, INTERRUPTED, UP_TO_DATE)
     lines = []
     seen_failed = False
     for key, label in STAGES:
@@ -139,6 +141,9 @@ def _headline(thread_id: str, rec: dict) -> tuple[str, str]:
     if outcome == SUPERSEDED:
         what = f"superseded by `{short(rec.get('superseded_by'))}`"
         return f":white_circle: {what}: *{who}*", f"{what}: {who}"
+    if outcome == UP_TO_DATE:
+        line = f"up to date: no change since build {short(rec.get('last_build'))}"
+        return f":white_check_mark: {line}\n*{who}*", f"{line}: {who}"
     if outcome == INTERRUPTED:
         return f":white_circle: interrupted (bot restarted): *{who}*", f"interrupted (bot restarted): {who}"
     status = rec.get("status") or "running"
@@ -455,7 +460,7 @@ def usage(targets: Iterable[str], error: str | None = None, workspace: tuple[str
 
 __all__ = ["ASK_ACK", "ASK_ERROR", "ASK_REFUSAL", "ask_answer", "ask_context", "ask_error", "slack_escape",
            "PUBLISH_ACTION","after_publish", "copyable", "built_reply", "certify_command", "decided_line", "publish_actions",
-           "published_link", "BUILT", "FAILED", "INTERRUPTED", "MAPPINGS_OMITTED", "PUBLISHED", "SUPERSEDED", "TERMINAL",
+           "published_link", "BUILT", "FAILED", "INTERRUPTED", "MAPPINGS_OMITTED", "PUBLISHED", "SUPERSEDED", "TERMINAL", "UP_TO_DATE",
            "design_without_mappings", "failing_tests", "first_line", "node_name", "reason_line",
            "run_results_failures", "tests_reason", "APPROVE_ACTION","NOTE_ACTION", "NOTE_BLOCK", "REJECT_ACTION", "REJECT_MODAL", "STAGES", "design_card",
            "escalation", "line", "progress", "published", "reject_modal", "safe_text", "short", "status_list", "usage"]

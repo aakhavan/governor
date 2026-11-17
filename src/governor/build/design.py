@@ -417,8 +417,10 @@ def _cell(value: Any) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ").strip()
 
 
-def render_report(proposal: Proposal | dict | None, findings: list[Finding] | list[dict], thread_id: str) -> str:
-    """The section 7 design report."""
+def render_report(proposal: Proposal | dict | None, findings: list[Finding] | list[dict], thread_id: str,
+                  drift: list[str] | None = None) -> str:
+    """The section 7 design report; ``drift`` (``Drift.summary_lines()`` of a drift run, batch3.md section 29) adds
+    the section ``## Drift since the last approved build``."""
     prop = proposal if isinstance(proposal, Proposal) or proposal is None else Proposal.model_validate(proposal)
     found = [_finding(f) for f in findings]
     models = prop.silver_models if prop else []
@@ -429,6 +431,11 @@ def render_report(proposal: Proposal | dict | None, findings: list[Finding] | li
     lines.append(f"{len(models)} silver model(s), {len(build)} KPI(s) to build, {len(declined)} KPI(s) declined"
                  + (f"; {len(found)} validation finding(s), not approvable." if found else "."))
     lines += ["", f"Thread: `{thread_id}`", ""]
+
+    if drift is not None:
+        lines += ["## Drift since the last approved build", ""]
+        lines += [f"- {d}" for d in drift] or ["No table or column change."]
+        lines.append("")
 
     lines += ["## Silver models", ""]
     if models:

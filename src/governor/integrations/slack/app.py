@@ -59,6 +59,7 @@ class Command:
     thread_id: str | None = None
     note: str | None = None
     question: str | None = None
+    force: bool = False  # ``run <target> force``: skip the up-to-date check (batch3.md section 29)
 
 
 def resolve_thread(token: str, threads: Iterable[str]) -> str | None:
@@ -90,9 +91,9 @@ def parse_command(text: str, targets: Iterable[str], threads: Iterable[str]) -> 
             raise UsageError("`status` takes no arguments.")
         return Command("status")
     if verb == "run":
-        if len(args) != 1 or args[0] not in targets:
-            raise UsageError("`run` needs exactly one known target name.")
-        return Command("run", target=args[0])
+        if not args or args[0] not in targets or (len(args) == 2 and args[1] != "force"):
+            raise UsageError("`run` needs exactly one known target name, optionally followed by `force`.")
+        return Command("run", target=args[0], force=len(args) == 2)
     if verb in ("approve", "publish", "reject"):
         if not args:
             raise UsageError(f"`{verb}` needs a build thread id.")
@@ -213,7 +214,7 @@ class GovernorSlack:
             thread_id = str(uuid.uuid4())
             respond(text=f"Starting build `{blocks.short(thread_id)}` for `{cmd.target}`; progress in #{self.config.channel}.",
                     response_type="ephemeral")
-            self.runner(lambda: self._run(cmd.target, thread_id))
+            self.runner(lambda: self._run(cmd.target, thread_id, force=cmd.force))
             return
         self._start(cmd, user_id, respond)
 
@@ -319,7 +320,7 @@ class GovernorSlack:
         except Exception as exc:  # noqa: BLE001
             log.warning("slack reply failed: %s", type(exc).__name__)
 
-    def _run(self, target: str, thread_id: str) -> None:
+    def _run(self, target: str, thread_id: str, force: bool = False) -> None:
         # Open records of the same project (not ended, not at the gate) will never finish now.
         try:
             self.notifier.supersede(target, thread_id)
@@ -333,7 +334,8 @@ class GovernorSlack:
             ensure_on_main(self.config.targets[target])  # publish branches from main (same as the CLI run)
             init_target(self.config.targets[target], target)
             # The outcome is the progress message (and the design card or escalation reply): no extra reply here.
-            self.build.start(self.config.targets[target], target, self._llm(), thread_id=thread_id)
+            extra = {"force": True} if force else {}  # without force, the call is exactly as before
+            self.build.start(self.config.targets[target], target, self._llm(), thread_id=thread_id, **extra)
         except Exception as exc:  # noqa: BLE001
             self._say(thread_id, f":warning: run failed: {_error_line(exc)}")
 

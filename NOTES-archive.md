@@ -1542,3 +1542,38 @@ Review: cursor-grok: pass | claude-tc-fable: pass
 
 For Amir: The acceptance lines 'the file differs from main' are the failure string stored even when the check passes. ok true means git diff --quiet against main returned 0, so graph.py, design.py, repair.md and propose.md match main. Unquoted values on a kept error line are left as written; section 25 and the threat model both say so, and Postgres quotes the values it reports.
 
+## Relocks
+- 17 Nov 2026 17:53: spec gap: the contract requires emitting event up_to_date, which needs the kind in events.KINDS, so F3 allowed_paths gains src/governor/build/events.py (the only change there is that kind); F5 gains build/profile.py and build/dbt.py for the per-tenant profiler and dbt env (via supervise, by Claude, delegated by Amir via chat 17 Nov) (changed: plan-batch3.yaml)
+
+## A1 result
+*Airflow integration (manual profile DAG, profiles API route, Profiles page), 13 Nov 2026 20:56.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass, `cursor-grok`: pass; 2 fix loop(s); branch `factory/A1`.
+
+| check | ok | detail |
+|---|---|---|
+| apps/streamlit/client.py only gains lines (<= 40) | yes | +8 -0 |
+| src/governor/api/app.py only gains lines (<= 3) | yes | +2 -0 |
+| diff inspected | yes | 30	0	plan/prompts/A1.md | 2	0	src/governor/api/app.py | warning: in the working copy of 'STATUS.md', CRLF will be replac |
+| DAG file exists | yes | C:\Users\amir0\portfolio\governor-airflow\airflow\dags\governor_profile_raw.py |
+| DAG imports allowed modules only | yes |  |
+| dag_id governor_profile_raw | yes |  |
+| manual only | yes |  |
+| no literal password | yes |  |
+| uses Variables for connection values | yes |  |
+| full offline test suite green | yes | 513 passed, 21 skipped in 111.39s (0:01:51) |
+| required tests present | yes | 6 found |
+| governor:local builds from the worktree | yes | #16 unpacking to docker.io/library/governor:local | #16 unpacking to docker.io/library/governor:local 0.6s done | #16 DO |
+| test bed up on 55432 | yes | start ../governor/testbed first |
+| profile runs as a container against the test bed | yes | 9 tables |
+
+Review: claude-tc-fable: pass | cursor-grok: pass
+
+For Amir: Pass. Watch three things when airflow-platform triggers the DAG: (1) the _RenderedDockerOperator subclass turns the Mount into a plain dict at render time, which docker-py accepts but nothing here executes; (2) the volume default governor_governor-data was not confirmed with docker volume ls; (3) an unset governor_build_password Variable renders as the literal string None and fails at Postgres auth, as docs/airflow.md states. I could not re-run pytest in this session (approval unavailable), so the test result is the acceptance's own run.
+
+## Additions for the next plan
+Profiles API: GET /profiles (newest first by mtime, max 100) and GET /profiles/{run_id} (raw bytes, 404 if absent, 422 if run_id fails ^[A-Za-z0-9_.+-]{1,128}$) live in src/governor/api/profiles.py behind make_router(caller_role); they read $GOVERNOR_STATE_DIR/profiles/ at request time (relative to repo root, like paths.STATE). The DAG writes /data/profiles/<run_id with ':'->'_'>.json, so the API's state dir must be the same volume mounted at /data in the compose stack. DockerOperator does not template docker_url or mounts natively; the DAG uses a _RenderedDockerOperator subclass that adds them to template_fields, so Airflow renders the Mount into a plain dict. Variables: governor_data_volume (default governor_governor-data, unverified against docker volume ls), docker_url, governor_pg_host/port/db, governor_build_user, governor_build_password (no default; missing renders as the string 'None'). The airflow-platform step must actually trigger the DAG once to prove the subclass and the volume name. Tests: tests/test_api_profiles.py, tests/test_airflow_dag.py (static AST, Airflow not installed), tests/ui/test_profiles_page.py over the ASGI client. accept_a1 now drops GOVERNOR_PG_DSN/GOVERNOR_PG_ADMIN_DSN before pytest so the live test-bed test skips.
+
+## Additions for F2
+governor.core.pgconn.with_timeout(dsn) and connect_timeout_s() exist; any new psycopg.connect under build/ or core/ must wrap its DSN with with_timeout (eval/ stays raw by contract). workspace.build_address() returns host:port/db for messages; slack.config.workspace() returns (paths.KNOWLEDGE, address) and start_line(config) builds the start-up line; blocks.usage() takes an optional (knowledge_name, address) tuple for the footer. The dbt profile template only affects newly written profiles.yml files; existing targets keep theirs. Pytest's default norecursedirs skips tests/build/ when collecting from 'tests', so required tests must live in tests/core/ or tests/integrations/. The unreachable-database test has no hard timeout guard, so a regression of with_timeout in profile_schema would hang the suite instead of failing; consider adding a lower-bound elapsed check or OperationalError match if that test is touched again.
+

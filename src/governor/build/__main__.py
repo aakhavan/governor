@@ -3,7 +3,8 @@
     python -m governor.build init --target <dir> --project-name <name>
     python -m governor.build profile --schema raw [--policy <file>] [--out <file>]
     python -m governor.build run --target <dir> --project-name <name> [--llm fake:<script.json>|openrouter]
-                                 [--policy <file>] [--profile <profile.json>]
+                                 [--policy <file>] [--profile <profile.json>] [--force]
+                                 (up_to_date when the raw schema has not changed since the last approved build)
     python -m governor.build approve <thread_id> --by <name> [--llm ...]   (builds silver and gold: built | escalated | blueprint_failed)
     python -m governor.build reject <thread_id> --note "<text>" [--llm ...]
     python -m governor.build publish --target <dir> [--open-pr]         (batch2b section 13)
@@ -99,7 +100,7 @@ def _run(args: argparse.Namespace) -> int:
         return _fail("cannot start the build", e)
     init_target(args.target, args.project_name)
     try:
-        out = graph.start(args.target, args.project_name, llm, policy=args.policy, profile=profile)
+        out = graph.start(args.target, args.project_name, llm, policy=args.policy, profile=profile, force=args.force)
     except Exception as e:  # noqa: BLE001
         return _fail("build run failed", e)
     print(json.dumps(out))
@@ -163,6 +164,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--llm", default="openrouter", help=llm_help)
     p.add_argument("--policy", type=Path, default=DEFAULT_POLICY, help="column -> PII tag file")
     p.add_argument("--profile", type=Path, help="use a saved profile (from profile --out) instead of profiling raw")
+    p.add_argument("--force", action="store_true",
+                   help="design again even when the raw schema has not changed since the last approved build")
     p.set_defaults(func=_run)
     p = sub.add_parser("approve", help="approve the design of a thread paused at the design gate")
     p.add_argument("thread_id")

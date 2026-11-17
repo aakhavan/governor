@@ -2,7 +2,9 @@
 
 ::
 
-    profile -> propose -> validate --findings, at most 2 repairs--> propose
+    profile -> compare --up to date (batch3 section 29: drift.md, status up_to_date)--> END
+                  | changed (previous design + drift note) or no fingerprint
+               propose -> validate --findings, at most 2 repairs--> propose
                              | ok (or repairs used up: write_report, then status design_invalid)
                         write_report -> design_gate (interrupt)
              reject + note (once) <------|  approve
@@ -70,6 +72,10 @@ AWAITING = "awaiting_design_approval"
 INVALID = "design_invalid"
 APPROVED = "design_approved"
 REJECTED = "design_rejected"
+UP_TO_DATE = "up_to_date"
+
+DRIFT_HEAD = "The raw schema changed since the last approved build:"
+DRIFT_TAIL = "Keep every unchanged model and KPI mapping; change only what these differences require."
 
 
 class BuildError(RuntimeError):
@@ -97,6 +103,9 @@ class BuildState(TypedDict, total=False):
     gold: dict
     blueprint: list[dict]
     summary: dict
+    force: bool  # skip the up-to-date check (batch3.md section 29)
+    drift: list[str] | None  # Drift.summary_lines() of a drift run
+    last_build: str | None  # the approved build an up-to-date run points to
     calls: Annotated[list[dict], operator.add]
 
 
@@ -190,6 +199,26 @@ def write_fingerprint(target: str | Path, profile: dict, approved_on: dt.date, t
     return path
 
 
+def _read_json(path: Path) -> dict | None:
+    """A JSON object file, or None when it is missing or unreadable."""
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    except (OSError, ValueError):
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def drift_note(lines: list[str]) -> str:
+    """The note a drift run gives the plan model (batch3.md section 29.2)."""
+    return "\n".join([DRIFT_HEAD, *(f"- {ln}" for ln in lines), DRIFT_TAIL])
+
+
+def write_drift(target: str | Path, text: str) -> Path:
+    path = governor_dir(target) / "drift.md"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
 # --------------------------------------------------------------------------- graph
 
 
@@ -238,6 +267,35 @@ def build_graph(
              relationships=len(prof.get("relationships") or []), saved=bool(state.get("profile")))
         return {} if state.get("profile") else {"profile": prof}
 
+    def compare(state: BuildState, config: RunnableConfig) -> dict:
+        """Up to date, drift or neither (batch3.md section 29). No fingerprint: nothing changes (29.3)."""
+        target = Path(state["target"])
+        doc = _read_json(target_fingerprint(target))
+        if doc is None:
+            return {}
+        current = drift.fingerprint(state["profile"])
+        if doc.get("hash") == drift.fingerprint_hash(current):
+            last = str(doc.get("thread_id") or "")
+            build = _read_json(target / "governor" / "build.json") or {}
+            up_to_date = (not state.get("force") and build.get("status") == BUILT and last
+                          and build.get("thread_id") == last and (target / "governor" / "design.json").is_file())
+            if not up_to_date:
+                return {}  # same schema, but the last build did not finish (or force): a full design as before
+            write_drift(target, f"No change in the raw schema since build {last[:8]}, "
+                                f"approved on {doc.get('approved_on')}.\n")
+            emit("up_to_date", thread_id=_tid(config), last_build=last)
+            return {"status": UP_TO_DATE, "last_build": last}
+        lines = drift.diff(doc.get("fingerprint") or {}, current).summary_lines()
+        write_drift(target, "# Drift since the last approved build\n\n" + "".join(f"- {ln}\n" for ln in lines))
+        update: dict[str, Any] = {"drift": lines, "note": drift_note(lines)}
+        previous = _read_json(target / "governor" / "design.json")
+        if previous is not None:
+            update["proposal"] = previous  # propose passes it as ``previous`` because the note is set
+        return update
+
+    def after_compare(state: BuildState) -> str:
+        return END if state.get("status") == UP_TO_DATE else "propose"
+
     def propose(state: BuildState, config: RunnableConfig) -> dict:
         findings = [Finding.model_validate(f) for f in state.get("findings") or []]
         note = state.get("note")
@@ -279,7 +337,8 @@ def build_graph(
         findings = state.get("findings") or []
         out = governor_dir(state["target"])
         report = out / "design.md"
-        report.write_text(design.render_report(state.get("proposal"), findings, thread_id), encoding="utf-8")
+        report.write_text(design.render_report(state.get("proposal"), findings, thread_id, drift=state.get("drift")),
+                          encoding="utf-8")
         design_file = None
         if not findings:
             # design.json is the proposal that would be approved; an invalid one is never written there
@@ -422,6 +481,7 @@ def build_graph(
 
     g = StateGraph(BuildState)
     g.add_node("profile", profile)
+    g.add_node("compare", compare)
     g.add_node("propose", propose)
     g.add_node("validate", validate)
     g.add_node("write_report", write_report)
@@ -435,7 +495,8 @@ def build_graph(
     g.add_node("dbt_build_gold", dbt_build_gold)
     g.add_node("summarise", summarise)
     g.add_edge(START, "profile")
-    g.add_edge("profile", "propose")
+    g.add_edge("profile", "compare")
+    g.add_conditional_edges("compare", after_compare, ["propose", END])
     g.add_edge("propose", "validate")
     g.add_conditional_edges("validate", after_validate, ["propose", "write_report"])
     g.add_conditional_edges("write_report", after_report, ["design_gate", END])
@@ -478,6 +539,11 @@ def _summary(graph, config: dict) -> dict:
         out["findings"] = sorted({f["code"] for f in values.get("findings") or []})
     if values.get("approved_file"):
         out["approved"] = values.get("approved_file")
+    if values.get("status") == UP_TO_DATE:
+        out["last_build"] = values.get("last_build")
+        out["drift_report"] = str(Path(values["target"]) / "governor" / "drift.md")
+    elif values.get("drift") is not None:
+        out["drift"] = list(values["drift"])
     status = values.get("status")
     if status in (silver.BUILT, BUILT, ESCALATED, BLUEPRINT_FAILED):
         sv = silver.result(values.get("silver") or {}).to_dict()
@@ -505,12 +571,14 @@ def _summary(graph, config: dict) -> dict:
 
 def start(target: str | Path, project_name: str, llm: BuildLLM, *, policy: str | Path | None = DEFAULT_POLICY,
           profile: dict | None = None, thread_id: str | None = None, checkpoints: str | Path | None = None,
-          **graph_kwargs: Any) -> dict:
-    """Run a new build thread to the design gate (or to design_invalid). ``profile`` skips profiling raw."""
+          force: bool = False, **graph_kwargs: Any) -> dict:
+    """Run a new build thread to the design gate (or to design_invalid, or ``up_to_date`` when nothing changed since
+    the last approved build). ``profile`` skips profiling raw; ``force`` skips only the up-to-date check."""
     thread_id = thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
     state: dict[str, Any] = {"target": str(Path(target).resolve()), "project_name": project_name,
-                             "policy": str(policy) if policy else "", "repairs": 0, "rejections": 0, "calls": []}
+                             "policy": str(policy) if policy else "", "repairs": 0, "rejections": 0, "calls": [],
+                             "force": bool(force)}
     if profile is not None:
         state["profile"] = profile
     emit("run_started", thread_id=thread_id, project=project_name, saved_profile=profile is not None)
@@ -549,5 +617,5 @@ def reject(thread_id: str, note: str, llm: BuildLLM, *, checkpoints: str | Path 
 SILVER_BUILT = silver.BUILT
 BUILT, ESCALATED, BLUEPRINT_FAILED = gold.BUILT, gold.ESCALATED, gold.BLUEPRINT_FAILED
 
-__all__ = ["APPROVED", "AWAITING", "BLUEPRINT_FAILED", "BUILT", "ESCALATED", "SILVER_BUILT", "INVALID", "REJECTED", "BuildError", "approve",
-           "build_graph", "record_decisions", "reject", "start", "target_fingerprint", "write_fingerprint"]
+__all__ = ["APPROVED", "AWAITING", "BLUEPRINT_FAILED", "BUILT", "ESCALATED", "SILVER_BUILT", "INVALID", "REJECTED", "UP_TO_DATE", "BuildError",
+           "approve", "build_graph", "drift_note", "record_decisions", "reject", "start", "target_fingerprint", "write_fingerprint"]

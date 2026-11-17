@@ -8,7 +8,9 @@ cost; details go in the Slack thread under it:
   findings, Approve / Reject buttons) and ``governor/design.md`` attached without its KPI mapping values;
 - ``escalated``: the failing node and its error, without data values (checkpoint, then the target's
   ``target/run_results.json``, then the stage);
-- ``published``: the branch and the pull-request link (the event's ``pr_url``).
+- ``published``: the branch and the pull-request link (the event's ``pr_url``);
+- ``up_to_date`` (batch3.md section 29): a terminal header ``up to date: no change since build <id8>``, no buttons
+  and no thread reply.
 
 Ended runs read as ended (batch2c section 20): the header turns red (``stopped at <stage>`` and a one-line reason)
 or green (built, published); records left open by a newer run of the project or by a restart are marked
@@ -152,8 +154,11 @@ def _terminal(rec: dict, event: dict) -> None:
         end = {"outcome": blocks.BUILT}
     elif kind == "published":
         end = {"outcome": blocks.PUBLISHED, "pr_url": event.get("pr_url"), "branch": event.get("branch")}
+    elif kind == "up_to_date":
+        end = {"outcome": blocks.UP_TO_DATE, "last_build": event.get("last_build")}
     if end is not None:
-        for k in ("outcome", "failed_stage", "stopped_at", "reason", "pr_url", "branch", "superseded_by"):
+        for k in ("outcome", "failed_stage", "stopped_at", "reason", "pr_url", "branch", "superseded_by",
+                  "last_build"):
             rec.pop(k, None)
         rec.update({k: v for k, v in end.items() if v is not None})
 
@@ -204,7 +209,7 @@ def _apply(rec: dict, event: dict) -> dict:
         "run_started": "started", "profiled": "profiled", "proposed": "design proposed", "validated": "validated",
         "approved": "approved, building silver", "silver_built": "silver built, building gold",
         "gold_built": "gold built", "repair": "repairing SQL", "published": "published",
-        "certified": "certified"}.get(kind, rec.get("status"))
+        "certified": "certified", "up_to_date": "up to date"}.get(kind, rec.get("status"))
     return rec
 
 
