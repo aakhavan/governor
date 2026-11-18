@@ -226,3 +226,105 @@ def test_live_deploy_role_creates_only_in_analytics():
             "where n.nspname in ('analytics', 'raw', 'dev_governor', 'public', 'private')").fetchall())
     assert rows.get("analytics") is True
     assert not any(v for k, v in rows.items() if k != "analytics")
+
+
+# ---- batch3 section 30: publish against a stale main, nothing to publish (offline, a local bare origin) ----
+
+def _with_origin(target, tmp_path):
+    """The target as its own repo with the scaffold commit pushed to a local bare ``origin``."""
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(origin)], check=True, capture_output=True)
+    git(target.parent, "init", "-b", "main", str(target))
+    git(target, "remote", "add", "origin", str(origin))
+    pub.ensure_repo(target)
+    git(target, "push", "-q", "origin", "main")
+    return origin
+
+
+def _merged_upstream(origin, tmp_path):
+    """Someone merged a pull request on origin: a generated file, a scaffold file and a new file changed."""
+    clone = tmp_path / "clone"
+    git(tmp_path, "clone", "-q", str(origin), str(clone))
+    (clone / "governor").mkdir(exist_ok=True)
+    (clone / "governor" / "design.md").write_text("merged earlier\n", encoding="utf-8")
+    (clone / "README.md").write_text("readme\n", encoding="utf-8")
+    with (clone / "dbt_project.yml").open("a", encoding="utf-8") as f:
+        f.write("# reviewed\n")
+    git(clone, "add", "-A")
+    git(clone, "commit", "-q", "-m", "merged pull request")
+    git(clone, "push", "-q", "origin", "main")
+    return git(clone, "rev-parse", "HEAD").strip()
+
+
+def test_publish_fast_forwards_stale_main(built, tmp_path):
+    target, tid = built
+    origin = _with_origin(target, tmp_path)
+    upstream = _merged_upstream(origin, tmp_path)
+    design = (target / "governor" / "design.md").read_bytes()
+    out = pub.publish(target)
+    assert out["status"] == "published"
+    assert git(target, "rev-parse", "main").strip() == upstream  # fast-forwarded
+    assert git(target, "rev-parse", f"{out['commit']}^").strip() == upstream  # the branch starts on the new main
+    show = subprocess.run(["git", "-C", str(target), "show", f"{out['branch']}:governor/design.md"],
+                          capture_output=True, check=True).stdout
+    assert show.replace(b"\r\n", b"\n") == design.replace(b"\r\n", b"\n")  # the build's file, not main's
+    assert git(target, "show", f"{out['branch']}:README.md") == "readme\n"
+    assert (target / "dbt_project.yml").read_text(encoding="utf-8").endswith("# reviewed\n")  # updated with main
+    assert git(target, "status", "--porcelain", "--untracked-files=no").strip() == ""
+    assert out["branch"] in git(origin, "branch", "--list")
+
+
+def test_publish_refuses_diverged_main(built, tmp_path):
+    target, _ = built
+    origin = _with_origin(target, tmp_path)
+    upstream = _merged_upstream(origin, tmp_path)
+    (target / "local.txt").write_text("own commit\n", encoding="utf-8")
+    git(target, "add", "local.txt")
+    git(target, "commit", "-q", "-m", "local only")
+    local = git(target, "rev-parse", "main").strip()
+    events_before = _events(target)
+    with pytest.raises(pub.PublishError, match="^local main has diverged from origin/main; pull and resolve, "
+                                               "then publish again$"):
+        pub.publish(target)
+    assert git(target, "rev-parse", "main").strip() == local
+    assert git(origin, "rev-parse", "main").strip() == upstream
+    assert git(origin, "for-each-ref", "--format=%(refname)", "refs/heads").split() == ["refs/heads/main"]  # nothing pushed
+    assert git(target, "branch", "--list", "governor/*").strip() == ""  # no branch created
+    assert git(target, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+    assert pub.read_published(target) is None and _events(target) == events_before
+
+
+def test_publish_with_no_changes_is_nothing_to_publish(built, tmp_path):
+    target, _ = built
+    origin = _with_origin(target, tmp_path)
+    first = pub.publish(target)
+    git(target, "checkout", "-q", "main")
+    git(target, "merge", "-q", "--ff-only", first["branch"])
+    git(target, "push", "-q", "origin", "main")
+    git(target, "push", "-q", "origin", "--delete", first["branch"])
+    git(target, "branch", "-q", "-D", first["branch"])
+    main = git(target, "rev-parse", "main").strip()
+    events_before = _events(target)
+    out = pub.publish(target)
+    assert out == {"status": "nothing_to_publish", "reason": "the build matches main"}
+    assert git(target, "rev-parse", "main").strip() == main  # no commit, empty or not
+    assert git(target, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+    assert git(target, "branch", "--list", "governor/*").strip() == ""  # the build branch is deleted
+    assert git(origin, "for-each-ref", "--format=%(refname)", "refs/heads").split() == ["refs/heads/main"]  # nothing pushed
+    assert _events(target) == events_before  # no published event
+    assert git(target, "status", "--porcelain", "--untracked-files=no").strip() == ""
+
+
+def test_publish_without_remote_unchanged(built, monkeypatch):
+    target, tid = built
+    calls = []
+    real_git = pub.git
+    monkeypatch.setattr(pub, "git", lambda t, *a, **k: calls.append(a[0]) or real_git(t, *a, **k))
+    out = pub.publish(target)
+    assert out["status"] == "published" and out["branch"] == f"governor/build-{tid[:8]}"
+    assert not {"fetch", "ls-remote", "update-ref", "reset", "push"} & set(calls)  # no remote: no sync, no push
+    assert "branch" not in calls  # the build branch is kept
+    assert git(target, "rev-parse", f"{out['commit']}^").strip() == git(target, "rev-parse", "main").strip()
+    assert git(target, "rev-parse", "--abbrev-ref", "HEAD").strip() == out["branch"]
+    assert git(target, "log", "--format=%s", "-1").strip() == f"governor: build {tid[:8]} (8 KPIs, 2 gaps)"
+    assert pub.read_published(target)["commit"] == out["commit"] and _events(target)[-1]["kind"] == "published"

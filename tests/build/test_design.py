@@ -56,6 +56,13 @@ def _unknown_table(d):
     _model(d, "stg_orders")["source_table"] = "olist_nope"
 
 
+def _unsafe_cast(d):
+    # order_status is text in the profile: a plain cast to integer fails when the model is queried
+    _model(d, "stg_orders")["columns"].append(
+        {"name": "status_code", "expr": "CAST(NULLIF(order_status, '') AS integer)", "type": "integer", "pii": False,
+         "description": ""})
+
+
 def _unknown_column(d):
     _col(_model(d, "stg_orders"), "purchased_at")["expr"] = "CAST(order_purchased AS timestamp)"
 
@@ -165,6 +172,7 @@ def _key_not_unique(d):
 CASES = [
     ("UNKNOWN_SOURCE_TABLE", "stg_orders", _unknown_table),
     ("UNKNOWN_SOURCE_COLUMN", "stg_orders.purchased_at", _unknown_column),
+    ("UNSAFE_CAST", "stg_orders.status_code", _unsafe_cast),
     ("BAD_FOLDER", "stg_orders", _staging_with_refs),
     ("BAD_FOLDER", "int_orders", _intermediate_with_source),
     ("BAD_FOLDER", "int_orders", _intermediate_without_refs),
@@ -204,7 +212,7 @@ def test_code_fires(code, subject, mutate, good, profile, policy):
 
 
 def test_every_validation_code_has_a_case():
-    covered = {c[0] for c in CASES} | {"PROPOSAL_UNPARSEABLE"}  # raised by the graph, tested in test_graph
+    covered = {c[0] for c in CASES} | {"PROPOSAL_UNPARSEABLE"}  # raised by the graph, tested in test_build_graph
     assert covered == set(design.CODES)
 
 
@@ -241,7 +249,8 @@ def test_key_on_table_without_candidate_key_is_flagged(good, profile, policy):
     _table(profile, "olist_order_reviews_dataset")["candidate_keys"] = []
     hits = _key_findings(good, profile, policy)
     assert [f.subject for f in hits] == ["stg_reviews"]
-    assert "olist_order_reviews_dataset has no unique column or column pair" in hits[0].problem
+    assert "olist_order_reviews_dataset has no unique column, column pair or column triple" in hits[0].problem
+    assert "intermediate model reads silver models only" in hits[0].problem
 
 
 def test_computed_key_is_flagged(good, profile, policy):
@@ -425,3 +434,23 @@ def test_record_decisions_appends_and_supersedes(tmp_path, good):
 
 def test_policy_fixture_is_the_shop_policy(policy):
     assert POLICY.is_file() and "customer_unique_id" in policy
+
+def test_guarded_cast_of_text_column_passes(good, profile, policy):
+    _model(good, "stg_orders")["columns"].append(
+        {"name": "status_code", "expr": "CASE WHEN btrim(order_status) ~ '^[0-9]+$' THEN CAST(btrim(order_status) AS integer) END",
+         "type": "integer", "pii": False, "description": ""})
+    assert [f for f in _codes(good, profile, policy) if f.code == "UNSAFE_CAST"] == []
+
+def test_integer_cast_beyond_int4_is_flagged(good, profile, policy):
+    # 18 Nov, Airbnb: listing ids reach 1.5e18, so CAST(... AS integer) fails in dbt; bigint is fine
+    table = next(t for t in profile["tables"] if t["name"] == "olist_orders_dataset")
+    table["columns"].append({"name": "big_id", "inferred_type": "integer", "null_rate": 0.0, "distinct": 10,
+                             "pii": False, "min": 1, "max": 1_500_000_000_000_000_000})
+    cols = _model(good, "stg_orders")["columns"]
+    cols.append({"name": "big_id", "expr": "CAST(NULLIF(big_id, '') AS integer)", "type": "integer", "pii": False,
+                 "description": ""})
+    hits = [f for f in _codes(good, profile, policy) if f.code == "UNSAFE_CAST"]
+    assert [f.subject for f in hits] == ["stg_orders.big_id"] and "bigint" in hits[0].problem
+    cols[-1]["expr"] = "CAST(NULLIF(big_id, '') AS bigint)"
+    assert [f for f in _codes(good, profile, policy) if f.code == "UNSAFE_CAST"] == []
+

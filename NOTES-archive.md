@@ -1482,3 +1482,176 @@ For Amir: mapping.json records olist_orders_dataset.order_id only as ord_hdr.ord
 ## Additions for E4
 E4 must leave src/governor/build/graph.py, src/governor/build/design.py, and evaluation/ unchanged. E3 added testbed/perturb.py, testbed/load_csv_dir.py, build_eval --policy, and the Perturbed holdout section in testbed/README.md. knowledge/shop/policy.yaml is still the original column names. A perturbed policy is an output of perturb.py: same tags (customer_id, location, free_text), keys renamed (cust_ref, cust_uid, cust_zip5, cust_town, cust_uf, geo_y, geo_x, slr_zip5, slr_town, rvw_ttl, rvw_txt). The profiler marks PII when the column name is a policy key, on every table that has that name. Orders are split into ord_hdr and ord_dlv; mapping.json points order_id only at ord_hdr.ord_ref, and ord_dlv also carries it. etl_audit_log (20 fixed rows) is not in the mapping. load_csv_dir touches only schema raw; --replace is required when raw is not empty. build_eval without --policy leaves hooks unset, and Hooks.policy stays the shop policy. The holdout run has not been executed.
 
+## Relocks
+- 17 Nov 2026 16:45: Batch 3: maintain mode and tenants (docs/capstone/batch3.md, ADR 0004) (changed: plan-batch3.yaml, plan.yaml, plan/accept/accept_a1.py, plan/accept/accept_f1.py, plan/accept/accept_f2.py, plan/accept/accept_f3.py, plan/accept/accept_f4.py, plan/accept/accept_f5.py, plan/accept/accept_f6.py, plan/prompts/C1.md, plan/prompts/C2.md, plan/prompts/C3.md, plan/prompts/C4.md, plan/prompts/C5.md, plan/prompts/C6.md, plan/prompts/D1.md, plan/prompts/D10.md, plan/prompts/D11.md, plan/prompts/D12.md, plan/prompts/D14.md, plan/prompts/D2.md, plan/prompts/D3.md, plan/prompts/D4.md, plan/prompts/D5.md, plan/prompts/D6.md, plan/prompts/D7.md, plan/prompts/D8a.md, plan/prompts/D8b.md, plan/prompts/D9.md, plan/prompts/D9b.md, plan/prompts/D9c.md, plan/prompts/E1.md, plan/prompts/E2.md, plan/prompts/E3.md, plan/prompts/E4.md, plan/prompts/F1.md, plan/prompts/F2.md, plan/prompts/F3.md, plan/prompts/F4.md, plan/prompts/F5.md, plan/prompts/F6.md, plan/prompts/G1.md, plan/prompts/G10a.md, plan/prompts/G10b.md, plan/prompts/G2a.md, plan/prompts/G2b.md, plan/prompts/G3.md, plan/prompts/G4.md, plan/prompts/G5a.md, plan/prompts/G5b.md, plan/prompts/G6a.md, plan/prompts/G6b.md, plan/prompts/G7.md, plan/prompts/G8.md, plan/prompts/G9.md)
+- 17 Nov 2026 16:46: spec fix (via supervise, by human) (changed: nothing)
+
+## F1 result
+*Safety rails (database connection timeout, active workspace in the bot), 17 Nov 2026 16:58.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F1`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| pgconn helper exists | yes | missing in src/governor/core/pgconn.py |
+| build_dsn uses the timeout | yes | missing in src/governor/build/workspace.py |
+| dbt profile template has connect_timeout | yes | missing in src/governor/build/workspace.py |
+| src/governor/eval untouched | yes |  |
+| pytest tests/core | yes | 100 passed, 12 skipped in 12.56s |
+| pytest tests/build | yes | 175 passed, 12 skipped in 58.91s |
+| pytest tests/integrations | yes | 38 passed in 9.39s |
+| required tests present | yes | 6 found |
+
+Review: F1 does what section 27 asks. with_timeout is applied to build_dsn and every psycopg.connect in build/ and core/serving.py, keeps an existing connect_timeout for URI and key-value DSNs, and the dbt template sets connect_timeout for dev and prod. src/governor/eval has no diff. The start line and usage footer show knowledge folder and host:port/db only; tests assert a fake password, user name and 'user=' never appear. The unreachable test is offline and finishes in about 2 s. Six required tests present, 313 tests pass.
+
+For Amir: STATUS.md in the working tree still says F1 is stopped on lock_mismatch; that is factory state from before the run, not something the implementer changed. Optional hardening: give test_unreachable_database_fails_within_timeout a lower elapsed bound or match psycopg.OperationalError so a future regression fails fast instead of hanging.
+
+## Relocks
+- 17 Nov 2026 17:20: acceptance bug fixed: required tests are now collected from the step's own folders (pytest skips folders named build when collecting from tests); F2 allowed_paths gains tests/core/test_build_drift.py, the implementer's workaround, to be deleted at review (via supervise, by Claude, delegated by Amir via chat 17 Nov) (changed: plan-batch3.yaml, plan/accept/accept_f1.py, plan/accept/accept_f2.py, plan/accept/accept_f3.py, plan/accept/accept_f4.py, plan/accept/accept_f5.py, plan/accept/accept_f6.py)
+
+## E4 result
+*Injection tests, error redaction and the threat model, 11 Nov 2026 14:24.*
+
+Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 1 fix loop(s); branch `factory/E4`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| src/governor/build/graph.py unchanged against main | yes | the file differs from main |
+| src/governor/build/design.py unchanged against main | yes | the file differs from main |
+| src/governor/build/prompts/repair.md unchanged against main | yes | the file differs from main |
+| src/governor/build/prompts/propose.md unchanged against main | yes | the file differs from main |
+| governor.build imports neither Slack nor ask | yes |  |
+| redact_error runs | yes |  |
+| no data value survives redaction | yes |  |
+| known identifiers survive | yes |  |
+| long numbers and DETAIL lines go | yes |  |
+| threat model exists, at most 80 lines | yes | 57 lines |
+| threat model has ASI01 | yes |  |
+| threat model has ASI02 | yes |  |
+| threat model has ASI03 | yes |  |
+| threat model has ASI06 | yes |  |
+| threat model has ASI09 | yes |  |
+| threat model has Open findings | yes |  |
+| threat model holds no marker or data value | yes |  |
+| pytest tests/build | yes | 171 passed, 12 skipped in 51.82s |
+| required tests present | yes | 9 found |
+
+Review: cursor-grok: pass | claude-tc-fable: pass
+
+For Amir: The acceptance lines 'the file differs from main' are the failure string stored even when the check passes. ok true means git diff --quiet against main returned 0, so graph.py, design.py, repair.md and propose.md match main. Unquoted values on a kept error line are left as written; section 25 and the threat model both say so, and Postgres quotes the values it reports.
+
+## Relocks
+- 17 Nov 2026 17:53: spec gap: the contract requires emitting event up_to_date, which needs the kind in events.KINDS, so F3 allowed_paths gains src/governor/build/events.py (the only change there is that kind); F5 gains build/profile.py and build/dbt.py for the per-tenant profiler and dbt env (via supervise, by Claude, delegated by Amir via chat 17 Nov) (changed: plan-batch3.yaml)
+
+## A1 result
+*Airflow integration (manual profile DAG, profiles API route, Profiles page), 13 Nov 2026 20:56.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass, `cursor-grok`: pass; 2 fix loop(s); branch `factory/A1`.
+
+| check | ok | detail |
+|---|---|---|
+| apps/streamlit/client.py only gains lines (<= 40) | yes | +8 -0 |
+| src/governor/api/app.py only gains lines (<= 3) | yes | +2 -0 |
+| diff inspected | yes | 30	0	plan/prompts/A1.md | 2	0	src/governor/api/app.py | warning: in the working copy of 'STATUS.md', CRLF will be replac |
+| DAG file exists | yes | C:\Users\amir0\portfolio\governor-airflow\airflow\dags\governor_profile_raw.py |
+| DAG imports allowed modules only | yes |  |
+| dag_id governor_profile_raw | yes |  |
+| manual only | yes |  |
+| no literal password | yes |  |
+| uses Variables for connection values | yes |  |
+| full offline test suite green | yes | 513 passed, 21 skipped in 111.39s (0:01:51) |
+| required tests present | yes | 6 found |
+| governor:local builds from the worktree | yes | #16 unpacking to docker.io/library/governor:local | #16 unpacking to docker.io/library/governor:local 0.6s done | #16 DO |
+| test bed up on 55432 | yes | start ../governor/testbed first |
+| profile runs as a container against the test bed | yes | 9 tables |
+
+Review: claude-tc-fable: pass | cursor-grok: pass
+
+For Amir: Pass. Watch three things when airflow-platform triggers the DAG: (1) the _RenderedDockerOperator subclass turns the Mount into a plain dict at render time, which docker-py accepts but nothing here executes; (2) the volume default governor_governor-data was not confirmed with docker volume ls; (3) an unset governor_build_password Variable renders as the literal string None and fails at Postgres auth, as docs/airflow.md states. I could not re-run pytest in this session (approval unavailable), so the test result is the acceptance's own run.
+
+## Additions for the next plan
+Profiles API: GET /profiles (newest first by mtime, max 100) and GET /profiles/{run_id} (raw bytes, 404 if absent, 422 if run_id fails ^[A-Za-z0-9_.+-]{1,128}$) live in src/governor/api/profiles.py behind make_router(caller_role); they read $GOVERNOR_STATE_DIR/profiles/ at request time (relative to repo root, like paths.STATE). The DAG writes /data/profiles/<run_id with ':'->'_'>.json, so the API's state dir must be the same volume mounted at /data in the compose stack. DockerOperator does not template docker_url or mounts natively; the DAG uses a _RenderedDockerOperator subclass that adds them to template_fields, so Airflow renders the Mount into a plain dict. Variables: governor_data_volume (default governor_governor-data, unverified against docker volume ls), docker_url, governor_pg_host/port/db, governor_build_user, governor_build_password (no default; missing renders as the string 'None'). The airflow-platform step must actually trigger the DAG once to prove the subclass and the volume name. Tests: tests/test_api_profiles.py, tests/test_airflow_dag.py (static AST, Airflow not installed), tests/ui/test_profiles_page.py over the ASGI client. accept_a1 now drops GOVERNOR_PG_DSN/GOVERNOR_PG_ADMIN_DSN before pytest so the live test-bed test skips.
+
+## Additions for F2
+governor.core.pgconn.with_timeout(dsn) and connect_timeout_s() exist; any new psycopg.connect under build/ or core/ must wrap its DSN with with_timeout (eval/ stays raw by contract). workspace.build_address() returns host:port/db for messages; slack.config.workspace() returns (paths.KNOWLEDGE, address) and start_line(config) builds the start-up line; blocks.usage() takes an optional (knowledge_name, address) tuple for the footer. The dbt profile template only affects newly written profiles.yml files; existing targets keep theirs. Pytest's default norecursedirs skips tests/build/ when collecting from 'tests', so required tests must live in tests/core/ or tests/integrations/. The unreachable-database test has no hard timeout guard, so a regression of with_timeout in profile_schema would hang the suite instead of failing; consider adding a lower-bound elapsed check or OperationalError match if that test is touched again.
+
+## F2 result
+*Profile fingerprint and drift, 17 Nov 2026 17:23.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F2`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| drift module exists | yes | missing in src/governor/build/drift.py |
+| diff exists | yes | missing in src/governor/build/drift.py |
+| fingerprint written at approval | yes | missing in src/governor/build/graph.py |
+| fingerprint published | yes | missing in src/governor/build/publish.py |
+| pytest tests/build | yes | 181 passed, 12 skipped in 58.46s |
+| required tests present | yes | 6 found |
+
+Review: F2 does what section 28 asks. The fingerprint holds only names, inferred types, PII flags, candidate keys, version and schema name; tables, columns and keys are sorted so the sha256 over canonical JSON is order-independent. diff reports names and type pairs only. The record node writes governor/profile_fingerprint.json with thread_id, approved_on, hash and fingerprint next to approved.yaml, and publish.GENERATED names it. The graph changes nowhere else. Tests inject distinctive values and sample cells and prove none leak.
+
+For Amir: Delete tests/core/test_build_drift.py and remove it from F2's allowed_paths in plan-batch3.yaml; it re-runs the six drift tests under a second module name whenever pytest is invoked on tests, and the relocked acceptance scripts no longer need it. The extra 'governor/profile_fingerprint.json' entry in publish.GENERATED is redundant with 'governor' but harmless.
+
+## Additions for F3
+F3 can rely on: graph.target_fingerprint(target) gives <target>/governor/profile_fingerprint.json; its JSON has keys thread_id, approved_on (ISO date), hash, fingerprint. drift.fingerprint accepts a Profile or the section 5 dict (it validates with Profile, extra='forbid', so pass exactly the profiler's dict). drift.fingerprint_hash(fp) is sha256 of json.dumps(fp, sort_keys=True, separators=(',',':')). drift.diff(old_fp, new_fp) returns Drift with .empty and .summary_lines() (sorted plain lines, names and type pairs only). The compare node should read the file through target_fingerprint and compare doc['hash'] with fingerprint_hash(fingerprint(state['profile'])). Note pytest's default norecursedirs skips tests/build when invoked on 'tests'; acceptance scripts now collect tests/build explicitly, so no re-export shim is needed. tests/core/test_build_drift.py is a workaround slated for deletion; do not depend on it.
+
+## F3 notes (implementer)
+Graph: profile -> compare -> (END when up_to_date | propose). compare returns {} without a readable fingerprint (29.3). Same hash plus build.json status built with the fingerprint's thread_id plus design.json, without force: writes drift.md, emits up_to_date (thread_id, last_build), status graph.UP_TO_DATE. Same hash otherwise: a full design from nothing (no drift note). Different hash: state drift = summary_lines, note = graph.drift_note(lines), proposal = design.json, so propose passes it as previous; repairs stay 0. _summary adds last_build/drift_report or drift. events.KINDS gained up_to_date. Slack: Command.force; build.start gets force=True only when forced; blocks.UP_TO_DATE is in TERMINAL, so supersede/interrupt skip it. Tests: tests/build/test_maintain.py, two at the end of tests/integrations/test_slack.py. Local pytest in a shell with GOVERNOR_ROOT set to another checkout fails the gate tests (wrong kpis.yaml); the acceptance script clears it.
+
+## F5 notes for F6
+- Events (`events_path()`) are still process-wide (GOVERNOR_STATE_DIR), not per tenant; contract 31 does not ask for it. Each event carries the thread id, and F6 maps threads to tenants via each tenant's checkpoints.
+- The project name is the tenant name verbatim; a name with `-` is not a valid dbt project name. Either restrict names in the registry or map `-` to `_` if that bites.
+- `Tenant.address` gives `host:port/db` for the F6 start-up line and footer.
+- Local shells may have GOVERNOR_ROOT set to another checkout; the acceptance script clears it, plain `pytest` does not (test_design then fails on a foreign catalogue).
+
+## F3 result
+*Up-to-date runs and drift-aware design, 17 Nov 2026 17:56.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F3`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| compare node | yes | missing in src/governor/build/graph.py |
+| force flag | yes | missing in src/governor/build/__main__.py |
+| drift section in report | yes | missing in src/governor/build/design.py |
+| pytest tests/build | yes | 187 passed, 12 skipped in 56.86s |
+| pytest tests/integrations | yes | 40 passed in 11.98s |
+| required tests present | yes | 8 found |
+
+Review: F3 does what section 29 asks. compare sits between profile and propose, requires hash + built build.json with the same thread + design.json, writes drift.md, emits up_to_date and ends with no model or dbt call (test snapshots models/ by bytes and mtime). force only skips that check; drift seeds the previous design through the existing proposal/note path with a names-only note and repairs stays 0. No-fingerprint targets return {} and run as before. Slack parses the literal force only, plain runs call start unchanged, up_to_date is terminal with no buttons or thread replies.
+
+For Amir: Clean step. Two cosmetic items only: the up_to_date Slack headline format differs slightly from the other terminal headers, and a stale drift.md can linger after a later full design of an unchanged schema.
+
+## Additions for F4
+graph.start now takes force=False and BuildState has force, drift and last_build keys; status UP_TO_DATE ends the graph after compare, before propose, so F5's tenant wiring must keep the profile and compare path tenant-aware (the fingerprint and build.json are read from the target, which is per tenant already). The drift note is in state['note'] and persists through repairs; a rejection replaces it. events.KINDS gained up_to_date. Slack: Command.force, GovernorSlack._run(target, thread_id, force=False) passes force only when True so plain calls stay byte-identical; blocks.UP_TO_DATE is in TERMINAL. Cosmetic leftovers: the up_to_date headline uses a newline before the build label unlike other states, and drift.md is not removed when a later run of an unchanged schema does a full design.
+
+## F4 result
+*Publish against a stale main, nothing to publish, 17 Nov 2026 18:10.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F4`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| no empty commits | yes | missing in src/governor/build/publish.py |
+| diverged main refused | yes | missing in src/governor/build/publish.py |
+| --allow-empty removed | yes | still in src/governor/build/publish.py |
+| pytest tests/build | yes | 191 passed, 12 skipped in 84.11s (0:01:24) |
+| pytest tests/integrations | yes | 40 passed in 12.75s |
+| required tests present | yes | 4 found |
+
+Review: F4 does what section 30 asks. sync_main fetches origin/main before any branch exists, fast-forwards only a main that is behind with no own commits (guarded update-ref), and raises the exact DIVERGED line otherwise with main, origin/main and the working tree untouched. An unchanged build makes no commit, returns to main, deletes the branch and emits no event; --allow-empty is gone. Targets without origin run no sync or push. The four tests use a local bare origin and a clone under tmp_path only; CLI and Slack show a plain message.
+
+For Amir: Two cosmetic items for later: plan/accept/_common.check prints the failure detail string even when ok is true, which makes the acceptance JSON read oddly; and sync_main runs one 'git status' per changed upstream file, so a very large merged PR will be slow but correct. The reviewer could not rerun pytest (command not permitted) and relied on the acceptance output.
+
+## Additions for F5
+publish() now runs sync_main(target) before 'checkout -B'. With an origin that has main it does ls-remote + fetch (network) up front, so a stub publisher or a monkeypatched pub.git is the way to keep later tests offline (see test_publish_without_remote_unchanged for the call-log pattern). publish() can return {'status': 'nothing_to_publish', 'reason': 'the build matches main'}: callers must treat it as a non-error (CLI prints 'Nothing to publish: ...' and exits 0; Slack _say's the same). No 'published' event and no .git/governor_published.json write happen in that case, so read_published(target) may still return the previous publish. sync_main is exported in __all__ and returns 'fast_forwarded' or None. Helpers: _generated(path) and ORIGIN_MAIN / DIVERGED constants in publish.py. The status --porcelain loop is per file; fine for now, batch it if a later step touches large upstream merges.
+
+## F6 result (implementer notes; the factory adds the reviewed result)
+One Slack bot for several tenants (section 32). SlackConfig.from_env loads GOVERNOR_TENANTS (TenantError -> ConfigError naming the variable): targets = tenant name -> tenant.target, config.tenants, and config.warnings carries TARGETS_IGNORED when GOVERNOR_SLACK_TARGETS is also set (printed by __main__). notifier.TenantThreads lists threads per tenant from each tenant's checkpoints (known_threads(tenant.checkpoints)) and reads a thread's state from its tenant's file; GovernorSlack takes tenant_threads= for tests. parse_command(..., tenant_threads=) puts the tenant on Command; resolve_tenant_thread raises UsageError naming both tenants when a token matches threads in two. Buttons and the reject modal resolve the tenant the same way. graph.start/approve/reject get tenant=<Tenant> only in multi-tenant mode (single-tenant calls unchanged); publish uses tenant.target; init_target gets dbt_project_name(name) ('-' -> '_', leading digit -> 't_'), the build's project name stays the tenant name. Messages: progress header '(tenant <name>)', design card title, every Notifier.reply gets a 'tenant <name>' context line (blocks.with_tenant); start line and usage footer list '<name>: host:port/db'. ask is refused before parsing. Docs: docs/tenants.md, docs/slack.md 'Several tenants'. Acceptance 7/7: tests/integrations 46, tests 549 (+21 skipped), tests/build 197 (+12 skipped). Limit: the message store, events and the channel stay process-wide; the build CLI still passes the raw tenant name to init_target (outside F6 paths).
+

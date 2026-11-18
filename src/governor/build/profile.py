@@ -6,6 +6,7 @@ integer, numeric, timestamp and date columns. A PII value is never fetched.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Iterable
 from itertools import combinations
@@ -16,6 +17,7 @@ import yaml
 from psycopg import sql
 
 from governor.build.models import ColumnProfile, Profile, Relationship, TableProfile
+from governor.core.pgconn import with_timeout
 
 # One set of patterns for the server (Postgres ARE) and the offline check (Python re). No backslashes,
 # so the literals need no escaping. Leading zeros make a value a code (zip prefixes), not a number.
@@ -116,6 +118,7 @@ _WIDER = {"boolean": ("boolean",), "integer": ("integer", "numeric"), "numeric":
           "date": ("date", "timestamp"), "timestamp": ("timestamp",), "text": ()}
 SAMPLE_ROWS = 10_000
 PAIR_SAMPLE_ROWS = 100_000
+TRIPLE_MAX_COLUMNS = 12  # C(12, 3) = 220 candidate triples at most
 
 
 def _stats(conn: psycopg.Connection, rel: sql.Composable, cols: list[str]) -> tuple[int, list[dict]]:
@@ -174,19 +177,33 @@ def _min_max(conn: psycopg.Connection, rel: sql.Composable, cols: dict[str, str]
     return out
 
 
-def _pair_keys(conn: psycopg.Connection, rel: sql.Composable, rows: int, columns: list[ColumnProfile]) -> list[list[str]]:
-    """Column pairs with no nulls that are unique together. A duplicate in the first rows already rules a pair out."""
+def _combo_keys(conn: psycopg.Connection, rel: sql.Composable, rows: int, columns: list[ColumnProfile],
+                size: int) -> list[list[str]]:
+    """Column combinations of ``size`` with no nulls that are unique together. A duplicate in the first rows already
+    rules a combination out. Triples look at the first ``TRIPLE_MAX_COLUMNS`` such columns only (at most 220 checks)."""
     full = [c for c in columns if c.null_rate == 0.0]
+    if size > 2:
+        full = full[:TRIPLE_MAX_COLUMNS]
     keys = []
-    for a, b in combinations(full, 2):
-        if a.distinct * b.distinct < rows:
+    for combo in combinations(full, size):
+        if math.prod(c.distinct for c in combo) < rows:
             continue
-        exprs = [_value(a.name), _value(b.name)]
+        exprs = [_value(c.name) for c in combo]
         if rows > PAIR_SAMPLE_ROWS and _distinct(conn, rel, exprs, PAIR_SAMPLE_ROWS) < PAIR_SAMPLE_ROWS:
             continue
         if _distinct(conn, rel, exprs) == rows:
-            keys.append([a.name, b.name])
+            keys.append([c.name for c in combo])
     return keys
+
+
+def _pair_keys(conn: psycopg.Connection, rel: sql.Composable, rows: int, columns: list[ColumnProfile]) -> list[list[str]]:
+    """Column pairs with no nulls that are unique together."""
+    return _combo_keys(conn, rel, rows, columns, 2)
+
+
+def _triple_keys(conn: psycopg.Connection, rel: sql.Composable, rows: int, columns: list[ColumnProfile]) -> list[list[str]]:
+    """Column triples with no nulls that are unique together (an enrolment: module, presentation, student)."""
+    return _combo_keys(conn, rel, rows, columns, 3)
 
 
 def _coverage(conn: psycopg.Connection, schema: str, key_table: str, other: str, col: str) -> float | None:
@@ -204,7 +221,7 @@ def profile_schema(dsn: str, schema: str = "raw", policy: dict[str, str] | None 
     """Profile every base table of ``schema`` (section 5 structure)."""
     policy = policy or {}
     tables: list[TableProfile] = []
-    with psycopg.connect(dsn, autocommit=True) as conn:
+    with psycopg.connect(with_timeout(dsn), autocommit=True) as conn:
         conn.read_only = True
         conn.execute("set work_mem = '128MB'")  # distinct counts hash in memory; this session only
         layout = _tables(conn, schema)
@@ -228,6 +245,8 @@ def profile_schema(dsn: str, schema: str = "raw", policy: dict[str, str] | None 
             keys = [[c.name] for c in columns if rows and c.null_rate == 0.0 and c.distinct == rows]
             if rows and not keys:
                 keys = _pair_keys(conn, rel, rows, columns)
+            if rows and not keys:  # 18 Nov: OULAD enrolments are unique only on module + presentation + student
+                keys = _triple_keys(conn, rel, rows, columns)
             tables.append(TableProfile(name=name, rows=rows, columns=columns, candidate_keys=keys))
 
         relationships: list[Relationship] = []

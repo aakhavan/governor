@@ -1,0 +1,66 @@
+# governor batch 3 (F1-F6): maintain mode (idempotent runs, drift-aware design, safe publish) and tenants.
+# Contract: docs/capstone/batch3.md sections 27-32. Decision: docs/adr/0004-maintain-mode-and-tenancy.md.
+# Runs on branch batch3, never on main. Run: factory lock --plan plan-batch3.yaml ; factory run --plan plan-batch3.yaml --until-gate
+# Only F6 has a human gate, so the batch runs unattended to the end and waits there for Amir's review.
+project: governor
+notes: NOTES.md
+agents: AGENTS.md
+defaults:
+  max_fix_loops: 2
+  timeout_min: 60
+  run_budget_usd: 90
+  step_budget_usd: 20
+  review_budget_usd: {design: 3.0, mechanical: 0.75}
+roles:
+  design: {implementer: [claude-tc-opus, cursor-grok], reviewer: [claude-tc-fable, cursor-grok]}
+steps:
+  - id: F1
+    title: Safety rails (database connection timeout, active workspace in the bot)
+    tier: design
+    prompt: plan/prompts/F1.md
+    accept: plan/accept/accept_f1.py
+    allowed_paths: [src/governor/core/pgconn.py, src/governor/build/workspace.py, src/governor/build/profile.py, src/governor/build/silver.py, src/governor/build/gold.py, src/governor/build/certify.py, src/governor/build/__main__.py, src/governor/core/serving.py, src/governor/integrations/slack/, tests/core/, tests/build/, tests/integrations/, docs/slack.md]
+    human_gate: false
+    review_focus: "every build, certify and serving connection gets a connect timeout and an existing one is kept; src/governor/eval is untouched; the start-up line and usage footer show host:port/db and the knowledge folder but never a user, password or full DSN; the unreachable-database test is offline and bounded"
+  - id: F2
+    title: Profile fingerprint and drift
+    tier: design
+    prompt: plan/prompts/F2.md
+    accept: plan/accept/accept_f2.py
+    # tests/core/test_build_drift.py: a re-export the F2 implementer added to work around an acceptance bug (since fixed);
+    # allowed only so the run can continue. Amir deletes it at review.
+    allowed_paths: [src/governor/build/drift.py, src/governor/build/graph.py, src/governor/build/publish.py, tests/build/, tests/fixtures/build/, tests/core/test_build_drift.py]
+    human_gate: false
+    review_focus: "the fingerprint holds only names, inferred types, PII flags and candidate keys, never rows, rates, distinct counts, min or max; the hash is order-independent; diff names changes only; the fingerprint is written at approval and published with the other generated files; nothing else in the graph changes"
+  - id: F3
+    title: Up-to-date runs and drift-aware design
+    tier: design
+    prompt: plan/prompts/F3.md
+    accept: plan/accept/accept_f3.py
+    allowed_paths: [src/governor/build/events.py, src/governor/build/graph.py, src/governor/build/design.py, src/governor/build/drift.py, src/governor/build/__main__.py, src/governor/build/prompts/propose.md, src/governor/integrations/slack/, tests/build/, tests/integrations/, tests/fixtures/build/, docs/slack.md]
+    human_gate: false
+    review_focus: "an up-to-date run makes zero model calls and touches no dbt model or file under models/; all three conditions are required (hash, built build.json with the same thread, design.json); force skips only that check; a drift run seeds previous with the last approved design and the note lists names only; targets without a fingerprint behave exactly as before; Slack parses force strictly and shows up_to_date as a terminal state without buttons"
+  - id: F4
+    title: Publish against a stale main, nothing to publish
+    tier: design
+    prompt: plan/prompts/F4.md
+    accept: plan/accept/accept_f4.py
+    allowed_paths: [src/governor/build/publish.py, src/governor/build/__main__.py, src/governor/integrations/slack/, tests/build/, tests/integrations/]
+    human_gate: false
+    review_focus: "a stale main is fast-forwarded only when it has no commits of its own; a diverged main commits and pushes nothing; an unchanged build makes no commit and leaves no branch; targets without origin behave as before; tests use a local bare repository and never the network"
+  - id: F5
+    title: Tenants (registry, per-tenant build, CLI --tenant)
+    tier: design
+    prompt: plan/prompts/F5.md
+    accept: plan/accept/accept_f5.py
+    allowed_paths: [src/governor/core/tenancy.py, src/governor/core/pgconn.py, src/governor/build/profile.py, src/governor/build/dbt.py, src/governor/build/graph.py, src/governor/build/__main__.py, src/governor/build/certify.py, src/governor/build/silver.py, src/governor/build/gold.py, src/governor/build/workspace.py, src/governor/build/publish.py, tests/core/, tests/build/, tests/fixtures/]
+    human_gate: false
+    review_focus: "a tenant run reads only its own knowledge, writes only its own state and target and connects only to its own database (the isolation tests prove each); no tenant means identical behaviour; the registry refuses shared roots, targets or databases; certify refuses an admin DSN for another tenant's database; no module-level state is mutated per tenant"
+  - id: F6
+    title: One Slack bot for several tenants
+    tier: design
+    prompt: plan/prompts/F6.md
+    accept: plan/accept/accept_f6.py
+    allowed_paths: [src/governor/integrations/slack/, tests/integrations/, docs/slack.md, docs/tenants.md]
+    human_gate: true
+    review_focus: "every command reaches exactly one tenant and a thread is resolved from its tenant's checkpoints; an ambiguous short id is an error naming both tenants; ask runs nothing in multi-tenant mode; single-tenant mode is unchanged; messages name the tenant and never carry data values or secrets; the whole suite is green"

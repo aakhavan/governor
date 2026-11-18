@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-A1 is complete and accepted 14/14 on branch factory/A1 (uncommitted in the governor-airflow worktree). New: airflow/dags/governor_profile_raw.py (manual DAG, DockerOperator subclass rendering docker_url and mounts, all connection values from Airflow Variables at run time, no credentials), src/governor/api/profiles.py (auth-guarded list and get routes with regex and resolved-path checks), apps/streamlit/pages/4_Profiles.py, docs/airflow.md, and three test files. Existing files only gained lines: app.py +2, client.py +8. Full offline suite 513 passed / 21 skipped; the profile workload ran as a governor:local container against the test bed on 55432 and profiled 9 tables. The DAG itself has not yet been run under Airflow; that belongs to the airflow-platform side.
+F6 (one Slack bot for several tenants) is implemented on branch factory/F6, uncommitted, and reviewed as pass. SlackConfig.from_env loads GOVERNOR_TENANTS into config.tenants with targets = tenant name -> tenant.target and a start-up warning when GOVERNOR_SLACK_TARGETS is also set. notifier.TenantThreads lists threads per tenant from each tenant's checkpoints; parse_command(tenant_threads=) and _button_tenant put exactly one tenant on each Command and raise a UsageError naming both tenants on an ambiguous short id. graph.start/approve/reject receive tenant=<Tenant> only in multi-tenant mode; publish uses the tenant's registered target. Progress header, design card title, every thread reply, the start line and the usage footer name the tenant (host:port/db only). ask is refused with the spec's text and runs nothing. Known limits: events and the Slack message store stay process-wide; the build CLI still passes the raw tenant name to init_target. Acceptance 7/7: tests/integrations 46, tests 549 passed and 21 skipped, tests/build 197 passed and 12 skipped.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -21,63 +21,46 @@ A1 is complete and accepted 14/14 on branch factory/A1 (uncommitted in the gover
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
 
-## E4 result
-*Injection tests, error redaction and the threat model, 11 Nov 2026 14:24.*
+## F5 result
+*Tenants (registry, per-tenant build, CLI --tenant), 17 Nov 2026 18:29.*
 
-Implementer `claude-tc-opus`; reviewers `cursor-grok`: pass, `claude-tc-fable`: pass; 1 fix loop(s); branch `factory/E4`.
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F5`.
 
 | check | ok | detail |
 |---|---|---|
 | capstone ground truth unchanged | yes | capstone ground truth unchanged |
-| src/governor/build/graph.py unchanged against main | yes | the file differs from main |
-| src/governor/build/design.py unchanged against main | yes | the file differs from main |
-| src/governor/build/prompts/repair.md unchanged against main | yes | the file differs from main |
-| src/governor/build/prompts/propose.md unchanged against main | yes | the file differs from main |
-| governor.build imports neither Slack nor ask | yes |  |
-| redact_error runs | yes |  |
-| no data value survives redaction | yes |  |
-| known identifiers survive | yes |  |
-| long numbers and DETAIL lines go | yes |  |
-| threat model exists, at most 80 lines | yes | 57 lines |
-| threat model has ASI01 | yes |  |
-| threat model has ASI02 | yes |  |
-| threat model has ASI03 | yes |  |
-| threat model has ASI06 | yes |  |
-| threat model has ASI09 | yes |  |
-| threat model has Open findings | yes |  |
-| threat model holds no marker or data value | yes |  |
-| pytest tests/build | yes | 171 passed, 12 skipped in 51.82s |
-| required tests present | yes | 9 found |
+| tenancy module | yes | missing in src/governor/core/tenancy.py |
+| graph takes a tenant | yes | missing in src/governor/build/graph.py |
+| CLI --tenant | yes | missing in src/governor/build/__main__.py |
+| pytest tests/core | yes | 120 passed, 12 skipped in 13.43s |
+| pytest tests/build | yes | 197 passed, 12 skipped in 87.99s (0:01:27) |
+| required tests present | yes | 8 found |
 
-Review: cursor-grok: pass | claude-tc-fable: pass
+Review: F5 does what section 31 asks. Tenant is a frozen dataclass with derived paths, build_dsn and dbt_env; load_tenants refuses bad names, unknown keys, missing knowledge files and shared root/target/database. graph.start/approve/reject inject the tenant's catalogue, blueprint, approved defaults, policy, checkpoints, profiler, inspector, row counter and dbt env via build_graph kwargs; no module-level state or os.environ is mutated. certify checks the admin DSN host:port/db before anything runs. CLI --tenant fills target/project name and refuses a foreign target (exit 2). All eight tests present.
 
-For Amir: The acceptance lines 'the file differs from main' are the failure string stored even when the check passes. ok true means git diff --quiet against main returned 0, so graph.py, design.py, repair.md and propose.md match main. Unquoted values on a kept error line are left as written; section 25 and the threat model both say so, and Postgres quotes the values it reports.
+For Amir: No code changes needed. Two small inconsistencies worth a later tidy: the registry's duplicate-database check does not treat localhost/127.0.0.1/::1 as one host while certify's admin DSN check does, and the registry validates kpis.yaml and blueprint.md but not shop/policy.yaml or shop/access.yaml, so a tenant missing those fails later with a less helpful error. Events remain process-wide, as NOTES already records for F6.
 
-## A1 result
-*Airflow integration (manual profile DAG, profiles API route, Profiles page), 13 Nov 2026 20:56.*
+## Additions for F6
+For F6: (1) Use graph.start/approve/reject with tenant=<Tenant>; checkpoints default to tenant.checkpoints (root/artifacts/build_checkpoints.sqlite), so listing threads per tenant means opening each tenant's checkpoint file via graph.open_checkpointer(tenant.checkpoints). (2) Events (events_path) are still process-wide in GOVERNOR_STATE_DIR; map thread ids to tenants via checkpoints, not via events. (3) Tenant.address gives host:port/db for the start-up line and footer; never log build_dsn(). (4) Project name is the tenant name verbatim; names may contain '-', which dbt rejects as a project name, so either restrict names in the registry or map '-' to '_' when calling init_target. (5) load_tenants raises TenantError (a ValueError) naming the tenant; tenants_path() returns None when GOVERNOR_TENANTS is unset or empty. (6) The registry's shared-database check compares host strings lowercased only; certify's admin DSN check treats localhost/127.0.0.1/::1 as one host, so two entries differing only by localhost vs 127.0.0.1 are accepted by the registry. (7) The registry does not check policy.yaml/access.yaml exist; a tenant missing knowledge/shop/policy.yaml fails at profile time with a FileNotFoundError surfaced as 'build run failed'.
 
-Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass, `cursor-grok`: pass; 2 fix loop(s); branch `factory/A1`.
+## F6 result
+*One Slack bot for several tenants, 17 Nov 2026 20:44.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass, `cursor-grok`: pass; 0 fix loop(s); branch `factory/F6`.
 
 | check | ok | detail |
 |---|---|---|
-| apps/streamlit/client.py only gains lines (<= 40) | yes | +8 -0 |
-| src/governor/api/app.py only gains lines (<= 3) | yes | +2 -0 |
-| diff inspected | yes | 30	0	plan/prompts/A1.md | 2	0	src/governor/api/app.py | warning: in the working copy of 'STATUS.md', CRLF will be replac |
-| DAG file exists | yes | C:\Users\amir0\portfolio\governor-airflow\airflow\dags\governor_profile_raw.py |
-| DAG imports allowed modules only | yes |  |
-| dag_id governor_profile_raw | yes |  |
-| manual only | yes |  |
-| no literal password | yes |  |
-| uses Variables for connection values | yes |  |
-| full offline test suite green | yes | 513 passed, 21 skipped in 111.39s (0:01:51) |
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| registry in Slack config | yes | missing in src/governor/integrations/slack/config.py |
+| tenants doc | yes | missing in docs/tenants.md |
+| pytest tests/integrations | yes | 46 passed in 10.04s |
+| pytest tests | yes | 549 passed, 21 skipped in 134.99s (0:02:14) |
+| pytest tests/build | yes | 197 passed, 12 skipped in 87.95s (0:01:27) |
 | required tests present | yes | 6 found |
-| governor:local builds from the worktree | yes | #16 unpacking to docker.io/library/governor:local | #16 unpacking to docker.io/library/governor:local 0.6s done | #16 DO |
-| test bed up on 55432 | yes | start ../governor/testbed first |
-| profile runs as a container against the test bed | yes | 9 tables |
 
 Review: claude-tc-fable: pass | cursor-grok: pass
 
-For Amir: Pass. Watch three things when airflow-platform triggers the DAG: (1) the _RenderedDockerOperator subclass turns the Mount into a plain dict at render time, which docker-py accepts but nothing here executes; (2) the volume default governor_governor-data was not confirmed with docker volume ls; (3) an unset governor_build_password Variable renders as the literal string None and fails at Postgres auth, as docs/airflow.md states. I could not re-run pytest in this session (approval unavailable), so the test result is the acceptance's own run.
+For Amir: Two non-blocking notes. The CLI --tenant path (F5) still gives init_target the raw tenant name, so a tenant like globex-eu started first from the CLI gets an invalid dbt project name; the Slack path maps it to globex_eu. Worth a one-line fix in build/__main__.py when convenient. Also, the reviewer's pytest run was blocked by the permission policy, so the green result is the acceptance script's.
 
 ## Additions for the next plan
-Profiles API: GET /profiles (newest first by mtime, max 100) and GET /profiles/{run_id} (raw bytes, 404 if absent, 422 if run_id fails ^[A-Za-z0-9_.+-]{1,128}$) live in src/governor/api/profiles.py behind make_router(caller_role); they read $GOVERNOR_STATE_DIR/profiles/ at request time (relative to repo root, like paths.STATE). The DAG writes /data/profiles/<run_id with ':'->'_'>.json, so the API's state dir must be the same volume mounted at /data in the compose stack. DockerOperator does not template docker_url or mounts natively; the DAG uses a _RenderedDockerOperator subclass that adds them to template_fields, so Airflow renders the Mount into a plain dict. Variables: governor_data_volume (default governor_governor-data, unverified against docker volume ls), docker_url, governor_pg_host/port/db, governor_build_user, governor_build_password (no default; missing renders as the string 'None'). The airflow-platform step must actually trigger the DAG once to prove the subclass and the volume name. Tests: tests/test_api_profiles.py, tests/test_airflow_dag.py (static AST, Airflow not installed), tests/ui/test_profiles_page.py over the ASGI client. accept_a1 now drops GOVERNOR_PG_DSN/GOVERNOR_PG_ADMIN_DSN before pytest so the live test-bed test skips.
+Multi-tenant Slack: GovernorSlack takes tenant_threads= (callable returning tenant -> thread ids) for tests; config.tenants non-empty switches every path. Notifier gets tenant_of= and records rec['tenant'] from the run_started project name, then from the tenants' checkpoints; every Notifier.reply appends a 'tenant <name>' context block via blocks.with_tenant, so any new reply type gets it for free, but a chat_update that rebuilds blocks must re-apply with_tenant (see _on_published). dbt_project_name(name) in app.py maps '-' to '_' and prefixes a leading digit with 't_'; the build CLI --tenant still hands init_target the raw tenant name, so a hyphenated tenant created from the CLI gets an invalid dbt project name unless Slack created the target first (init_target never overwrites). ask remains single-tenant and is refused before parse_command. The reviewer's pytest invocation was blocked by the permission policy; acceptance reported tests/integrations 46 passed and the full suite 549 passed, 21 skipped.

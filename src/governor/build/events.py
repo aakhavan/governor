@@ -25,7 +25,8 @@ log = logging.getLogger(__name__)
 EVENTS_FILE = "events.jsonl"
 NOTIFIERS_ENV = "GOVERNOR_BUILD_NOTIFIERS"
 KINDS = ("run_started", "profiled", "proposed", "validated", "design_gate", "approved", "rejected", "silver_built",
-         "repair", "escalated", "gold_built", "built", "published", "certified")
+         "repair", "escalated", "gold_built", "built", "published", "certified",
+         "up_to_date")
 _MAX_TEXT = 300
 
 

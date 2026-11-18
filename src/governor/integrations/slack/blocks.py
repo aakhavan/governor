@@ -31,7 +31,8 @@ STAGES: tuple[tuple[str, str], ...] = (
 )
 
 USAGE = ("Usage:\n"
-         "• `/governor run <target>`: start a build (targets: {targets})\n"
+         "• `/governor run <target> [force]`: start a build (targets: {targets}); `force` designs again even "
+         "when nothing changed\n"
          "• `/governor status`: recent build threads\n"
          "• `/governor approve <thread>`: approve the design at the gate\n"
          "• `/governor reject <thread> <note>`: send the design back with a note\n"
@@ -96,7 +97,8 @@ def _cost(value: Any) -> str:
 
 
 FAILED, BUILT, PUBLISHED, SUPERSEDED, INTERRUPTED = "failed", "built", "published", "superseded", "interrupted"
-TERMINAL = (FAILED, BUILT, PUBLISHED, SUPERSEDED, INTERRUPTED)
+UP_TO_DATE = "up_to_date"  # batch3.md section 29: nothing changed since the last approved build
+TERMINAL = (FAILED, BUILT, PUBLISHED, SUPERSEDED, INTERRUPTED, UP_TO_DATE)
 _LABELS = dict(STAGES)
 
 
@@ -105,7 +107,7 @@ def _checklist(rec: dict) -> list[str]:
     done = set(rec.get("done") or [])
     outcome = rec.get("outcome")
     failed = rec.get("failed_stage") if outcome == FAILED else None
-    ended = outcome in (FAILED, SUPERSEDED, INTERRUPTED)
+    ended = outcome in (FAILED, SUPERSEDED, INTERRUPTED, UP_TO_DATE)
     lines = []
     seen_failed = False
     for key, label in STAGES:
@@ -123,7 +125,10 @@ def _checklist(rec: dict) -> list[str]:
 
 def _headline(thread_id: str, rec: dict) -> tuple[str, str]:
     """(mrkdwn header, plain fallback). Ended runs read as ended."""
-    who = f"governor build `{short(thread_id)}` ({rec.get('project') or 'build'})"
+    if rec.get("tenant"):  # batch3 section 32.3: multi-tenant mode names the tenant
+        who = f"governor build `{short(thread_id)}` (tenant {safe_text(rec['tenant'], 60)})"
+    else:
+        who = f"governor build `{short(thread_id)}` ({rec.get('project') or 'build'})"
     outcome = rec.get("outcome")
     if outcome == FAILED:
         where = rec.get("stopped_at") or _LABELS.get(rec.get("failed_stage") or "", "build")
@@ -139,6 +144,9 @@ def _headline(thread_id: str, rec: dict) -> tuple[str, str]:
     if outcome == SUPERSEDED:
         what = f"superseded by `{short(rec.get('superseded_by'))}`"
         return f":white_circle: {what}: *{who}*", f"{what}: {who}"
+    if outcome == UP_TO_DATE:
+        line = f"up to date: no change since build {short(rec.get('last_build'))}"
+        return f":white_check_mark: {line}\n*{who}*", f"{line}: {who}"
     if outcome == INTERRUPTED:
         return f":white_circle: interrupted (bot restarted): *{who}*", f"interrupted (bot restarted): {who}"
     status = rec.get("status") or "running"
@@ -319,10 +327,11 @@ def _gap_reason(k: dict) -> str:
 
 
 def design_card(thread_id: str, proposal: dict | None, findings: list[dict] | None, status: str,
-                decided: str | None = None) -> tuple[str, list[dict]]:
+                decided: str | None = None, tenant: str | None = None) -> tuple[str, list[dict]]:
     """Silver models, KPIs to build and to decline with gap reasons, validation findings, and (when the design
     waits at the gate) Approve / Reject buttons. Once decided, the ``decided`` line replaces the buttons.
-    Mappings are not shown: they can hold SQL literals."""
+    Mappings are not shown: they can hold SQL literals. ``tenant`` (multi-tenant mode) is named in the title."""
+    of = f" (tenant {safe_text(tenant, 60)})" if tenant else ""
     proposal = proposal or {}
     findings = findings or []
     silver = proposal.get("silver_models") or []
@@ -330,7 +339,7 @@ def design_card(thread_id: str, proposal: dict | None, findings: list[dict] | No
     build = [k for k in kpis if k.get("decision") == "build"]
     decline = [k for k in kpis if k.get("decision") == "decline"]
     waiting = status == "awaiting_design_approval"
-    title = (f"*Design for build `{short(thread_id)}`*: {len(silver)} silver models, {len(build)} KPIs to build, "
+    title = (f"*Design for build `{short(thread_id)}`*{of}: {len(silver)} silver models, {len(build)} KPIs to build, "
              f"{len(decline)} to decline, {len(findings)} validation findings")
     blocks: list[dict] = [_section(title)]
     blocks.append(_section("*Silver models*\n" + _bullets(f"`{m.get('name')}` ({m.get('folder') or 'silver'})"
@@ -354,7 +363,7 @@ def design_card(thread_id: str, proposal: dict | None, findings: list[dict] | No
         blocks.append(_context("The full report is `governor/design.md` (attached). Approving builds silver and gold."))
     else:
         blocks.append(_context(f"Status `{status}`: the design cannot be approved. See `governor/design.md`."))
-    text = f"Design for build {short(thread_id)}: {len(build)} KPIs to build, {len(decline)} to decline"
+    text = f"Design for build {short(thread_id)}{of}: {len(build)} KPIs to build, {len(decline)} to decline"
     return text, blocks
 
 
@@ -403,6 +412,14 @@ def line(text: str) -> tuple[str, list[dict]]:
     return text, [_section(text)]
 
 
+def with_tenant(text: str, block_list: list[dict] | None, tenant: str) -> tuple[str, list[dict]]:
+    """A thread reply in multi-tenant mode (batch3 section 32.3): the fallback text and a context line name the
+    tenant. A plain-text reply becomes one section plus that line."""
+    name = safe_text(tenant, 60)
+    out = list(block_list) if block_list else [_section(text)]
+    return f"{text} (tenant {name})", out + [_context(f"tenant {name}")]
+
+
 def status_list(threads: list[dict]) -> str:
     """``/governor status``: one line per recent thread (newest first)."""
     if not threads:
@@ -444,14 +461,25 @@ def ask_error(reason: Any) -> str:
     return ASK_ERROR.format(reason=safe_text(reason, 200) or "unknown error")
 
 
-def usage(targets: Iterable[str], error: str | None = None) -> str:
+def usage(targets: Iterable[str], error: str | None = None, workspace: tuple[str, str] | None = None,
+          tenants: str | None = None) -> str:
+    """The usage text; ``workspace`` (knowledge folder name, ``host:port/db``) adds the footer line. ``tenants``
+    (multi-tenant mode, ``<name>: <host>:<port>/<db>, ...``) replaces it with the tenant list."""
     names = ", ".join(f"`{t}`" for t in sorted(targets)) or "none configured"
-    return (f"{error}\n" if error else "") + USAGE.format(targets=names)
+    text = (f"{error}\n" if error else "") + USAGE.format(targets=names)
+    if tenants:
+        text += f"\ntenants: {tenants}"
+    elif workspace:
+        text += f"\nworkspace: knowledge {workspace[0]} · database {workspace[1]}"
+    return text
 
 
-__all__ = ["ASK_ACK", "ASK_ERROR", "ASK_REFUSAL", "ask_answer", "ask_context", "ask_error", "slack_escape",
+ASK_MULTI_TENANT = "ask serves one tenant only; it is not available in multi-tenant mode yet"
+
+
+__all__ = ["ASK_ACK", "ASK_ERROR", "ASK_MULTI_TENANT", "ASK_REFUSAL", "with_tenant", "ask_answer", "ask_context", "ask_error", "slack_escape",
            "PUBLISH_ACTION","after_publish", "copyable", "built_reply", "certify_command", "decided_line", "publish_actions",
-           "published_link", "BUILT", "FAILED", "INTERRUPTED", "MAPPINGS_OMITTED", "PUBLISHED", "SUPERSEDED", "TERMINAL",
+           "published_link", "BUILT", "FAILED", "INTERRUPTED", "MAPPINGS_OMITTED", "PUBLISHED", "SUPERSEDED", "TERMINAL", "UP_TO_DATE",
            "design_without_mappings", "failing_tests", "first_line", "node_name", "reason_line",
            "run_results_failures", "tests_reason", "APPROVE_ACTION","NOTE_ACTION", "NOTE_BLOCK", "REJECT_ACTION", "REJECT_MODAL", "STAGES", "design_card",
            "escalation", "line", "progress", "published", "reject_modal", "safe_text", "short", "status_list", "usage"]

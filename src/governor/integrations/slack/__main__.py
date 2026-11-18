@@ -9,7 +9,7 @@ import logging
 import sys
 
 from governor.integrations.slack.app import create_app
-from governor.integrations.slack.config import ConfigError, SlackConfig
+from governor.integrations.slack.config import ConfigError, SlackConfig, start_line
 
 
 def main() -> int:
@@ -23,13 +23,14 @@ def main() -> int:
     if missing:
         print(f"governor slack: set {', '.join(missing)} (see docs/slack.md)", file=sys.stderr)
         return 1
+    for warning in config.warnings:  # batch3 section 32.1: GOVERNOR_SLACK_TARGETS ignored under a registry
+        print(f"governor slack: warning: {warning}", file=sys.stderr)
     if not config.approvers:
         print("governor slack: GOVERNOR_SLACK_APPROVERS is empty, so nobody can approve", file=sys.stderr)
     from slack_bolt.adapter.socket_mode import SocketModeHandler
 
     app = create_app(config)
-    print(f"governor slack: Socket Mode, channel #{config.channel}, targets {sorted(config.targets) or 'none'}",
-          file=sys.stderr)
+    print(start_line(config), file=sys.stderr)
     SocketModeHandler(app, config.app_token).start()
     return 0
 
