@@ -38,6 +38,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 from governor.build import events, graph
 from governor.build import publish as build_publish
+from governor.core.tenancy import dbt_project_name
 from governor.integrations.slack import blocks
 from governor.integrations.slack.config import SlackConfig, ensure_notifier_registered, tenant_list, workspace
 from governor.integrations.slack.notifier import Notifier, TenantThreads, known_threads, thread_values
@@ -84,12 +85,6 @@ def resolve_tenant_thread(token: str, tenant_threads: Mapping[str, Iterable[str]
         return None, None
     thread_id = resolve_thread(token, by_tenant[hits[0]])
     return (hits[0], thread_id) if thread_id else (None, None)
-
-
-def dbt_project_name(tenant: str) -> str:
-    """dbt project names allow letters, digits and ``_`` and start with a letter or ``_``: ``-`` becomes ``_``."""
-    name = tenant.replace("-", "_")
-    return name if not name[:1].isdigit() else f"t_{name}"
 
 
 def resolve_thread(token: str, threads: Iterable[str]) -> str | None:

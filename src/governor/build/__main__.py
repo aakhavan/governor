@@ -27,6 +27,7 @@ import psycopg
 
 from governor.build.workspace import build_dsn, init_target, write_sources
 from governor.core.paths import KNOWLEDGE
+from governor.core.tenancy import dbt_project_name
 
 if TYPE_CHECKING:
     from governor.core.tenancy import Tenant
@@ -156,7 +157,8 @@ def _run(args: argparse.Namespace) -> int:
         ensure_on_main(args.target)  # publish branches from main: never build on an earlier build's branch
     except Exception as e:  # noqa: BLE001
         return _fail("cannot start the build", e)
-    init_target(args.target, args.project_name)
+    # a tenant name may hold "-", which dbt project names do not allow (same mapping as the Slack bot)
+    init_target(args.target, dbt_project_name(args.project_name) if tenant else args.project_name)
     try:
         out = graph.start(args.target, args.project_name, llm, policy=args.policy, profile=profile, force=args.force,
                           tenant=tenant)

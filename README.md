@@ -73,7 +73,7 @@ Design decisions, with the options considered, are in [`docs/adr/`](docs/adr/):
 1. **Gold KPIs come from reviewed SQL templates, not from the model** ([ADR 0001](docs/adr/0001-gold-kpis-from-templates.md)). The model only maps template inputs to columns; a blueprint check proves every gold file equals a fresh render of the approved mapping.
 2. **The database is the PII boundary** ([ADR 0002](docs/adr/0002-postgres-adapters-and-serving-schemas.md)). Each reader role gets its own serving views: salted hashes for analysts, masks for finance unless a column is granted.
 3. **Writes go through a branch and two gates** ([ADR 0003](docs/adr/0003-build-writes-through-branch-and-two-gates.md)). Separate logins: `governor_build` creates only in `dev_governor`, `governor_deploy` only in `analytics`, `governor_ask` is read-only with `SET ROLE` taken from the token, never from the request.
-4. **Build mode rebuilds from raw on every run.** A rerun is safe, because nothing reaches a stakeholder without a design approval, a merged pull request and certification, but it is not incremental. Maintain mode (compare the new profile with the last one, skip the model call when nothing changed, open a pull request with only the diff) is the next module.
+4. **Build mode rebuilds from raw on every run.** A rerun is safe, because nothing reaches a stakeholder without a design approval, a merged pull request and certification, but it is not incremental. Maintain mode (compare the new profile with the last one, skip the model call when nothing changed, open a pull request with only the diff) was added after submission ([ADR 0004](docs/adr/0004-maintain-mode-and-tenancy.md), see [the last section](#after-submission-maintain-mode-and-tenants)).
 
 ### How it applies the course
 
@@ -159,9 +159,9 @@ Full write-up: [`docs/capstone/ethics.md`](docs/capstone/ethics.md); threat mode
 
 - **No outside users yet**; tested by the author as the target user, end to end through Slack.
 - **Few runs, two datasets**; model output varies between runs.
-- **Rebuilds from raw** on every run; maintain mode is not built (decision 4).
+- **Maintain mode watches the raw schema only**: a hand edit to a generated model is not detected, and `force` restores it.
 - **Wrong-but-valid mappings** pass the code checks.
-- **Single tenant, Postgres only** for build mode.
+- **Postgres only** for build mode; `ask` and the certified registry serve one tenant.
 
 ## Companion modules and earlier work
 
@@ -174,3 +174,17 @@ Full write-up: [`docs/capstone/ethics.md`](docs/capstone/ethics.md); threat mode
 Built step by step by my own code factory (implement → review loops over CLI coding agents, with human gates); foundation files from my Sprint 4 project are listed in [`PROVENANCE.md`](PROVENANCE.md).
 
 Code: MIT ([`LICENSE`](LICENSE)). The Olist dataset is CC BY-NC-SA 4.0 (credit: Olist, "Brazilian E-Commerce Public Dataset by Olist"); it is not in this repository, and values derived from it, including [`evaluation/build_gold/`](evaluation/build_gold/NOTICE.md) and [`evaluation/shop_golden/`](evaluation/shop_golden/NOTICE.md), stay under that licence.
+
+## After submission: maintain mode and tenants
+
+Added on 17–18 Nov 2026, after the capstone was submitted. Built by the same factory in six reviewed steps, and run end to end from one Slack bot serving three datasets as tenants: retail, education and short-term rentals (Inside Airbnb Berlin). Decision and options: [ADR 0004](docs/adr/0004-maintain-mode-and-tenancy.md).
+
+| | |
+|---|---|
+| **Idempotent reruns** | At approval, governor stores a fingerprint of the raw schema: table and column names, inferred types, PII flags and candidate keys, never counts or values. A later run with the same fingerprint and a finished build ends as `up_to_date`, with no model call and no dbt run. `run <target> force` designs again. |
+| **Drift-aware design** | When the fingerprint differs, the planner gets the last approved design and the list of changes, and is told to change only what they require. The design report lists the changes; both human gates stay. |
+| **Safer publish** | `publish` fetches `origin/main`, fast-forwards a local `main` that is only behind, refuses one that has diverged, and makes no commit when the build matches `main`. |
+| **Safety rails** | Every database connection gives up after `GOVERNOR_PG_CONNECT_TIMEOUT` seconds (default 10); the Slack bot shows the knowledge folder and the database (`host:port/db`) it serves. |
+| **Tenants** | One registry file (`GOVERNOR_TENANTS`) lists tenants, each with its own knowledge folder, run state, dbt repository and database. The build, the CLI (`--tenant`), `certify` and one Slack bot route every command to exactly one tenant; tests check that a run never reads another tenant's knowledge, state or database. See [`docs/tenants.md`](docs/tenants.md). |
+
+Seen on the retail dataset: a rerun with no change ended `up_to_date` in seconds, and publishing the merged build again made no commit. The education dataset added two code checks before the design gate: keys of three columns, and casts that the raw values cannot hold.

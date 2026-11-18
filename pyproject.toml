@@ -38,3 +38,5 @@ packages = ["src/governor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# pytest skips folders named "build" by default; tests/build holds the build-mode tests
+norecursedirs = [".*", "*.egg", "dist", "node_modules", "venv", "__pycache__"]

@@ -25,6 +25,7 @@ from sqlglot.errors import SqlglotError
 
 from governor.build.llm import BuildLLM
 from governor.build.models import Finding, Profile, Proposal, ProposalReply, proposal_as_reply
+from governor.build.profile import PATTERNS
 from governor.core.catalogue import ApprovedDecisions, Blueprint, CatalogueError, KpiCatalogue, render
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
@@ -38,6 +39,8 @@ CODES = (
     "PROPOSAL_UNPARSEABLE", "EXPR_UNPARSEABLE", "KPI_DUPLICATE",
     # batch2c section 19
     "KEY_NOT_UNIQUE",
+    # 18 Nov 2026: a plain cast of a column the profile infers as text
+    "UNSAFE_CAST",
 )
 
 
@@ -237,6 +240,44 @@ def _key_source(expr: str | None, name: str) -> str | None:
     return tree.name if isinstance(tree, exp.Column) and tree.name else None
 
 
+TYPED = ("integer", "numeric", "date", "timestamp", "boolean")
+INT4_MAX = 2_147_483_647
+
+
+def _unsafe_cast(c, table) -> str | None:
+    """A typed staging column that is a plain cast of a raw column the profile infers as ``text`` fails when the model
+    is queried, on the values that are not of that type (18 Nov: OULAD '?' in assessments.date; 17 Nov: Maven '$9.99').
+    A guarded or cleaned expression (CASE, regex, replace) is not a plain cast and passes."""
+    kind = (c.type or "").strip().lower()
+    if kind not in TYPED or not (c.expr or "").strip():
+        return None
+    try:
+        tree = sqlglot.parse_one(c.expr, read="postgres")
+    except SqlglotError:
+        return None
+    if tree.find(exp.Cast) is None:
+        return None
+    src = _key_source(c.expr, c.name)
+    if src is None:
+        return None
+    col = next((x for x in table.columns if x.name == src or x.name == src.lower()), None)
+    if col is None or col.distinct == 0:
+        return None
+    small = {exp.DataType.Type.INT, exp.DataType.Type.SMALLINT}
+    if any(cast.to is not None and cast.to.this in small for cast in tree.find_all(exp.Cast)):
+        # 18 Nov: Airbnb listing ids reach 1.5e18; the profile keeps min and max of non-PII integer columns
+        lo, hi = col.min, col.max
+        if (isinstance(hi, (int, float)) and hi > INT4_MAX) or (isinstance(lo, (int, float)) and lo < -INT4_MAX - 1):
+            return (f"casts {table.name}.{src} to integer, but its values reach {hi if hi and hi > INT4_MAX else lo}, "
+                    f"outside the Postgres integer range (about +-2.1 billion): cast it AS bigint")
+    if col.inferred_type != "text":
+        return None
+    op = "~*" if kind == "boolean" else "~"
+    return (f"casts {table.name}.{src} to {kind}, but the profile infers that column as text: some values are not "
+            f"{kind} (such as '?' or '$9.99'), so a plain cast fails when the model is queried. Guard it, for example "
+            f"CASE WHEN btrim({src}) {op} '{PATTERNS[kind]}' THEN CAST(btrim({src}) AS {kind}) END")
+
+
 def _key_findings(m, table) -> list[tuple[str, str]]:
     """Section 19: a staging key must contain a candidate key of its profiled source table (subject, problem)."""
     have = {c.name for c in table.columns}
@@ -259,9 +300,9 @@ def _key_findings(m, table) -> list[tuple[str, str]]:
         return []
     key = ", ".join(m.primary_key)
     if not table.candidate_keys:
-        return [(m.name, f"primary_key [{key}] is not known to be unique: {table.name} has no unique column or "
-                         "column pair in the profile; leave it unstaged unless a KPI needs it, or dedupe it in an "
-                         "intermediate model")]
+        return [(m.name, f"primary_key [{key}] is not known to be unique: {table.name} has no unique column, "
+                         "column pair or column triple in the profile; leave it unstaged (an intermediate model "
+                         "reads silver models only, never raw tables)")]
     cands = "; ".join("[" + ", ".join(ck) + "]" for ck in table.candidate_keys)
     return [(m.name, f"primary_key [{key}] (raw columns [{', '.join(sorted(raw))}]) contains no candidate key of "
                      f"{table.name} ({table.rows} rows); its candidate keys are {cands}: key on one of them")]
@@ -337,6 +378,9 @@ def validate(proposal: Proposal | dict, profile: Profile | dict, catalogue: KpiC
                                       and _is_pii(m.source_table, col if col in have else col.lower(), policy, pii_profiled))
                     if pii_read and not c.pii:
                         add("PII_UNTAGGED", f"{m.name}.{c.name}", f"reads PII column(s) {pii_read} but has pii: false (L6)")
+                    unsafe = _unsafe_cast(c, prof.table(m.source_table))
+                    if unsafe:
+                        add("UNSAFE_CAST", f"{m.name}.{c.name}", unsafe)
                 # keys against the profile's candidate keys (batch2c section 19)
                 for subject, problem in _key_findings(m, prof.table(m.source_table)):
                     add("KEY_NOT_UNIQUE", subject, problem)

@@ -107,6 +107,12 @@ class Tenant:
 # --------------------------------------------------------------------------- registry
 
 
+def dbt_project_name(tenant: str) -> str:
+    """dbt project names allow letters, digits and ``_`` and start with a letter or ``_``: ``-`` becomes ``_``."""
+    name = tenant.replace("-", "_")
+    return name if not name[:1].isdigit() else f"t_{name}"
+
+
 def tenants_path() -> Path | None:
     """The registry file from ``GOVERNOR_TENANTS``; ``None`` (single-tenant) when unset or empty."""
     raw = (os.environ.get(ENV_TENANTS) or "").strip()
@@ -169,4 +175,4 @@ def load_tenants(path: str | Path) -> dict[str, Tenant]:
     return out
 
 
-__all__ = ["ENV_TENANTS", "Tenant", "TenantError", "load_tenants", "tenants_path"]
+__all__ = ["ENV_TENANTS", "Tenant", "TenantError", "dbt_project_name", "load_tenants", "tenants_path"]

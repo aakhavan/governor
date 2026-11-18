@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from governor.build import __main__ as build_cli
-from governor.build.models import Profile
+from governor.build.models import ColumnProfile, Profile
 from governor.build.profile import PATTERNS, TYPE_ORDER, infer_type, load_policy, profile_schema
 from governor.build.workspace import build_dsn
 
@@ -158,3 +158,35 @@ def test_live_cli_out(tmp_path, capsys):
     summary = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert summary["out"] == str(out) and summary["tables"] >= 2
     assert json.loads(out.read_text(encoding="utf-8"))["schema"] == "raw"
+
+def _fake_db(monkeypatch, data):
+    """Column names stand in for SQL expressions; distinct counts come from ``data`` (a list of dicts)."""
+    from governor.build import profile as prof
+
+    monkeypatch.setattr(prof, "_value", lambda col: col)
+    monkeypatch.setattr(prof, "_distinct", lambda conn, rel, exprs, limit=None:
+                        len({tuple(r[e] for e in exprs) for r in (data[:limit] if limit else data)}))
+    return prof
+
+
+def test_triple_key_when_no_single_or_pair_key(monkeypatch):
+    # 18 Nov, OULAD: an enrolment is unique only on module + presentation + student
+    names = ["code_module", "code_presentation", "id_student"]
+    data = [dict(zip(names, (m, p, s))) for m in ("AAA", "BBB") for p in ("2013J", "2014B") for s in (1, 2, 3)]
+    data = [d | {"gender": "F" if d["id_student"] % 2 else "M"} for d in data]
+    prof = _fake_db(monkeypatch, data)
+    cols = [ColumnProfile(name=n, inferred_type="text", null_rate=0.0, distinct=len({d[n] for d in data}), pii=False)
+            for n in names + ["gender"]]
+    assert prof._pair_keys(None, None, len(data), cols) == []
+    assert prof._triple_keys(None, None, len(data), cols) == [names]
+
+
+def test_triple_search_skips_columns_with_nulls(monkeypatch):
+    names = ["a", "b", "c"]
+    data = [dict(zip(names, (a, b, c))) for a in (1, 2) for b in (1, 2) for c in (1, 2)]
+    prof = _fake_db(monkeypatch, data)
+    cols = [ColumnProfile(name="a", inferred_type="integer", null_rate=0.0, distinct=2, pii=False),
+            ColumnProfile(name="b", inferred_type="integer", null_rate=0.0, distinct=2, pii=False),
+            ColumnProfile(name="c", inferred_type="integer", null_rate=0.1, distinct=2, pii=False)]
+    assert prof._triple_keys(None, None, len(data), cols) == []
+

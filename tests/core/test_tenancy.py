@@ -112,3 +112,9 @@ def test_tenant_registry_rejects_bad_files(tmp_path, text, needle):
         load_tenants(_registry(tmp_path / "tenants.yaml", text))
     with pytest.raises(TenantError, match="cannot read the tenant registry"):
         load_tenants(tmp_path / "missing.yaml")
+
+@pytest.mark.parametrize("name, expected", [("acme", "acme"), ("globex-eu", "globex_eu"), ("9shop", "t_9shop")])
+def test_dbt_project_name_is_valid_for_dbt(name, expected):
+    # the CLI (--tenant) and the Slack bot give init_target this name; dbt rejects "-" and a leading digit
+    assert tenancy.dbt_project_name(name) == expected
+
