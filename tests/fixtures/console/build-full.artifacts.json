@@ -1,0 +1,300 @@
+{
+  "finding_codes": {},
+  "funnel": {
+    "built": 8,
+    "computable": 8,
+    "proposed": 10,
+    "requested": 10,
+    "validated": 10
+  },
+  "kpis": [
+    {
+      "id": "gmv",
+      "models": [
+        "int_order_lines"
+      ],
+      "status": "built"
+    },
+    {
+      "id": "net_revenue",
+      "models": [
+        "int_order_lines"
+      ],
+      "status": "built"
+    },
+    {
+      "id": "aov",
+      "models": [
+        "int_order_lines"
+      ],
+      "status": "built"
+    },
+    {
+      "id": "on_time_delivery_rate",
+      "models": [
+        "int_orders"
+      ],
+      "status": "built"
+    },
+    {
+      "id": "avg_review_score",
+      "models": [
+        "int_order_reviews"
+      ],
+      "status": "built"
+    },
+    {
+      "id": "repeat_purchase_rate",
+      "models": [
+        "int_orders"
+      ],
+      "status": "built"
+    },
+    {
+      "id": "cohort_retention",
+      "models": [
+        "int_orders"
+      ],
+      "status": "built"
+    },
+    {
+      "id": "historical_clv",
+      "models": [
+        "int_order_lines"
+      ],
+      "status": "built"
+    },
+    {
+      "id": "conversion_rate",
+      "models": [],
+      "status": "gap"
+    },
+    {
+      "id": "gross_margin",
+      "models": [],
+      "status": "gap"
+    }
+  ],
+  "lineage": {
+    "edges": [
+      {
+        "source": "int_order_lines",
+        "target": "kpi_aov"
+      },
+      {
+        "source": "int_order_lines",
+        "target": "kpi_gmv"
+      },
+      {
+        "source": "int_order_lines",
+        "target": "kpi_historical_clv"
+      },
+      {
+        "source": "int_order_lines",
+        "target": "kpi_net_revenue"
+      },
+      {
+        "source": "int_order_reviews",
+        "target": "kpi_avg_review_score"
+      },
+      {
+        "source": "int_orders",
+        "target": "kpi_cohort_retention"
+      },
+      {
+        "source": "int_orders",
+        "target": "kpi_on_time_delivery_rate"
+      },
+      {
+        "source": "int_orders",
+        "target": "kpi_repeat_purchase_rate"
+      },
+      {
+        "source": "olist_customers_dataset",
+        "target": "stg_customers"
+      },
+      {
+        "source": "olist_order_items_dataset",
+        "target": "stg_order_items"
+      },
+      {
+        "source": "olist_order_reviews_dataset",
+        "target": "stg_reviews"
+      },
+      {
+        "source": "olist_orders_dataset",
+        "target": "stg_orders"
+      },
+      {
+        "source": "stg_customers",
+        "target": "int_order_lines"
+      },
+      {
+        "source": "stg_customers",
+        "target": "int_orders"
+      },
+      {
+        "source": "stg_order_items",
+        "target": "int_order_lines"
+      },
+      {
+        "source": "stg_orders",
+        "target": "int_order_lines"
+      },
+      {
+        "source": "stg_orders",
+        "target": "int_order_reviews"
+      },
+      {
+        "source": "stg_orders",
+        "target": "int_orders"
+      },
+      {
+        "source": "stg_reviews",
+        "target": "int_order_reviews"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "olist_customers_dataset",
+        "layer": "raw"
+      },
+      {
+        "id": "olist_order_items_dataset",
+        "layer": "raw"
+      },
+      {
+        "id": "olist_order_reviews_dataset",
+        "layer": "raw"
+      },
+      {
+        "id": "olist_orders_dataset",
+        "layer": "raw"
+      },
+      {
+        "id": "int_order_lines",
+        "layer": "silver"
+      },
+      {
+        "id": "int_order_reviews",
+        "layer": "silver"
+      },
+      {
+        "id": "int_orders",
+        "layer": "silver"
+      },
+      {
+        "id": "stg_customers",
+        "layer": "silver"
+      },
+      {
+        "id": "stg_order_items",
+        "layer": "silver"
+      },
+      {
+        "id": "stg_orders",
+        "layer": "silver"
+      },
+      {
+        "id": "stg_reviews",
+        "layer": "silver"
+      },
+      {
+        "id": "kpi_aov",
+        "layer": "kpi"
+      },
+      {
+        "id": "kpi_avg_review_score",
+        "layer": "kpi"
+      },
+      {
+        "id": "kpi_cohort_retention",
+        "layer": "kpi"
+      },
+      {
+        "id": "kpi_gmv",
+        "layer": "kpi"
+      },
+      {
+        "id": "kpi_historical_clv",
+        "layer": "kpi"
+      },
+      {
+        "id": "kpi_net_revenue",
+        "layer": "kpi"
+      },
+      {
+        "id": "kpi_on_time_delivery_rate",
+        "layer": "kpi"
+      },
+      {
+        "id": "kpi_repeat_purchase_rate",
+        "layer": "kpi"
+      }
+    ]
+  },
+  "models": [
+    {
+      "layer": "staging",
+      "name": "stg_orders"
+    },
+    {
+      "layer": "staging",
+      "name": "stg_order_items"
+    },
+    {
+      "layer": "staging",
+      "name": "stg_customers"
+    },
+    {
+      "layer": "staging",
+      "name": "stg_reviews"
+    },
+    {
+      "layer": "silver",
+      "name": "int_order_lines"
+    },
+    {
+      "layer": "silver",
+      "name": "int_orders"
+    },
+    {
+      "layer": "silver",
+      "name": "int_order_reviews"
+    },
+    {
+      "layer": "gold",
+      "name": "kpi_gmv"
+    },
+    {
+      "layer": "gold",
+      "name": "kpi_net_revenue"
+    },
+    {
+      "layer": "gold",
+      "name": "kpi_aov"
+    },
+    {
+      "layer": "gold",
+      "name": "kpi_on_time_delivery_rate"
+    },
+    {
+      "layer": "gold",
+      "name": "kpi_avg_review_score"
+    },
+    {
+      "layer": "gold",
+      "name": "kpi_repeat_purchase_rate"
+    },
+    {
+      "layer": "gold",
+      "name": "kpi_cohort_retention"
+    },
+    {
+      "layer": "gold",
+      "name": "kpi_historical_clv"
+    }
+  ],
+  "repairs": 1,
+  "tests_passed": 15
+}

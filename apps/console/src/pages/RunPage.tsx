@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { getTopology, listRuns } from "../api/client";
-import type { RunSummary, Topology, TopologyNode } from "../api/types";
+import { getArtifacts, getTopology, listRuns } from "../api/client";
+import type { Artifacts, RunSummary, Topology, TopologyNode } from "../api/types";
 import { useRunEvents } from "../api/useRunEvents";
 import { copy, eventText, graphText, runLabel, statusText } from "../copy";
 import type { Direction } from "../graph/layout";
@@ -10,6 +10,13 @@ import { RunCanvas } from "../graph/RunCanvas";
 import { fold } from "../run/fold";
 import { formatClock, formatCost, formatCount, formatDuration, formatElapsed, statusTone } from "../run/format";
 import type { RunEvent, RunView } from "../run/types";
+import { ResultPanel } from "../views/ResultPanel";
+
+function isArtifacts(value: unknown): value is Artifacts {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Partial<Artifacts>;
+  return Array.isArray(record.kpis) && Array.isArray(record.models) && record.funnel != null && record.lineage != null;
+}
 
 const LIVE = new Set(["running", "paused", "awaiting_approval", "awaiting_clarification"]);
 const SPEEDS = [1, 4, 16] as const;
@@ -39,6 +46,7 @@ export function RunPage() {
   const [listMode, setListMode] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<"steps" | "node">("steps");
+  const [artifacts, setArtifacts] = useState<Artifacts | null>(null);
   const stepsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -48,6 +56,7 @@ export function RunPage() {
     setReplay(null);
     setMeta(null);
     setTopology(null);
+    setArtifacts(null);
     setSelectedId(null);
     setTab("steps");
     listRuns(undefined, 500, controller.signal)
@@ -72,6 +81,24 @@ export function RunPage() {
       });
     return () => controller.abort();
   }, [runId]);
+
+  useEffect(() => {
+    if (!runId || meta?.graph !== "build") return undefined;
+    const controller = new AbortController();
+    let active = true;
+    Promise.resolve()
+      .then(() => getArtifacts(runId, controller.signal))
+      .then((next) => {
+        if (active) setArtifacts(isArtifacts(next) ? next : null);
+      })
+      .catch(() => {
+        if (active) setArtifacts(null);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [runId, meta?.graph]);
 
   const stream = useRunEvents(phase === "ready" && replay !== null ? runId : null, {
     replay: replay ?? false,
@@ -157,6 +184,7 @@ export function RunPage() {
       {phase === "error" ? <p className="empty">{copy.apiDown}</p> : null}
       {phase === "missing" ? <p className="empty">{copy.runMissing}</p> : null}
       {phase !== "error" && phase !== "missing" ? (
+        <>
         <div className="run-body">
           <div className="canvas-wrap">
             {topology && replay !== null ? (
@@ -193,6 +221,10 @@ export function RunPage() {
             </div>
           </aside>
         </div>
+        {phase === "ready" && meta ? (
+          <ResultPanel key={meta.run_id} graph={meta.graph} view={view} events={stream.events} artifacts={artifacts} />
+        ) : null}
+        </>
       ) : null}
     </div>
   );
