@@ -104,6 +104,16 @@ def _metrics(value: Any) -> dict | None:
     return out or None
 
 
+def _token(row: dict, *keys: str) -> int:
+    """The first present token count. Build rows use ``input_tokens``; ask usage uses ``tokens_in``."""
+    for key in keys:
+        if key in row:
+            found = _as_int(row.get(key))
+            if found is not None:
+                return found
+    return 0
+
+
 def call_metrics(calls: list | None) -> dict:
     """Totals for the ``calls`` a node added, or for the whole run. Cost is null when any call's cost is unknown."""
     rows = [row for row in (calls or []) if isinstance(row, dict)]
@@ -111,8 +121,8 @@ def call_metrics(calls: list | None) -> dict:
     costs: list[float] = []
     unknown = False
     for row in rows:
-        tokens_in += _as_int(row.get("input_tokens")) or 0
-        tokens_out += _as_int(row.get("output_tokens")) or 0
+        tokens_in += _token(row, "input_tokens", "tokens_in")
+        tokens_out += _token(row, "output_tokens", "tokens_out")
         if "cost_usd" not in row or row.get("cost_usd") is None:
             unknown = True
             continue
@@ -264,12 +274,16 @@ def _summary_text(summarise: Callable | None, update: Any, state: Any) -> str | 
 
 
 def _update_metrics(update: Any) -> dict | None:
-    if not isinstance(update, dict) or "calls" not in update:
+    """Metrics for the calls a node just added: build's ``calls`` list, or ask's ``usage`` list."""
+    if not isinstance(update, dict):
         return None
     calls = update.get("calls")
-    if not isinstance(calls, list):
-        return None
-    return call_metrics(calls)
+    if isinstance(calls, list):
+        return call_metrics(calls)
+    usage = update.get("usage")
+    if isinstance(usage, list):
+        return call_metrics(usage)
+    return None
 
 
 def traced(graph: str, node_id: str, fn: Callable, summarise: Callable | None):

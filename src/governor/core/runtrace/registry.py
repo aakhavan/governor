@@ -1,7 +1,8 @@
-"""Node specs and the build topology (batch4.md section 35).
+"""Node specs and topology for the build and ask graphs (batch4.md section 35).
 
-``topology`` compiles the build graph with a fake model and no checkpointer, so it
-never touches the network or a database. Ask nodes arrive in a later step.
+``topology`` compiles a graph with a fake model and no checkpointer, so it never
+touches the network or a database. Build and ask stay unimported until a caller
+asks for that graph.
 """
 
 from __future__ import annotations
@@ -77,22 +78,67 @@ BUILD_EDGES: dict[tuple[str, str], str] = {
     ("write_gold", "summarise"): "blueprint failed",
 }
 
+ASK_NODES: tuple[NodeSpec, ...] = (
+    _spec("guard", "Guard", "guard", "Stops a question that is not about the billing data.", "understand", 1),
+    _spec("retrieve_context", "Retrieve", "io", "Finds catalog cards for the tables and metrics.", "understand", 2),
+    _spec("plan", "Plan", "llm", "Asks the model what the question is asking for.", "understand", 3),
+    _spec("clarify", "Clarify", "gate", "Waits for a person to fill in a missing detail.", "understand", 4),
+    _spec("draft_sql", "Draft SQL", "llm", "Asks the model to draft a query.", "sql", 5),
+    _spec("validate", "Validate", "check", "Checks the query against the access policy.", "sql", 6),
+    _spec("dry_run", "Dry run", "check", "Checks the query with the warehouse planner.", "sql", 7),
+    _spec("repair", "Repair", "llm", "Asks the model to repair a refused query.", "sql", 8),
+    _spec("execute", "Execute", "io", "Runs the checked query and counts the rows.", "sql", 9),
+    _spec("answer", "Answer", "llm", "Asks the model to word the answer.", "answer", 10),
+    _spec("record_trace", "Record", "io", "Saves the decision trace for this question.", "answer", 11),
+)
+
+ASK_START = _spec("start", "Start", "io", "Where an ask run begins.", "understand", 0)
+ASK_END = _spec("end", "End", "io", "Where an ask run ends.", "answer", 100)
+
+# Conditional edges of the compiled ask graph, in plain words.
+ASK_EDGES: dict[tuple[str, str], str] = {
+    ("guard", "retrieve_context"): "ok",
+    ("guard", "record_trace"): "blocked",
+    ("plan", "clarify"): "unclear",
+    ("plan", "draft_sql"): "ready",
+    ("plan", "record_trace"): "refused",
+    ("clarify", "plan"): "answered",
+    ("clarify", "record_trace"): "blocked",
+    ("validate", "dry_run"): "ok",
+    ("validate", "repair"): "refused: repair",
+    ("validate", "record_trace"): "refused",
+    ("dry_run", "execute"): "ok",
+    ("dry_run", "repair"): "failed: repair",
+    ("dry_run", "record_trace"): "refused",
+    ("execute", "answer"): "ok",
+    ("execute", "repair"): "failed: repair",
+    ("execute", "record_trace"): "refused",
+}
+
 
 def _public(node_id: str) -> str:
     return {"__start__": "start", "__end__": "end"}.get(node_id, node_id)
 
 
-def topology(graph: str) -> dict:
-    """``{graph, nodes, edges}`` for a compiled graph. Only ``build`` exists in this step."""
-    if graph != "build":
-        raise KeyError(graph)
-    from governor.build.graph import build_graph
-    from governor.build.llm import FakeBuildLLM
-
-    drawable = build_graph(FakeBuildLLM({}), None).get_graph()
-    nodes = [spec.model_dump() for spec in (START, *BUILD_NODES, END)]
+def _drawn(graph: str, specs: tuple[NodeSpec, ...] | list[NodeSpec], labels: dict[tuple[str, str], str], drawable) -> dict:
     edges = [{"source": _public(edge.source), "target": _public(edge.target),
-              "label": BUILD_EDGES.get((edge.source, edge.target), ""),
+              "label": labels.get((edge.source, edge.target), ""),
               "conditional": bool(edge.conditional)}
              for edge in drawable.edges]
-    return {"graph": "build", "nodes": nodes, "edges": edges}
+    return {"graph": graph, "nodes": [spec.model_dump() for spec in specs], "edges": edges}
+
+
+def topology(graph: str) -> dict:
+    """``{graph, nodes, edges}`` for a compiled graph. Fake model, no checkpointer, no database."""
+    if graph == "build":
+        from governor.build.graph import build_graph
+        from governor.build.llm import FakeBuildLLM
+
+        return _drawn("build", [START, *BUILD_NODES, END], BUILD_EDGES, build_graph(FakeBuildLLM({}), None).get_graph())
+    if graph == "ask":
+        from governor.ask.graph import build_graph
+        from governor.ask.llm_testing import FakeLLM
+
+        drawable = build_graph(llm=FakeLLM(), checkpointer=None).get_graph()
+        return _drawn("ask", [ASK_START, *ASK_NODES, ASK_END], ASK_EDGES, drawable)
+    raise KeyError(graph)

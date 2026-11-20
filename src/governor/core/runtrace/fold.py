@@ -1,8 +1,8 @@
 """Reduce a run log to the view the console draws (batch4.md section 34).
 
 Events apply in ``seq`` order. A duplicate ``seq`` is ignored. After ``run_finished``,
-a build node that never started is ``skipped``. Cost is null when any finished
-node's cost is null.
+a registered build or ask node that never started is ``skipped``. Cost is null
+when any finished node's cost is null.
 """
 
 from __future__ import annotations
@@ -62,11 +62,17 @@ def _number(value: Any) -> int | float | None:
 
 
 def _catalog(graph: str | None) -> list[str]:
-    if graph != "build":
-        return []
-    from governor.core.runtrace.registry import BUILD_NODES
+    if graph == "build":
+        from governor.core.runtrace.registry import BUILD_NODES
 
-    return [spec.id for spec in sorted(BUILD_NODES, key=lambda spec: spec.order) if not spec.planned]
+        specs = BUILD_NODES
+    elif graph == "ask":
+        from governor.core.runtrace.registry import ASK_NODES
+
+        specs = ASK_NODES
+    else:
+        return []
+    return [spec.id for spec in sorted(specs, key=lambda spec: spec.order) if not spec.planned]
 
 
 def _unrecovered(events: list[dict]) -> bool:

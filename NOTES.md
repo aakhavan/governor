@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-Batch 4 V1 is in place: governor.core.runtrace (RunLog, traced, fold, BUILD_NODES, topology), build graph fully wrapped with _sum_* helpers and lifecycle logging in start/approve/reject resume paths. Shared fold_cases.json has eight named cases; core and build runtrace tests pass alongside the full suite. Legacy build events.jsonl unchanged when GOVERNOR_RUNTRACE=0. V2 (ask tracing) is next.
+Batch 4 V2 is done: ask registry and labelled topology, all eleven nodes traced with §35 summaries, checkpoints.invoke owns run_started/resumed/paused/finished, and fold marks never-started ask nodes skipped after a finished run. Marker and lifecycle tests pass offline. V3 (console read API and demo fixtures) is next.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,25 +20,6 @@ Batch 4 V1 is in place: governor.core.runtrace (RunLog, traced, fold, BUILD_NODE
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## F6 result
-*One Slack bot for several tenants, 17 Nov 2026 20:44.*
-
-Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass, `cursor-grok`: pass; 0 fix loop(s); branch `factory/F6`.
-
-| check | ok | detail |
-|---|---|---|
-| capstone ground truth unchanged | yes | capstone ground truth unchanged |
-| registry in Slack config | yes | missing in src/governor/integrations/slack/config.py |
-| tenants doc | yes | missing in docs/tenants.md |
-| pytest tests/integrations | yes | 46 passed in 10.04s |
-| pytest tests | yes | 549 passed, 21 skipped in 134.99s (0:02:14) |
-| pytest tests/build | yes | 197 passed, 12 skipped in 87.95s (0:01:27) |
-| required tests present | yes | 6 found |
-
-Review: claude-tc-fable: pass | cursor-grok: pass
-
-For Amir: Two non-blocking notes. The CLI --tenant path (F5) still gives init_target the raw tenant name, so a tenant like globex-eu started first from the CLI gets an invalid dbt project name; the Slack path maps it to globex_eu. Worth a one-line fix in build/__main__.py when convenient. Also, the reviewer's pytest run was blocked by the permission policy, so the green result is the acceptance script's.
 
 ## V1 result
 *Run-event contract, reducer and build-graph tracing, 20 Nov 2026 18:38.*
@@ -65,8 +46,30 @@ Review: V1 matches batch4 §34–35: additive JSONL tracing, fold reducer with 8
 
 For Amir: Accept script prints detail strings like "missing" and "no traced(" even on success — they are failure messages, not status.
 
-## Additions for V2
-V2 should mirror build: ASK_NODES registry, traced ask nodes, summaries per §35 ask table, run_started/run_finished via ask checkpoints funnel, clarify as pause, guard refused → run_finished status refused. Reuse fold_cases.json for TS parity in V4; note build run_finished emits run-level metrics via call_metrics while fold totals sum only node_finished metrics. Nodes without config need bind_run (or config thread_id). RunLog re-reads the JSONL file each emit for seq/attempt — fine for V1 volume. registry.topology('build') compiles the graph offline; ask topology will need the same pattern without importing build.
+## V2 result
+*Ask-graph tracing, 20 Nov 2026 19:06.*
+
+Implementer `cursor-grok`; reviewers `cursor-composer`: pass; 0 fix loop(s); branch `factory/V2`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| src/governor/ask/graph.py does not import build/integrations | yes | bad import |
+| src/governor/ask/checkpoints.py does not import build/integrations | yes | bad import |
+| ask graph wraps nodes | yes | no traced( |
+| topology has every ask node | yes | 11 nodes |
+| every conditional edge labelled | yes | [] |
+| pytest tests/ask | yes | 164 passed, 2 skipped in 49.52s |
+| required tests present | yes | 6 found |
+| pytest tests | yes | 773 passed, 33 skipped in 217.39s (0:03:37) |
+| pytest tests/build | yes | 207 passed, 12 skipped in 93.43s (0:01:33) |
+
+Review: V2 wires ask tracing end-to-end: ASK_NODES and labelled edges, every node wrapped with traced summaries, checkpoints.invoke emits run lifecycle events, fold skips unstarted nodes after run_finished. Offline tests cover repair, guard block, clarify pause, and the marker privacy check. Acceptance and full pytest are green; API/trace store behaviour unchanged.
+
+For Amir: Optional follow-up: eval AgentSystem uses graph.invoke without run lifecycle wrappers; only affects golden eval threads, not the ask API.
+
+## Additions for V3
+V3 can use topology('ask') and fold() on GOVERNOR_STATE_DIR/runs/ask/<thread_id>.jsonl. run_status mapping is in checkpoints.run_status. Guard-blocked runs finish with status blocked and many skipped nodes. Clarify leaves the log without run_finished until resume. Summaries never carry question/SQL/values; only counts and codes. Eval agent still bypasses checkpoints.invoke — console live runs come from API/CLI unless that is changed later.
 
 ## Additions for the next plan
 Multi-tenant Slack: GovernorSlack takes tenant_threads= (callable returning tenant -> thread ids) for tests; config.tenants non-empty switches every path. Notifier gets tenant_of= and records rec['tenant'] from the run_started project name, then from the tenants' checkpoints; every Notifier.reply appends a 'tenant <name>' context block via blocks.with_tenant, so any new reply type gets it for free, but a chat_update that rebuilds blocks must re-apply with_tenant (see _on_published). dbt_project_name(name) in app.py maps '-' to '_' and prefixes a leading digit with 't_'; the build CLI --tenant still hands init_target the raw tenant name, so a hyphenated tenant created from the CLI gets an invalid dbt project name unless Slack created the target first (init_target never overwrites). ask remains single-tenant and is refused before parse_command. The reviewer's pytest invocation was blocked by the permission policy; acceptance reported tests/integrations 46 passed and the full suite 549 passed, 21 skipped.
