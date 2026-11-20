@@ -47,3 +47,11 @@ This repo is **governor** (core + ask modules), built step by step by the code f
 - Contract: `docs/capstone/batch2d.md`. `src/governor/build/graph.py`, `src/governor/build/design.py` and everything under `evaluation/` do not change in this batch.
 - `governor.integrations` may import `governor.ask` and `governor.build`; those two never import each other or `governor.integrations`.
 - No data value from the warehouse goes into a prompt, a log line, a Slack message or a file in the repo. Tests use a marker string to prove it. This holds for build mode and the certified path. The one existing exception is governor-ask's answer step (`ask/prompts/answer.md`), which sees the first result rows to word the answer; it writes placeholders and `fill_answer` puts the values in.
+
+## Capstone batch 4 (V1 onwards): the run console
+
+- Contract: `docs/capstone/batch4.md` (sections 33-39); decision: `docs/adr/0005-run-console.md`. Read only the sections your step prompt names.
+- Shared tracing code lives in `src/governor/core/runtrace/`; `governor.build` and `governor.ask` import it, never each other or `governor.integrations`.
+- Run logs, summaries, API responses and the UI carry counts, names, codes, statuses, durations, tokens and cost only: never a data value, question, SQL, answer, person's name, full path or secret.
+- The front end lives in `apps/console/` (Node 20+, npm). Commit `package.json` and `package-lock.json`, never `node_modules/` or `dist/`. Run npm only inside `apps/console/`.
+- Front-end tests are Vitest; Python tests stay offline. Use only original icons and artwork (inline SVG); no third-party logos.
