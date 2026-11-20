@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-F6 (one Slack bot for several tenants) is implemented on branch factory/F6, uncommitted, and reviewed as pass. SlackConfig.from_env loads GOVERNOR_TENANTS into config.tenants with targets = tenant name -> tenant.target and a start-up warning when GOVERNOR_SLACK_TARGETS is also set. notifier.TenantThreads lists threads per tenant from each tenant's checkpoints; parse_command(tenant_threads=) and _button_tenant put exactly one tenant on each Command and raise a UsageError naming both tenants on an ambiguous short id. graph.start/approve/reject receive tenant=<Tenant> only in multi-tenant mode; publish uses the tenant's registered target. Progress header, design card title, every thread reply, the start line and the usage footer name the tenant (host:port/db only). ask is refused with the spec's text and runs nothing. Known limits: events and the Slack message store stay process-wide; the build CLI still passes the raw tenant name to init_target. Acceptance 7/7: tests/integrations 46, tests 549 passed and 21 skipped, tests/build 197 passed and 12 skipped.
+Batch 4 V1 is in place: governor.core.runtrace (RunLog, traced, fold, BUILD_NODES, topology), build graph fully wrapped with _sum_* helpers and lifecycle logging in start/approve/reject resume paths. Shared fold_cases.json has eight named cases; core and build runtrace tests pass alongside the full suite. Legacy build events.jsonl unchanged when GOVERNOR_RUNTRACE=0. V2 (ask tracing) is next.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,28 +20,6 @@ F6 (one Slack bot for several tenants) is implemented on branch factory/F6, unco
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## F5 result
-*Tenants (registry, per-tenant build, CLI --tenant), 17 Nov 2026 18:29.*
-
-Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F5`.
-
-| check | ok | detail |
-|---|---|---|
-| capstone ground truth unchanged | yes | capstone ground truth unchanged |
-| tenancy module | yes | missing in src/governor/core/tenancy.py |
-| graph takes a tenant | yes | missing in src/governor/build/graph.py |
-| CLI --tenant | yes | missing in src/governor/build/__main__.py |
-| pytest tests/core | yes | 120 passed, 12 skipped in 13.43s |
-| pytest tests/build | yes | 197 passed, 12 skipped in 87.99s (0:01:27) |
-| required tests present | yes | 8 found |
-
-Review: F5 does what section 31 asks. Tenant is a frozen dataclass with derived paths, build_dsn and dbt_env; load_tenants refuses bad names, unknown keys, missing knowledge files and shared root/target/database. graph.start/approve/reject inject the tenant's catalogue, blueprint, approved defaults, policy, checkpoints, profiler, inspector, row counter and dbt env via build_graph kwargs; no module-level state or os.environ is mutated. certify checks the admin DSN host:port/db before anything runs. CLI --tenant fills target/project name and refuses a foreign target (exit 2). All eight tests present.
-
-For Amir: No code changes needed. Two small inconsistencies worth a later tidy: the registry's duplicate-database check does not treat localhost/127.0.0.1/::1 as one host while certify's admin DSN check does, and the registry validates kpis.yaml and blueprint.md but not shop/policy.yaml or shop/access.yaml, so a tenant missing those fails later with a less helpful error. Events remain process-wide, as NOTES already records for F6.
-
-## Additions for F6
-For F6: (1) Use graph.start/approve/reject with tenant=<Tenant>; checkpoints default to tenant.checkpoints (root/artifacts/build_checkpoints.sqlite), so listing threads per tenant means opening each tenant's checkpoint file via graph.open_checkpointer(tenant.checkpoints). (2) Events (events_path) are still process-wide in GOVERNOR_STATE_DIR; map thread ids to tenants via checkpoints, not via events. (3) Tenant.address gives host:port/db for the start-up line and footer; never log build_dsn(). (4) Project name is the tenant name verbatim; names may contain '-', which dbt rejects as a project name, so either restrict names in the registry or map '-' to '_' when calling init_target. (5) load_tenants raises TenantError (a ValueError) naming the tenant; tenants_path() returns None when GOVERNOR_TENANTS is unset or empty. (6) The registry's shared-database check compares host strings lowercased only; certify's admin DSN check treats localhost/127.0.0.1/::1 as one host, so two entries differing only by localhost vs 127.0.0.1 are accepted by the registry. (7) The registry does not check policy.yaml/access.yaml exist; a tenant missing knowledge/shop/policy.yaml fails at profile time with a FileNotFoundError surfaced as 'build run failed'.
 
 ## F6 result
 *One Slack bot for several tenants, 17 Nov 2026 20:44.*
@@ -61,6 +39,34 @@ Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass, `cursor-grok`: 
 Review: claude-tc-fable: pass | cursor-grok: pass
 
 For Amir: Two non-blocking notes. The CLI --tenant path (F5) still gives init_target the raw tenant name, so a tenant like globex-eu started first from the CLI gets an invalid dbt project name; the Slack path maps it to globex_eu. Worth a one-line fix in build/__main__.py when convenient. Also, the reviewer's pytest run was blocked by the permission policy, so the green result is the acceptance script's.
+
+## V1 result
+*Run-event contract, reducer and build-graph tracing, 20 Nov 2026 18:38.*
+
+Implementer `cursor-grok`; reviewers `cursor-composer`: pass; 0 fix loop(s); branch `factory/V1`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| runtrace package | yes | missing |
+| fold cases: at least 8 | yes | 8 cases |
+| fold cases cover section 34 | yes | ok |
+| build graph wraps nodes | yes | no traced( in build/graph.py |
+| build does not import ask/integrations | yes | bad import |
+| topology has every build node | yes | 14 nodes |
+| every conditional edge labelled | yes | [] |
+| pytest tests/core | yes | 131 passed, 12 skipped in 10.94s |
+| required tests present | yes | 7 found |
+| pytest tests/build | yes | 207 passed, 12 skipped in 91.56s (0:01:31) |
+| required tests present | yes | 5 found |
+| pytest tests | yes | 767 passed, 33 skipped in 209.26s (0:03:29) |
+
+Review: V1 matches batch4 §34–35: additive JSONL tracing, fold reducer with 8 shared cases, build registry/topology, and traced build nodes plus entry-point lifecycle events. Tracing re-raises exceptions, treats GraphInterrupt as pause, respects GOVERNOR_RUNTRACE=0, and marker tests show no warehouse/approver leakage. Acceptance tests and review_focus items are covered.
+
+For Amir: Accept script prints detail strings like "missing" and "no traced(" even on success — they are failure messages, not status.
+
+## Additions for V2
+V2 should mirror build: ASK_NODES registry, traced ask nodes, summaries per §35 ask table, run_started/run_finished via ask checkpoints funnel, clarify as pause, guard refused → run_finished status refused. Reuse fold_cases.json for TS parity in V4; note build run_finished emits run-level metrics via call_metrics while fold totals sum only node_finished metrics. Nodes without config need bind_run (or config thread_id). RunLog re-reads the JSONL file each emit for seq/attempt — fine for V1 volume. registry.topology('build') compiles the graph offline; ask topology will need the same pattern without importing build.
 
 ## Additions for the next plan
 Multi-tenant Slack: GovernorSlack takes tenant_threads= (callable returning tenant -> thread ids) for tests; config.tenants non-empty switches every path. Notifier gets tenant_of= and records rec['tenant'] from the run_started project name, then from the tenants' checkpoints; every Notifier.reply appends a 'tenant <name>' context block via blocks.with_tenant, so any new reply type gets it for free, but a chat_update that rebuilds blocks must re-apply with_tenant (see _on_published). dbt_project_name(name) in app.py maps '-' to '_' and prefixes a leading digit with 't_'; the build CLI --tenant still hands init_target the raw tenant name, so a hyphenated tenant created from the CLI gets an invalid dbt project name unless Slack created the target first (init_target never overwrites). ask remains single-tenant and is refused before parse_command. The reviewer's pytest invocation was blocked by the permission policy; acceptance reported tests/integrations 46 passed and the full suite 549 passed, 21 skipped.

@@ -12,7 +12,7 @@ defaults:
   step_budget_usd: 25
   review_budget_usd: {design: 3.0, mechanical: 0.75}
 roles:
-  design: {implementer: [claude-tc-opus, cursor-grok], reviewer: [claude-tc-fable, cursor-grok]}
+  design: {implementer: [claude-tc-opus, cursor-grok], reviewer: [claude-tc-fable, cursor-composer, cursor-grok]}
 steps:
   - id: V1
     title: Run-event contract, reducer and build-graph tracing

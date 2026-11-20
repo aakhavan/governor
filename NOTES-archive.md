@@ -1655,3 +1655,29 @@ publish() now runs sync_main(target) before 'checkout -B'. With an origin that h
 ## F6 result (implementer notes; the factory adds the reviewed result)
 One Slack bot for several tenants (section 32). SlackConfig.from_env loads GOVERNOR_TENANTS (TenantError -> ConfigError naming the variable): targets = tenant name -> tenant.target, config.tenants, and config.warnings carries TARGETS_IGNORED when GOVERNOR_SLACK_TARGETS is also set (printed by __main__). notifier.TenantThreads lists threads per tenant from each tenant's checkpoints (known_threads(tenant.checkpoints)) and reads a thread's state from its tenant's file; GovernorSlack takes tenant_threads= for tests. parse_command(..., tenant_threads=) puts the tenant on Command; resolve_tenant_thread raises UsageError naming both tenants when a token matches threads in two. Buttons and the reject modal resolve the tenant the same way. graph.start/approve/reject get tenant=<Tenant> only in multi-tenant mode (single-tenant calls unchanged); publish uses tenant.target; init_target gets dbt_project_name(name) ('-' -> '_', leading digit -> 't_'), the build's project name stays the tenant name. Messages: progress header '(tenant <name>)', design card title, every Notifier.reply gets a 'tenant <name>' context line (blocks.with_tenant); start line and usage footer list '<name>: host:port/db'. ask is refused before parsing. Docs: docs/tenants.md, docs/slack.md 'Several tenants'. Acceptance 7/7: tests/integrations 46, tests 549 (+21 skipped), tests/build 197 (+12 skipped). Limit: the message store, events and the channel stay process-wide; the build CLI still passes the raw tenant name to init_target (outside F6 paths).
 
+## Relocks
+- 20 Nov 2026 17:55: batch 4 spec (LangGraph events + React console), written by Claude (changed: plan-batch3.yaml, plan-batch4.yaml, plan/accept/_console.py, plan/accept/accept_v1.py, plan/accept/accept_v2.py, plan/accept/accept_v3.py, plan/accept/accept_v4.py, plan/accept/accept_v5.py, plan/accept/accept_v6.py, plan/prompts/F1.md, plan/prompts/F2.md, plan/prompts/F3.md, plan/prompts/F4.md, plan/prompts/F5.md, plan/prompts/F6.md, plan/prompts/V1.md, plan/prompts/V2.md, plan/prompts/V3.md, plan/prompts/V4.md, plan/prompts/V5.md, plan/prompts/V6.md)
+- 20 Nov 2026 18:31: V1 stopped no_profile (Claude Turing profiles unavailable, implementer cursor-grok): add cursor-composer as a reviewer between claude-tc-fable and cursor-grok (via supervise, by claude (delegated)) (changed: plan-batch4.yaml)
+
+## F5 result
+*Tenants (registry, per-tenant build, CLI --tenant), 17 Nov 2026 18:29.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F5`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| tenancy module | yes | missing in src/governor/core/tenancy.py |
+| graph takes a tenant | yes | missing in src/governor/build/graph.py |
+| CLI --tenant | yes | missing in src/governor/build/__main__.py |
+| pytest tests/core | yes | 120 passed, 12 skipped in 13.43s |
+| pytest tests/build | yes | 197 passed, 12 skipped in 87.99s (0:01:27) |
+| required tests present | yes | 8 found |
+
+Review: F5 does what section 31 asks. Tenant is a frozen dataclass with derived paths, build_dsn and dbt_env; load_tenants refuses bad names, unknown keys, missing knowledge files and shared root/target/database. graph.start/approve/reject inject the tenant's catalogue, blueprint, approved defaults, policy, checkpoints, profiler, inspector, row counter and dbt env via build_graph kwargs; no module-level state or os.environ is mutated. certify checks the admin DSN host:port/db before anything runs. CLI --tenant fills target/project name and refuses a foreign target (exit 2). All eight tests present.
+
+For Amir: No code changes needed. Two small inconsistencies worth a later tidy: the registry's duplicate-database check does not treat localhost/127.0.0.1/::1 as one host while certify's admin DSN check does, and the registry validates kpis.yaml and blueprint.md but not shop/policy.yaml or shop/access.yaml, so a tenant missing those fails later with a less helpful error. Events remain process-wide, as NOTES already records for F6.
+
+## Additions for F6
+For F6: (1) Use graph.start/approve/reject with tenant=<Tenant>; checkpoints default to tenant.checkpoints (root/artifacts/build_checkpoints.sqlite), so listing threads per tenant means opening each tenant's checkpoint file via graph.open_checkpointer(tenant.checkpoints). (2) Events (events_path) are still process-wide in GOVERNOR_STATE_DIR; map thread ids to tenants via checkpoints, not via events. (3) Tenant.address gives host:port/db for the start-up line and footer; never log build_dsn(). (4) Project name is the tenant name verbatim; names may contain '-', which dbt rejects as a project name, so either restrict names in the registry or map '-' to '_' when calling init_target. (5) load_tenants raises TenantError (a ValueError) naming the tenant; tenants_path() returns None when GOVERNOR_TENANTS is unset or empty. (6) The registry's shared-database check compares host strings lowercased only; certify's admin DSN check treats localhost/127.0.0.1/::1 as one host, so two entries differing only by localhost vs 127.0.0.1 are accepted by the registry. (7) The registry does not check policy.yaml/access.yaml exist; a tenant missing knowledge/shop/policy.yaml fails at profile time with a FileNotFoundError surfaced as 'build run failed'.
+
