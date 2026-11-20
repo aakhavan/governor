@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "build": "./src/governor/integrations/studio.py:build",
+    "ask": "./src/governor/integrations/studio.py:ask"
+  }
+}

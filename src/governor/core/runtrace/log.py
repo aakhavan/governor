@@ -13,6 +13,7 @@ import inspect
 import json
 import logging
 import os
+import string
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -78,6 +79,21 @@ def _as_int(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return int(value)
+
+
+_NAME_CHARS = frozenset(string.ascii_letters + string.digits + "_.-")
+
+
+def _target_name(value: Any) -> str | None:
+    """A directory name for the build target. A path, a slash or ``..`` is dropped."""
+    if not isinstance(value, str):
+        return None
+    name = value.strip()
+    if not name or len(name) > 80 or not name[0].isalnum():
+        return None
+    if any(ch not in _NAME_CHARS for ch in name):
+        return None
+    return name
 
 
 def _text(value: Any) -> str | None:
@@ -215,6 +231,10 @@ class RunLog:
         error = _text(fields.get("error_code")) if "error_code" in fields else None
         if error is not None:
             event["error_code"] = error
+        if type == "run_started":
+            target = _target_name(fields.get("target_name")) if "target_name" in fields else None
+            if target is not None:
+                event["target_name"] = target
         _append_line(self.path, json.dumps(event, ensure_ascii=False))
 
 

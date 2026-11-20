@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-Batch 4 V2 is done: ask registry and labelled topology, all eleven nodes traced with §35 summaries, checkpoints.invoke owns run_started/resumed/paused/finished, and fold marks never-started ask nodes skipped after a finished run. Marker and lifecycle tests pass offline. V3 (console read API and demo fixtures) is next.
+Batch 4 V3 is in place: `governor.integrations.console` serves a read-only console API on the main FastAPI app, with streaming run logs and build artifact summaries. Shipped demo JSONL fixtures cover full build, up-to-date build, repaired ask, and blocked ask; `scripts/make_console_demo.py` regenerates them deterministically. LangGraph Studio is wired via root `langgraph.json` and `governor.integrations.studio`. Pytest coverage for console API and demo/studio is green per acceptance. Next factory step is V4: the `apps/console/` React run canvas consuming these endpoints.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,31 +20,6 @@ Batch 4 V2 is done: ask registry and labelled topology, all eleven nodes traced 
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## V1 result
-*Run-event contract, reducer and build-graph tracing, 20 Nov 2026 18:38.*
-
-Implementer `cursor-grok`; reviewers `cursor-composer`: pass; 0 fix loop(s); branch `factory/V1`.
-
-| check | ok | detail |
-|---|---|---|
-| capstone ground truth unchanged | yes | capstone ground truth unchanged |
-| runtrace package | yes | missing |
-| fold cases: at least 8 | yes | 8 cases |
-| fold cases cover section 34 | yes | ok |
-| build graph wraps nodes | yes | no traced( in build/graph.py |
-| build does not import ask/integrations | yes | bad import |
-| topology has every build node | yes | 14 nodes |
-| every conditional edge labelled | yes | [] |
-| pytest tests/core | yes | 131 passed, 12 skipped in 10.94s |
-| required tests present | yes | 7 found |
-| pytest tests/build | yes | 207 passed, 12 skipped in 91.56s (0:01:31) |
-| required tests present | yes | 5 found |
-| pytest tests | yes | 767 passed, 33 skipped in 209.26s (0:03:29) |
-
-Review: V1 matches batch4 §34–35: additive JSONL tracing, fold reducer with 8 shared cases, build registry/topology, and traced build nodes plus entry-point lifecycle events. Tracing re-raises exceptions, treats GraphInterrupt as pause, respects GOVERNOR_RUNTRACE=0, and marker tests show no warehouse/approver leakage. Acceptance tests and review_focus items are covered.
-
-For Amir: Accept script prints detail strings like "missing" and "no traced(" even on success — they are failure messages, not status.
 
 ## V2 result
 *Ask-graph tracing, 20 Nov 2026 19:06.*
@@ -68,8 +43,33 @@ Review: V2 wires ask tracing end-to-end: ASK_NODES and labelled edges, every nod
 
 For Amir: Optional follow-up: eval AgentSystem uses graph.invoke without run lifecycle wrappers; only affects golden eval threads, not the ask API.
 
-## Additions for V3
-V3 can use topology('ask') and fold() on GOVERNOR_STATE_DIR/runs/ask/<thread_id>.jsonl. run_status mapping is in checkpoints.run_status. Guard-blocked runs finish with status blocked and many skipped nodes. Clarify leaves the log without run_finished until resume. Summaries never carry question/SQL/values; only counts and codes. Eval agent still bypasses checkpoints.invoke — console live runs come from API/CLI unless that is changed later.
+## V3 result
+*Console API (SSE, replay, artifacts), demo runs and LangGraph Studio entry points, 20 Nov 2026 19:46.*
+
+Implementer `cursor-grok`; reviewers `cursor-composer`: pass; 0 fix loop(s); branch `factory/V3`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| langgraph.json graphs | yes | {'build': './src/governor/integrations/studio.py:build', 'ask': './src/governor/integrations/studio.py:ask'} |
+| demo runs shipped | yes | 4 runs, 1 artifacts |
+| demo script | yes | missing |
+| studio build graph | yes | 16 nodes |
+| studio ask graph | yes | 13 nodes |
+| studio graphs without checkpointer | yes | [True, True] |
+| pytest tests/api | yes | 28 passed in 10.19s |
+| required tests present | yes | 11 found |
+| pytest tests/integrations | yes | 49 passed in 22.09s |
+| required tests present | yes | 3 found |
+| pytest tests | yes | 787 passed, 33 skipped in 219.78s (0:03:39) |
+| pytest tests/build | yes | 207 passed, 12 skipped in 92.69s (0:01:32) |
+
+Review: V3 delivers the read-only `/v1/console` API (topology, runs list/view, SSE events, build artifacts), console-only CORS, and bearer auth with an open dev bypass without weakening `/v1/ask`. SSE matches section 36: framing, Last-Event-ID, replay pacing caps, live poll/heartbeat/idle shutdown. Artifacts expose names and counts only with empty fallbacks. Four shipped demo runs plus `make_console_demo.py` are deterministic and graph-driven. `langgraph.json` and `studio.py` compile build/ask without a checkpointer and without import-time network.
+
+For Amir: Acceptance reported 787 pytest passes plus 28 API and 49 integration tests for this step; no code changes required from review.
+
+## Additions for V4
+Mount is at `/v1/console` with `GET /graphs/{build|ask}`, `/runs`, `/runs/{id}`, `/runs/{id}/events?replay=&speed=`, `/runs/{id}/artifacts`. Auth: same bearer tokens as the API, or `GOVERNOR_CONSOLE_OPEN=1` for local UI; optional `GOVERNOR_CONSOLE_ORIGINS` (default Vite dev hosts). EventSource should send `Last-Event-ID`, support `replay=1` and `speed`, and handle comment heartbeats. Shipped demo run ids: `build-full`, `build-current`, `ask-repaired`, `ask-blocked` (live logs under state dir override demo on id clash). Artifacts only for build runs (`target_name` on `run_started`). Frontend fold must match `governor.core.runtrace.fold` (section 34).
 
 ## Additions for the next plan
 Multi-tenant Slack: GovernorSlack takes tenant_threads= (callable returning tenant -> thread ids) for tests; config.tenants non-empty switches every path. Notifier gets tenant_of= and records rec['tenant'] from the run_started project name, then from the tenants' checkpoints; every Notifier.reply appends a 'tenant <name>' context block via blocks.with_tenant, so any new reply type gets it for free, but a chat_update that rebuilds blocks must re-apply with_tenant (see _on_published). dbt_project_name(name) in app.py maps '-' to '_' and prefixes a leading digit with 't_'; the build CLI --tenant still hands init_target the raw tenant name, so a hyphenated tenant created from the CLI gets an invalid dbt project name unless Slack created the target first (init_target never overwrites). ask remains single-tenant and is refused before parse_command. The reviewer's pytest invocation was blocked by the permission policy; acceptance reported tests/integrations 46 passed and the full suite 549 passed, 21 skipped.

@@ -1700,3 +1700,31 @@ Review: claude-tc-fable: pass | cursor-grok: pass
 
 For Amir: Two non-blocking notes. The CLI --tenant path (F5) still gives init_target the raw tenant name, so a tenant like globex-eu started first from the CLI gets an invalid dbt project name; the Slack path maps it to globex_eu. Worth a one-line fix in build/__main__.py when convenient. Also, the reviewer's pytest run was blocked by the permission policy, so the green result is the acceptance script's.
 
+## Relocks
+- 20 Nov 2026 19:38: V3 scope stop was a spec gap: section 36 allows target_name on run_started (build/graph.py + runtrace/log.py) and asks for the Studio how-to in docs/console.md; added those paths to V3 allowed_paths (via supervise, by claude (delegated)) (changed: plan-batch4.yaml)
+
+## V1 result
+*Run-event contract, reducer and build-graph tracing, 20 Nov 2026 18:38.*
+
+Implementer `cursor-grok`; reviewers `cursor-composer`: pass; 0 fix loop(s); branch `factory/V1`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| runtrace package | yes | missing |
+| fold cases: at least 8 | yes | 8 cases |
+| fold cases cover section 34 | yes | ok |
+| build graph wraps nodes | yes | no traced( in build/graph.py |
+| build does not import ask/integrations | yes | bad import |
+| topology has every build node | yes | 14 nodes |
+| every conditional edge labelled | yes | [] |
+| pytest tests/core | yes | 131 passed, 12 skipped in 10.94s |
+| required tests present | yes | 7 found |
+| pytest tests/build | yes | 207 passed, 12 skipped in 91.56s (0:01:31) |
+| required tests present | yes | 5 found |
+| pytest tests | yes | 767 passed, 33 skipped in 209.26s (0:03:29) |
+
+Review: V1 matches batch4 §34–35: additive JSONL tracing, fold reducer with 8 shared cases, build registry/topology, and traced build nodes plus entry-point lifecycle events. Tracing re-raises exceptions, treats GraphInterrupt as pause, respects GOVERNOR_RUNTRACE=0, and marker tests show no warehouse/approver leakage. Acceptance tests and review_focus items are covered.
+
+For Amir: Accept script prints detail strings like "missing" and "no traced(" even on success — they are failure messages, not status.
+

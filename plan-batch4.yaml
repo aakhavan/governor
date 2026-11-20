@@ -35,7 +35,7 @@ steps:
     tier: design
     prompt: plan/prompts/V3.md
     accept: plan/accept/accept_v3.py
-    allowed_paths: [src/governor/integrations/console/, src/governor/integrations/studio.py, src/governor/api/app.py, scripts/make_console_demo.py, langgraph.json, tests/api/, tests/integrations/, tests/fixtures/console/]
+    allowed_paths: [src/governor/integrations/console/, src/governor/integrations/studio.py, src/governor/api/app.py, src/governor/core/runtrace/, src/governor/build/graph.py, docs/console.md, scripts/make_console_demo.py, langgraph.json, tests/api/, tests/integrations/, tests/fixtures/console/]
     human_gate: false
     review_focus: "every console route is read-only; without GOVERNOR_CONSOLE_OPEN a token is required and the ask routes are unaffected either way; SSE framing, Last-Event-ID, replay pacing caps and the live tail end conditions follow section 36; artifacts carry names and counts only and degrade to empty values; demo runs are produced by the real traced graphs and the script is deterministic; studio functions compile without a checkpointer and make no network call at import"
   - id: V4

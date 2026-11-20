@@ -754,7 +754,7 @@ def start(target: str | Path, project_name: str, llm: BuildLLM, *, policy: str |
         state["profile"] = profile
     emit("run_started", thread_id=thread_id, project=project_name, saved_profile=profile is not None)
     run_log = RunLog("build", thread_id)
-    run_log.emit("run_started")
+    run_log.emit("run_started", target_name=Path(target).name)
     with bind_run(thread_id), open_checkpointer(checkpoints) as saver:
         graph = build_graph(llm, saver, **graph_kwargs)
         try:
