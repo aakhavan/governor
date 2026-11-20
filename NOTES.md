@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-Batch 4 V3 is in place: `governor.integrations.console` serves a read-only console API on the main FastAPI app, with streaming run logs and build artifact summaries. Shipped demo JSONL fixtures cover full build, up-to-date build, repaired ask, and blocked ask; `scripts/make_console_demo.py` regenerates them deterministically. LangGraph Studio is wired via root `langgraph.json` and `governor.integrations.studio`. Pytest coverage for console API and demo/studio is green per acceptance. Next factory step is V4: the `apps/console/` React run canvas consuming these endpoints.
+V4 is complete: Governor run console under apps/console (Vite, React 18, React Flow, dagre) with fold reducer, live/replay RunPage, Runs and static Graph pages, copy.ts strings, and offline Vitest. API client and fetch-based SSE support console open mode and optional bearer token on JSON routes only.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -20,28 +20,6 @@ Batch 4 V3 is in place: `governor.integrations.console` serves a read-only conso
 - G3: dbt `source freshness` measures `_loaded_at` against the wall clock (DuckDB now()), and `_loaded_at` is now the pinned as_of, so green sources report warn after 12 h and error after 24 h. build_green.py accepts that (status pass/warn/error, 2 results) instead of failing. Side effect: green sources.json / meta.freshness are not "pass", so `lineage.failing_nodes` on the green build would flag the two sources. Clean fix (outside G3 paths): a project macro overriding `collect_freshness` to use `var('as_of')` as snapshotted_at, or `loaded_at_query` in _sources.yml. Amir decides.
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
-
-## V2 result
-*Ask-graph tracing, 20 Nov 2026 19:06.*
-
-Implementer `cursor-grok`; reviewers `cursor-composer`: pass; 0 fix loop(s); branch `factory/V2`.
-
-| check | ok | detail |
-|---|---|---|
-| capstone ground truth unchanged | yes | capstone ground truth unchanged |
-| src/governor/ask/graph.py does not import build/integrations | yes | bad import |
-| src/governor/ask/checkpoints.py does not import build/integrations | yes | bad import |
-| ask graph wraps nodes | yes | no traced( |
-| topology has every ask node | yes | 11 nodes |
-| every conditional edge labelled | yes | [] |
-| pytest tests/ask | yes | 164 passed, 2 skipped in 49.52s |
-| required tests present | yes | 6 found |
-| pytest tests | yes | 773 passed, 33 skipped in 217.39s (0:03:37) |
-| pytest tests/build | yes | 207 passed, 12 skipped in 93.43s (0:01:33) |
-
-Review: V2 wires ask tracing end-to-end: ASK_NODES and labelled edges, every node wrapped with traced summaries, checkpoints.invoke emits run lifecycle events, fold skips unstarted nodes after run_finished. Offline tests cover repair, guard block, clarify pause, and the marker privacy check. Acceptance and full pytest are green; API/trace store behaviour unchanged.
-
-For Amir: Optional follow-up: eval AgentSystem uses graph.invoke without run lifecycle wrappers; only affects golden eval threads, not the ask API.
 
 ## V3 result
 *Console API (SSE, replay, artifacts), demo runs and LangGraph Studio entry points, 20 Nov 2026 19:46.*
@@ -68,8 +46,39 @@ Review: V3 delivers the read-only `/v1/console` API (topology, runs list/view, S
 
 For Amir: Acceptance reported 787 pytest passes plus 28 API and 49 integration tests for this step; no code changes required from review.
 
-## Additions for V4
-Mount is at `/v1/console` with `GET /graphs/{build|ask}`, `/runs`, `/runs/{id}`, `/runs/{id}/events?replay=&speed=`, `/runs/{id}/artifacts`. Auth: same bearer tokens as the API, or `GOVERNOR_CONSOLE_OPEN=1` for local UI; optional `GOVERNOR_CONSOLE_ORIGINS` (default Vite dev hosts). EventSource should send `Last-Event-ID`, support `replay=1` and `speed`, and handle comment heartbeats. Shipped demo run ids: `build-full`, `build-current`, `ask-repaired`, `ask-blocked` (live logs under state dir override demo on id clash). Artifacts only for build runs (`target_name` on `run_started`). Frontend fold must match `governor.core.runtrace.fold` (section 34).
+## V4 result
+*React console with the live run canvas (React Flow), 20 Nov 2026 20:21.*
+
+Implementer `cursor-grok`; reviewers `cursor-composer`: pass; 0 fix loop(s); branch `factory/V4`.
+
+| check | ok | detail |
+|---|---|---|
+| console dependencies | yes | ok |
+| npm scripts | yes | ok |
+| apps/console/src/run/fold.ts | yes | missing |
+| apps/console/src/graph/RunCanvas.tsx | yes | missing |
+| apps/console/src/graph/GovernorNode.tsx | yes | missing |
+| apps/console/src/copy.ts | yes | missing |
+| apps/console/src/pages/RunsPage.tsx | yes | missing |
+| apps/console/src/pages/RunPage.tsx | yes | missing |
+| apps/console/src/pages/GraphPage.tsx | yes | missing |
+| apps/console/package-lock.json | yes | missing |
+| console .gitignore covers node_modules and dist | yes | missing entries |
+| fold test reads the shared cases | yes | fold_cases.json not imported in a test |
+| required console tests present | yes | 4 found |
+| node 20+ on PATH | yes | v24.22.0 |
+| npm ci | yes | npm warn install-scripts   esbuild@0.21.5 (postinstall: node install.js) | npm warn install-scripts | npm warn install-s |
+| npm run lint | yes | > governor-console@0.0.0 lint | > eslint . |
+| npm run typecheck | yes | > governor-console@0.0.0 typecheck | > tsc --noEmit |
+| npm test | yes | [2m      Tests [22m [1m[32m19 passed[39m[22m[90m (19)[39m | [2m   Start at [22m 20:20:08 | [2m   Duration [2 |
+| npm run build | yes | [2mdist/[22m[35massets/index-DY-1M5sn.css  [39m[1m[2m 25.21 kB[22m[1m[22m[2m │ gzip:   5.03 kB[22m | [2mdist |
+
+Review: V4 delivers the console stack in apps/console/: fold.ts matches all eight fold_cases.json cases; RunCanvas implements §37 node and edge visuals; HeaderEventSource plus useRunEvents dedupe by seq and send Last-Event-ID on reconnect (tested). User strings live in copy.ts; icons are inline SVG. Lint, typecheck, 19 Vitest tests, and build passed per acceptance; no committed secrets.
+
+For Amir: Fold parity and the four required console tests give solid confidence; a quick manual pass with the API in GOVERNOR_CONSOLE_OPEN=1 mode would still validate HeaderEventSource against a real stream.
 
 ## Additions for the next plan
 Multi-tenant Slack: GovernorSlack takes tenant_threads= (callable returning tenant -> thread ids) for tests; config.tenants non-empty switches every path. Notifier gets tenant_of= and records rec['tenant'] from the run_started project name, then from the tenants' checkpoints; every Notifier.reply appends a 'tenant <name>' context block via blocks.with_tenant, so any new reply type gets it for free, but a chat_update that rebuilds blocks must re-apply with_tenant (see _on_published). dbt_project_name(name) in app.py maps '-' to '_' and prefixes a leading digit with 't_'; the build CLI --tenant still hands init_target the raw tenant name, so a hyphenated tenant created from the CLI gets an invalid dbt project name unless Slack created the target first (init_target never overwrites). ask remains single-tenant and is refused before parse_command. The reviewer's pytest invocation was blocked by the permission policy; acceptance reported tests/integrations 46 passed and the full suite 549 passed, 21 skipped.
+
+## Additions for V5
+V5 can use the installed but unused recharts dependency. main.tsx installs HeaderEventSource before any SSE—keep that for Last-Event-ID. JSON fetch may use VITE_API_TOKEN; the event stream does not. Topology labels and summaries come from the API/fixtures, not copy.ts. Optional hardening: derive classifyEdges from seq-ordered deduped events like fold. Console fixtures: tests/fixtures/console/{fold_cases,demo_run,topology_*}.json.

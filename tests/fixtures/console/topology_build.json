@@ -1,0 +1,319 @@
+{
+  "graph": "build",
+  "nodes": [
+    {
+      "id": "start",
+      "label": "Start",
+      "kind": "io",
+      "description": "Where a build run begins.",
+      "group": "design",
+      "order": 0,
+      "planned": false
+    },
+    {
+      "id": "profile",
+      "label": "Profile",
+      "kind": "io",
+      "description": "Reads the raw schema: table, column and PII counts.",
+      "group": "design",
+      "order": 1,
+      "planned": false
+    },
+    {
+      "id": "compare",
+      "label": "Compare",
+      "kind": "check",
+      "description": "Checks the schema fingerprint against the last approved build.",
+      "group": "design",
+      "order": 2,
+      "planned": false
+    },
+    {
+      "id": "propose",
+      "label": "Propose",
+      "kind": "llm",
+      "description": "Asks the model for silver models and KPI mappings.",
+      "group": "design",
+      "order": 3,
+      "planned": false
+    },
+    {
+      "id": "validate",
+      "label": "Validate",
+      "kind": "check",
+      "description": "Checks the proposal and lists finding codes.",
+      "group": "design",
+      "order": 4,
+      "planned": false
+    },
+    {
+      "id": "write_report",
+      "label": "Report",
+      "kind": "io",
+      "description": "Writes the design report for the approval gate.",
+      "group": "design",
+      "order": 5,
+      "planned": false
+    },
+    {
+      "id": "design_gate",
+      "label": "Design gate",
+      "kind": "gate",
+      "description": "Waits for a person to approve or reject the design.",
+      "group": "design",
+      "order": 6,
+      "planned": false
+    },
+    {
+      "id": "record_decisions",
+      "label": "Record",
+      "kind": "io",
+      "description": "Records the approved KPI mappings.",
+      "group": "design",
+      "order": 7,
+      "planned": false
+    },
+    {
+      "id": "write_silver",
+      "label": "Write silver",
+      "kind": "llm",
+      "description": "Writes staging and intermediate models.",
+      "group": "silver",
+      "order": 8,
+      "planned": false
+    },
+    {
+      "id": "dbt_build_silver",
+      "label": "Build silver",
+      "kind": "dbt",
+      "description": "Builds and tests the silver models.",
+      "group": "silver",
+      "order": 9,
+      "planned": false
+    },
+    {
+      "id": "repair_silver",
+      "label": "Repair silver",
+      "kind": "llm",
+      "description": "Asks the model to repair a failing silver model.",
+      "group": "silver",
+      "order": 10,
+      "planned": false
+    },
+    {
+      "id": "silver_done",
+      "label": "Silver done",
+      "kind": "check",
+      "description": "Records whether silver built or escalated.",
+      "group": "silver",
+      "order": 11,
+      "planned": false
+    },
+    {
+      "id": "write_gold",
+      "label": "Write gold",
+      "kind": "io",
+      "description": "Writes gold KPI models and the gap list.",
+      "group": "gold",
+      "order": 12,
+      "planned": false
+    },
+    {
+      "id": "dbt_build_gold",
+      "label": "Build gold",
+      "kind": "dbt",
+      "description": "Builds and tests the gold KPI models.",
+      "group": "gold",
+      "order": 13,
+      "planned": false
+    },
+    {
+      "id": "summarise",
+      "label": "Summary",
+      "kind": "summary",
+      "description": "Writes the build summary: status and cost.",
+      "group": "gold",
+      "order": 14,
+      "planned": false
+    },
+    {
+      "id": "end",
+      "label": "End",
+      "kind": "io",
+      "description": "Where a build run ends.",
+      "group": "gold",
+      "order": 100,
+      "planned": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "target": "profile",
+      "label": "",
+      "conditional": false
+    },
+    {
+      "source": "compare",
+      "target": "end",
+      "label": "up to date",
+      "conditional": true
+    },
+    {
+      "source": "compare",
+      "target": "propose",
+      "label": "changed or new",
+      "conditional": true
+    },
+    {
+      "source": "dbt_build_gold",
+      "target": "summarise",
+      "label": "",
+      "conditional": false
+    },
+    {
+      "source": "dbt_build_silver",
+      "target": "dbt_build_silver",
+      "label": "more models",
+      "conditional": true
+    },
+    {
+      "source": "dbt_build_silver",
+      "target": "repair_silver",
+      "label": "test failed",
+      "conditional": true
+    },
+    {
+      "source": "dbt_build_silver",
+      "target": "silver_done",
+      "label": "silver finished",
+      "conditional": true
+    },
+    {
+      "source": "design_gate",
+      "target": "end",
+      "label": "rejected again",
+      "conditional": true
+    },
+    {
+      "source": "design_gate",
+      "target": "propose",
+      "label": "rejected",
+      "conditional": true
+    },
+    {
+      "source": "design_gate",
+      "target": "record_decisions",
+      "label": "approved",
+      "conditional": true
+    },
+    {
+      "source": "profile",
+      "target": "compare",
+      "label": "",
+      "conditional": false
+    },
+    {
+      "source": "propose",
+      "target": "validate",
+      "label": "",
+      "conditional": false
+    },
+    {
+      "source": "record_decisions",
+      "target": "write_silver",
+      "label": "",
+      "conditional": false
+    },
+    {
+      "source": "repair_silver",
+      "target": "dbt_build_silver",
+      "label": "repaired",
+      "conditional": true
+    },
+    {
+      "source": "repair_silver",
+      "target": "repair_silver",
+      "label": "still failing",
+      "conditional": true
+    },
+    {
+      "source": "repair_silver",
+      "target": "silver_done",
+      "label": "escalated",
+      "conditional": true
+    },
+    {
+      "source": "silver_done",
+      "target": "end",
+      "label": "escalated",
+      "conditional": true
+    },
+    {
+      "source": "silver_done",
+      "target": "write_gold",
+      "label": "silver built",
+      "conditional": true
+    },
+    {
+      "source": "validate",
+      "target": "propose",
+      "label": "findings: repair",
+      "conditional": true
+    },
+    {
+      "source": "validate",
+      "target": "write_report",
+      "label": "ok",
+      "conditional": true
+    },
+    {
+      "source": "write_gold",
+      "target": "dbt_build_gold",
+      "label": "ok",
+      "conditional": true
+    },
+    {
+      "source": "write_gold",
+      "target": "summarise",
+      "label": "blueprint failed",
+      "conditional": true
+    },
+    {
+      "source": "write_report",
+      "target": "end",
+      "label": "design invalid",
+      "conditional": true
+    },
+    {
+      "source": "write_report",
+      "target": "design_gate",
+      "label": "awaiting approval",
+      "conditional": true
+    },
+    {
+      "source": "write_silver",
+      "target": "dbt_build_silver",
+      "label": "sql ok",
+      "conditional": true
+    },
+    {
+      "source": "write_silver",
+      "target": "repair_silver",
+      "label": "sql refused",
+      "conditional": true
+    },
+    {
+      "source": "write_silver",
+      "target": "silver_done",
+      "label": "escalated",
+      "conditional": true
+    },
+    {
+      "source": "summarise",
+      "target": "end",
+      "label": "",
+      "conditional": false
+    }
+  ]
+}
