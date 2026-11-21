@@ -1728,3 +1728,34 @@ Review: V1 matches batch4 §34–35: additive JSONL tracing, fold reducer with 8
 
 For Amir: Accept script prints detail strings like "missing" and "no traced(" even on success — they are failure messages, not status.
 
+## V4 result
+*React console with the live run canvas (React Flow), 20 Nov 2026 20:21.*
+
+Implementer `cursor-grok`; reviewers `cursor-composer`: pass; 0 fix loop(s); branch `factory/V4`.
+
+| check | ok | detail |
+|---|---|---|
+| console dependencies | yes | ok |
+| npm scripts | yes | ok |
+| apps/console/src/run/fold.ts | yes | missing |
+| apps/console/src/graph/RunCanvas.tsx | yes | missing |
+| apps/console/src/graph/GovernorNode.tsx | yes | missing |
+| apps/console/src/copy.ts | yes | missing |
+| apps/console/src/pages/RunsPage.tsx | yes | missing |
+| apps/console/src/pages/RunPage.tsx | yes | missing |
+| apps/console/src/pages/GraphPage.tsx | yes | missing |
+| apps/console/package-lock.json | yes | missing |
+| console .gitignore covers node_modules and dist | yes | missing entries |
+| fold test reads the shared cases | yes | fold_cases.json not imported in a test |
+| required console tests present | yes | 4 found |
+| node 20+ on PATH | yes | v24.22.0 |
+| npm ci | yes | npm warn install-scripts   esbuild@0.21.5 (postinstall: node install.js) | npm warn install-scripts | npm warn install-s |
+| npm run lint | yes | > governor-console@0.0.0 lint | > eslint . |
+| npm run typecheck | yes | > governor-console@0.0.0 typecheck | > tsc --noEmit |
+| npm test | yes | [2m      Tests [22m [1m[32m19 passed[39m[22m[90m (19)[39m | [2m   Start at [22m 20:20:08 | [2m   Duration [2 |
+| npm run build | yes | [2mdist/[22m[35massets/index-DY-1M5sn.css  [39m[1m[2m 25.21 kB[22m[1m[22m[2m │ gzip:   5.03 kB[22m | [2mdist |
+
+Review: V4 delivers the console stack in apps/console/: fold.ts matches all eight fold_cases.json cases; RunCanvas implements §37 node and edge visuals; HeaderEventSource plus useRunEvents dedupe by seq and send Last-Event-ID on reconnect (tested). User strings live in copy.ts; icons are inline SVG. Lint, typecheck, 19 Vitest tests, and build passed per acceptance; no committed secrets.
+
+For Amir: Fold parity and the four required console tests give solid confidence; a quick manual pass with the API in GOVERNOR_CONSOLE_OPEN=1 mode would still validate HeaderEventSource against a real stream.
+
