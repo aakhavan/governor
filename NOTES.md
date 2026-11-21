@@ -3,7 +3,7 @@
 Rules: under 150 lines. Current state, open questions, last two steps' result + additions. Older sections go to `NOTES-archive.md` (the factory rotates).
 
 ## Current state
-F6 (one Slack bot for several tenants) is implemented on branch factory/F6, uncommitted, and reviewed as pass. SlackConfig.from_env loads GOVERNOR_TENANTS into config.tenants with targets = tenant name -> tenant.target and a start-up warning when GOVERNOR_SLACK_TARGETS is also set. notifier.TenantThreads lists threads per tenant from each tenant's checkpoints; parse_command(tenant_threads=) and _button_tenant put exactly one tenant on each Command and raise a UsageError naming both tenants on an ambiguous short id. graph.start/approve/reject receive tenant=<Tenant> only in multi-tenant mode; publish uses the tenant's registered target. Progress header, design card title, every thread reply, the start line and the usage footer name the tenant (host:port/db only). ask is refused with the spec's text and runs nothing. Known limits: events and the Slack message store stay process-wide; the build CLI still passes the raw tenant name to init_target. Acceptance 7/7: tests/integrations 46, tests 549 passed and 21 skipped, tests/build 197 passed and 12 skipped.
+The run console SPA is feature-complete for batch 4: API routes, replay UI, tests, and docs. V6 packages it for compose (console on 8080), documents dev/Docker/replay/Studio in docs/console.md, adds a README showcase blurb, and commits four Playwright-generated screenshots under docs/showcase/. Full Python suite and console lint/typecheck/test/build pass per acceptance.
 
 ## Open questions
 - G2b gate review (claude.ai, 22 Oct): golden set fine; but `fixture/build_green.py` stamps as_of from the wall clock (Sprint 4 behaviour), so a rebuild on another day shifts days_outstanding/overdue answers and breaks the golden as_of check. Spec change for G3 (item 0 + locked check): pin as_of in `fixture/AS_OF` = 2026-10-22T14:11:26+00:00. Needs `factory relock` before `approve G2b`.
@@ -21,46 +21,68 @@ F6 (one Slack bot for several tenants) is implemented on branch factory/F6, unco
 - G3: the prompt gave AS_OF as `2026-10-22T14:11:26+00:00`, but the locked check compares against `str()` of the YAML datetime, so fixture/AS_OF and as_of.txt use `2026-10-22 14:11:26+00:00` (same instant; fromisoformat reads both).
 - G3: `--llm` defaults to `fake` so nothing spends money by accident; G10 must pass `--llm openrouter`. The report records `llm`.
 
-## F5 result
-*Tenants (registry, per-tenant build, CLI --tenant), 17 Nov 2026 18:29.*
+## V5 result
+*Result views (summary, lineage, build funnel, KPI evidence, guard path), 20 Nov 2026 21:00.*
 
-Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F5`.
-
-| check | ok | detail |
-|---|---|---|
-| capstone ground truth unchanged | yes | capstone ground truth unchanged |
-| tenancy module | yes | missing in src/governor/core/tenancy.py |
-| graph takes a tenant | yes | missing in src/governor/build/graph.py |
-| CLI --tenant | yes | missing in src/governor/build/__main__.py |
-| pytest tests/core | yes | 120 passed, 12 skipped in 13.43s |
-| pytest tests/build | yes | 197 passed, 12 skipped in 87.99s (0:01:27) |
-| required tests present | yes | 8 found |
-
-Review: F5 does what section 31 asks. Tenant is a frozen dataclass with derived paths, build_dsn and dbt_env; load_tenants refuses bad names, unknown keys, missing knowledge files and shared root/target/database. graph.start/approve/reject inject the tenant's catalogue, blueprint, approved defaults, policy, checkpoints, profiler, inspector, row counter and dbt env via build_graph kwargs; no module-level state or os.environ is mutated. certify checks the admin DSN host:port/db before anything runs. CLI --tenant fills target/project name and refuses a foreign target (exit 2). All eight tests present.
-
-For Amir: No code changes needed. Two small inconsistencies worth a later tidy: the registry's duplicate-database check does not treat localhost/127.0.0.1/::1 as one host while certify's admin DSN check does, and the registry validates kpis.yaml and blueprint.md but not shop/policy.yaml or shop/access.yaml, so a tenant missing those fails later with a less helpful error. Events remain process-wide, as NOTES already records for F6.
-
-## Additions for F6
-For F6: (1) Use graph.start/approve/reject with tenant=<Tenant>; checkpoints default to tenant.checkpoints (root/artifacts/build_checkpoints.sqlite), so listing threads per tenant means opening each tenant's checkpoint file via graph.open_checkpointer(tenant.checkpoints). (2) Events (events_path) are still process-wide in GOVERNOR_STATE_DIR; map thread ids to tenants via checkpoints, not via events. (3) Tenant.address gives host:port/db for the start-up line and footer; never log build_dsn(). (4) Project name is the tenant name verbatim; names may contain '-', which dbt rejects as a project name, so either restrict names in the registry or map '-' to '_' when calling init_target. (5) load_tenants raises TenantError (a ValueError) naming the tenant; tenants_path() returns None when GOVERNOR_TENANTS is unset or empty. (6) The registry's shared-database check compares host strings lowercased only; certify's admin DSN check treats localhost/127.0.0.1/::1 as one host, so two entries differing only by localhost vs 127.0.0.1 are accepted by the registry. (7) The registry does not check policy.yaml/access.yaml exist; a tenant missing knowledge/shop/policy.yaml fails at profile time with a FileNotFoundError surfaced as 'build run failed'.
-
-## F6 result
-*One Slack bot for several tenants, 17 Nov 2026 20:44.*
-
-Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass, `cursor-grok`: pass; 0 fix loop(s); branch `factory/F6`.
+Implementer `cursor-grok`; reviewers `cursor-composer`: pass; 0 fix loop(s); branch `factory/V5`.
 
 | check | ok | detail |
 |---|---|---|
-| capstone ground truth unchanged | yes | capstone ground truth unchanged |
-| registry in Slack config | yes | missing in src/governor/integrations/slack/config.py |
-| tenants doc | yes | missing in docs/tenants.md |
-| pytest tests/integrations | yes | 46 passed in 10.04s |
-| pytest tests | yes | 549 passed, 21 skipped in 134.99s (0:02:14) |
-| pytest tests/build | yes | 197 passed, 12 skipped in 87.95s (0:01:27) |
-| required tests present | yes | 6 found |
+| view SummaryView | yes | missing |
+| view LineageView | yes | missing |
+| view FunnelView | yes | missing |
+| view KpiEvidenceView | yes | missing |
+| view GuardPathView | yes | missing |
+| required console tests present | yes | 7 found |
+| node 20+ on PATH | yes | v24.22.0 |
+| npm ci | yes | npm warn install-scripts   esbuild@0.21.5 (postinstall: node install.js) | npm warn install-scripts | npm warn install-s |
+| npm run lint | yes | > governor-console@0.0.0 lint | > eslint . |
+| npm run typecheck | yes | > governor-console@0.0.0 typecheck | > tsc --noEmit |
+| npm test | yes | [2m      Tests [22m [1m[32m27 passed[39m[22m[90m (27)[39m | [2m   Start at [22m 20:59:35 | [2m   Duration [2 |
+| npm run build | yes | - Using dynamic import() to code-split the application | - Use build.rollupOptions.output.manualChunks to improve chunki |
 
-Review: claude-tc-fable: pass | cursor-grok: pass
+Review: V5 adds five result views under the run canvas with copy-driven captions, empty states, demo fixtures, and offline Vitest coverage. Build views read artifacts (and summary falls back to folded node summaries); ask guard path reads events plus view. Lineage, funnel, and KPI charts match §38; styles use theme tokens where it matters. Acceptance checks and npm lint/typecheck/test/build all passed.
 
-For Amir: Two non-blocking notes. The CLI --tenant path (F5) still gives init_target the raw tenant name, so a tenant like globex-eu started first from the CLI gets an invalid dbt project name; the Slack path maps it to globex_eu. Worth a one-line fix in build/__main__.py when convenient. Also, the reviewer's pytest run was blocked by the permission policy, so the green result is the acceptance script's.
+For Amir: Worth a quick manual flip light/dark on lineage and funnel during the V6 showcase gate; automated tests do not assert theme contrast.
+
+## V6 result
+*Docker, screenshots, docs and README (showcase), 21 Nov 2026 16:33.*
+
+Implementer `cursor-grok`; reviewers `cursor-composer`: pass; 0 fix loop(s); branch `factory/V6`.
+
+| check | ok | detail |
+|---|---|---|
+| compose console service | yes | missing console service on 8080 |
+| compose keeps console closed by default | yes | open mode set by default |
+| console Dockerfile | yes | missing |
+| nginx config | yes | missing |
+| docs/console.md | yes | missing or incomplete |
+| README run console section | yes | missing |
+| screenshot script | yes | missing |
+| node 20+ on PATH | yes | v24.22.0 |
+| npm ci | yes | npm warn install-scripts   esbuild@0.21.5 (postinstall: node install.js) | npm warn install-scripts | npm warn install-s |
+| npm run lint | yes | > governor-console@0.0.0 lint | > eslint . |
+| npm run typecheck | yes | > governor-console@0.0.0 typecheck | > tsc --noEmit |
+| npm test | yes | [2m      Tests [22m [1m[32m27 passed[39m[22m[90m (27)[39m | [2m   Start at [22m 21:28:40 | [2m   Duration [2 |
+| npm run build | yes | - Using dynamic import() to code-split the application | - Use build.rollupOptions.output.manualChunks to improve chunki |
+| API up in open mode | yes | port 60136 |
+| build against the test API | yes | - Using dynamic import() to code-split the application | - Use build.rollupOptions.output.manualChunks to improve chunki |
+| vite preview up | yes | http://127.0.0.1:60137 |
+| playwright chromium | yes |  |
+| screenshots | yes | > governor-console@0.0.0 screenshots | > node scripts/screenshots.mjs --url http://127.0.0.1:60137 --out C:\Users\amir0\ |
+| screenshot console-runs.png | yes | 46963 bytes |
+| screenshot console-build-live.png | yes | 105246 bytes |
+| screenshot console-build-lineage.png | yes | 85929 bytes |
+| screenshot console-ask-guard.png | yes | 99567 bytes |
+| pytest tests | yes | 787 passed, 33 skipped in 228.59s (0:03:48) |
+| pytest tests/build | yes | 207 passed, 12 skipped in 94.19s (0:01:34) |
+
+Review: V6 delivers the console in Docker (Node 20 build, nginx SPA + /v1/ SSE proxy), compose on 8080 without default open mode, a Playwright screenshot harness with health checks, four believable 1440×900 showcase images, and updated console docs/README. Matches batch4 §39 and review_focus; acceptance results are trustworthy.
+
+For Amir: README highlights dev startup only; Docker is in docs/console.md. For a live stack demo, set GOVERNOR_CONSOLE_OPEN in .env when using compose.
 
 ## Additions for the next plan
-Multi-tenant Slack: GovernorSlack takes tenant_threads= (callable returning tenant -> thread ids) for tests; config.tenants non-empty switches every path. Notifier gets tenant_of= and records rec['tenant'] from the run_started project name, then from the tenants' checkpoints; every Notifier.reply appends a 'tenant <name>' context block via blocks.with_tenant, so any new reply type gets it for free, but a chat_update that rebuilds blocks must re-apply with_tenant (see _on_published). dbt_project_name(name) in app.py maps '-' to '_' and prefixes a leading digit with 't_'; the build CLI --tenant still hands init_target the raw tenant name, so a hyphenated tenant created from the CLI gets an invalid dbt project name unless Slack created the target first (init_target never overwrites). ask remains single-tenant and is refused before parse_command. The reviewer's pytest invocation was blocked by the permission policy; acceptance reported tests/integrations 46 passed and the full suite 549 passed, 21 skipped.
+Docker users hit the console at :8080 with /v1/ proxied to the api service; they must set GOVERNOR_CONSOLE_OPEN (and origins if needed) on the api via .env — the console container has no API env. Regenerate showcase PNGs with `npm run screenshots` in apps/console (needs Chromium: npx playwright install chromium) against a running preview/dev URL and API in open mode. Screenshot script uses EventSource hold trick for build-live at 4×; lineage shot toggles light then dark theme.
+
+## Additions for V6
+ResultPanel is wired on RunPage (build tabs: summary/lineage/funnel/kpi; ask: guard). Artifacts load only for build graph. V6 Playwright shots need console-build-lineage and console-ask-guard against a demo run with manifest/events; consider toggling theme during screenshot pass since chart theme is untested in Vitest. Fixtures live at tests/fixtures/console/build-full.artifacts.json and ask-repaired.events.json.

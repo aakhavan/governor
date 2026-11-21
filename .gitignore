@@ -22,3 +22,7 @@ docs/review/
 docs/walkthroughs/
 docs/capstone/design.md
 docs/capstone/batch2*.md
+
+# batch 4 console (apps/console)
+apps/console/node_modules/
+apps/console/dist/

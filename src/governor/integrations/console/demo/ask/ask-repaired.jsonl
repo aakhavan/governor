@@ -1,0 +1,24 @@
+{"v": 1, "ts": "2026-01-15T12:00:11.250+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 1, "type": "run_started"}
+{"v": 1, "ts": "2026-01-15T12:00:11.500+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 2, "type": "node_started", "node": "guard", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:11.750+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 3, "type": "node_finished", "node": "guard", "attempt": 1, "duration_ms": 40, "summary": "ok"}
+{"v": 1, "ts": "2026-01-15T12:00:12.000+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 4, "type": "node_started", "node": "retrieve_context", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:12.250+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 5, "type": "node_finished", "node": "retrieve_context", "attempt": 1, "duration_ms": 40, "summary": "2 tables · 0 metrics"}
+{"v": 1, "ts": "2026-01-15T12:00:12.500+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 6, "type": "node_started", "node": "plan", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:12.750+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 7, "type": "node_finished", "node": "plan", "attempt": 1, "duration_ms": 40, "summary": "answer", "metrics": {"llm_calls": 1, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0}}
+{"v": 1, "ts": "2026-01-15T12:00:13.000+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 8, "type": "node_started", "node": "draft_sql", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:13.250+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 9, "type": "node_finished", "node": "draft_sql", "attempt": 1, "duration_ms": 40, "summary": "drafted", "metrics": {"llm_calls": 1, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0}}
+{"v": 1, "ts": "2026-01-15T12:00:13.500+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 10, "type": "node_started", "node": "validate", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:13.750+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 11, "type": "node_finished", "node": "validate", "attempt": 1, "duration_ms": 40, "summary": "refused: COLUMN_UNKNOWN"}
+{"v": 1, "ts": "2026-01-15T12:00:14.000+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 12, "type": "node_started", "node": "repair", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:14.250+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 13, "type": "node_finished", "node": "repair", "attempt": 1, "duration_ms": 40, "summary": "repair 1", "metrics": {"llm_calls": 1, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0}}
+{"v": 1, "ts": "2026-01-15T12:00:14.500+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 14, "type": "node_started", "node": "validate", "attempt": 2}
+{"v": 1, "ts": "2026-01-15T12:00:14.750+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 15, "type": "node_finished", "node": "validate", "attempt": 2, "duration_ms": 40, "summary": "ok"}
+{"v": 1, "ts": "2026-01-15T12:00:15.000+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 16, "type": "node_started", "node": "dry_run", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:15.250+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 17, "type": "node_finished", "node": "dry_run", "attempt": 1, "duration_ms": 40, "summary": "ok"}
+{"v": 1, "ts": "2026-01-15T12:00:15.500+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 18, "type": "node_started", "node": "execute", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:15.750+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 19, "type": "node_finished", "node": "execute", "attempt": 1, "duration_ms": 40, "summary": "1 rows"}
+{"v": 1, "ts": "2026-01-15T12:00:16.000+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 20, "type": "node_started", "node": "answer", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:16.250+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 21, "type": "node_finished", "node": "answer", "attempt": 1, "duration_ms": 40, "summary": "answered", "metrics": {"llm_calls": 1, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0}}
+{"v": 1, "ts": "2026-01-15T12:00:16.500+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 22, "type": "node_started", "node": "record_trace", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:16.750+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 23, "type": "node_finished", "node": "record_trace", "attempt": 1, "duration_ms": 40, "summary": "saved"}
+{"v": 1, "ts": "2026-01-15T12:00:17.000+00:00", "run_id": "ask-repaired", "graph": "ask", "seq": 24, "type": "run_finished", "status": "answered", "metrics": {"llm_calls": 4, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0}}

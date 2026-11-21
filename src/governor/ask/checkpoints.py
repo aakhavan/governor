@@ -31,9 +31,12 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.errors import GraphInterrupt
+from langgraph.types import Command
 
 from governor.ask import traces
 from governor.core import paths
+from governor.core.runtrace.log import RunLog, bind_run, call_metrics
 
 TTL_ENV = "GOVERNOR_THREAD_TTL_H"
 DEFAULT_TTL_H = 24.0
@@ -105,16 +108,84 @@ def _write(store: SqliteSaver, sql: str, params: tuple) -> None:
         store.conn.commit()
 
 
-def invoke(graph: Any, store: SqliteSaver, payload: Any, config: dict, role: str | None) -> dict:
-    """``graph.invoke`` that drops the thread's checkpoints unless the run paused at clarify."""
-    paused = False
+def run_status(outcome: str | None) -> str:
+    """Map a graph outcome to a run-log status: ``answered``, ``refused``, ``blocked`` or ``error``.
+
+    A guard refusal is ``blocked``. Other refusals, an unanswerable plan and a
+    failed clarification are ``refused``. A warehouse failure or an unknown end
+    is ``error``.
+    """
+    if outcome == "answer":
+        return "answered"
+    if outcome == "refused_guard":
+        return "blocked"
+    if outcome in {"refused_policy", "refused_repair", "unanswerable", "clarify_failed"}:
+        return "refused"
+    return "error"
+
+
+def _is_resume(payload: Any) -> bool:
+    return isinstance(payload, Command) and payload.resume is not None
+
+
+def _outcome(result: dict) -> str | None:
+    outcome = result.get("outcome")
+    if isinstance(outcome, str) and outcome:
+        return outcome
+    trace = result.get("trace")
+    if isinstance(trace, dict):
+        recorded = trace.get("outcome")
+        if isinstance(recorded, str) and recorded:
+            return recorded
+    return None
+
+
+def _run_metrics(result: dict | None) -> dict | None:
+    if not isinstance(result, dict):
+        return None
+    usage = result.get("usage")
+    if not isinstance(usage, list) or not usage:
+        return None
+    return call_metrics(usage)
+
+
+def _emit_finished(run_log: RunLog, result: dict | None) -> None:
+    """``run_finished`` for a thread that ended. Never raises into the caller."""
     try:
-        result = graph.invoke(payload, config)
-        paused = bool(result.get("__interrupt__"))
+        status = run_status(_outcome(result)) if isinstance(result, dict) else "error"
+        metrics = _run_metrics(result)
+        if metrics is None:
+            run_log.emit("run_finished", status=status)
+        else:
+            run_log.emit("run_finished", status=status, metrics=metrics)
+    except Exception:  # noqa: BLE001 — tracing must not change the ask result
+        run_log.emit("run_finished", status="error")
+
+
+def invoke(graph: Any, store: SqliteSaver, payload: Any, config: dict, role: str | None) -> dict:
+    """``graph.invoke`` that drops the thread's checkpoints unless the run paused at clarify.
+
+    This is the one funnel for ask calls. A new thread emits ``run_started``; a
+    ``Command(resume=...)`` emits ``run_resumed``. ``run_finished`` is written
+    only when the thread ends. A clarify interrupt stays a pause.
+    """
+    thread_id = config["configurable"]["thread_id"]
+    run_log = RunLog("ask", thread_id)
+    run_log.emit("run_resumed" if _is_resume(payload) else "run_started")
+    paused = False
+    result: dict | None = None
+    try:
+        with bind_run(thread_id):
+            result = graph.invoke(payload, config)
+        paused = bool(isinstance(result, dict) and result.get("__interrupt__"))
         return result
+    except GraphInterrupt:
+        paused = True
+        raise
     finally:
         if not paused:
-            finish(store, config["configurable"]["thread_id"], role)
+            _emit_finished(run_log, result if isinstance(result, dict) else None)
+            finish(store, thread_id, role)
 
 
 def prune_stale(store: SqliteSaver, *, ttl_h: float | None = None, now: datetime | None = None) -> list[str]:

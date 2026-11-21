@@ -38,6 +38,7 @@ from governor.ask.policy import Policy
 from governor.ask.schemas import AnswerDraft, AskState, QueryPlan, SqlDraft
 from governor.ask.validator import validate as validate_sql
 from governor.core import lineage, paths, security
+from governor.core.runtrace.log import traced
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
 log = logging.getLogger(__name__)
@@ -284,10 +285,110 @@ def _refuse(outcome: str, text: str, **extra: Any) -> dict:
     return {"outcome": outcome, "refusal": text, **extra}
 
 
+def _codes(update: dict) -> list[str]:
+    return [code for code in (update.get("codes") or []) if isinstance(code, str) and code]
+
+
+def _sum_guard(update: dict, state: AskState) -> str:
+    if not update.get("refusal") and update.get("outcome") != "refused_guard":
+        return "ok"
+    codes = []
+    for item in update.get("policy_decisions") or []:
+        if not isinstance(item, dict):
+            continue
+        rule = str(item.get("rule") or "")
+        code = rule.split(":", 1)[-1]
+        if code:
+            codes.append(code)
+    return "blocked: " + " ".join(codes) if codes else "blocked"
+
+
+def _sum_retrieve(update: dict, state: AskState) -> str:
+    ids = [item for item in (update.get("retrieved_ids") or []) if isinstance(item, str)]
+    tables = sum(item.startswith("model:") for item in ids)
+    metrics = sum(item.startswith("metric:") for item in ids)
+    return f"{tables} tables · {metrics} metrics"
+
+
+def _sum_plan(update: dict, state: AskState) -> str:
+    if update.get("outcome") == "refused_guard":
+        return "blocked"
+    plan = update.get("plan") if isinstance(update.get("plan"), dict) else {}
+    intent = plan.get("intent")
+    if intent in ("answer", "clarify", "unanswerable"):
+        return str(intent)
+    return "answer"
+
+
+def _sum_clarify(update: dict, state: AskState) -> str:
+    return "asked"
+
+
+def _sum_draft(update: dict, state: AskState) -> str:
+    return "drafted"
+
+
+def _sum_validate(update: dict, state: AskState) -> str:
+    codes = _codes(update)
+    return "refused: " + " ".join(codes) if codes else "ok"
+
+
+def _sum_dry_run(update: dict, state: AskState) -> str:
+    codes = _codes(update)
+    if codes:
+        return codes[0]
+    if update.get("dry_run_error"):
+        return "DRY_RUN_FAILED"
+    return "ok"
+
+
+def _sum_execute(update: dict, state: AskState) -> str:
+    if _codes(update) or update.get("dry_run_error"):
+        return "0 rows"
+    count = update.get("row_count")
+    if isinstance(count, bool) or not isinstance(count, int):
+        rows = update.get("rows")
+        count = len(rows) if isinstance(rows, list) else 0
+    return f"{count} rows"
+
+
+def _sum_repair(update: dict, state: AskState) -> str:
+    count = update.get("repairs")
+    if isinstance(count, bool) or not isinstance(count, int):
+        count = int(state.get("repairs") or 0) + 1
+    return f"repair {count}"
+
+
+def _sum_answer(update: dict, state: AskState) -> str:
+    return "answered"
+
+
+def _sum_record(update: dict, state: AskState) -> str:
+    return "not saved" if update.get("trace_error") else "saved"
+
+
+_SUMMARIES = {
+    "guard": _sum_guard,
+    "retrieve_context": _sum_retrieve,
+    "plan": _sum_plan,
+    "clarify": _sum_clarify,
+    "draft_sql": _sum_draft,
+    "validate": _sum_validate,
+    "dry_run": _sum_dry_run,
+    "repair": _sum_repair,
+    "execute": _sum_execute,
+    "answer": _sum_answer,
+    "record_trace": _sum_record,
+}
+
+# Omitted checkpointer means the in-memory saver. None compiles with no saver (topology only).
+_DEFAULT_CHECKPOINTER = object()
+
+
 def build_graph(
     *,
     llm: Any = None,
-    checkpointer: Any = None,
+    checkpointer: Any = _DEFAULT_CHECKPOINTER,
     database: str | Path | None = None,
     access_path: Path | None = None,
     meta_path: Path | None = None,
@@ -304,7 +405,7 @@ def build_graph(
     ``None`` the real models are built on first use: FAST_MODEL (gpt-5-nano)
     for ``plan``, gpt-5-mini for ``draft_sql``, ``repair`` and ``answer``, so
     compiling needs no network or key. ``checkpointer`` defaults to an
-    ``InMemorySaver``. ``database``, ``access_path``, ``meta_path``, ``cards``
+    ``InMemorySaver``; pass ``None`` to compile with no saver. ``database``, ``access_path``, ``meta_path``, ``cards``
     and ``as_of`` point the graph at fixtures. Retrieval defaults to BM25
     (best tune recall in G4, no embedding call). ``record_trace`` writes each
     trace to ``trace_path`` (default ``paths.TRACES``) unless ``store_traces``
@@ -597,7 +698,7 @@ def build_graph(
         ("answer", answer),
         ("record_trace", record_trace),
     ]:
-        builder.add_node(name, fn)
+        builder.add_node(name, traced("ask", name, fn, _SUMMARIES[name]))
     builder.add_edge(START, "guard")
     builder.add_conditional_edges("guard", stop_or("retrieve_context"), ["retrieve_context", "record_trace"])
     builder.add_edge("retrieve_context", "plan")
@@ -610,4 +711,5 @@ def build_graph(
     builder.add_conditional_edges("execute", after_check("answer"), ["answer", "repair", "record_trace"])
     builder.add_edge("answer", "record_trace")
     builder.add_edge("record_trace", END)
-    return builder.compile(checkpointer=checkpointer if checkpointer is not None else InMemorySaver())
+    saver = InMemorySaver() if checkpointer is _DEFAULT_CHECKPOINTER else checkpointer
+    return builder.compile(checkpointer=saver)

@@ -1,0 +1,64 @@
+# governor batch 4 (V1-V6): the run console (live LangGraph node canvas + result views + replay).
+# Contract: docs/capstone/batch4.md sections 33-39. Decision: docs/adr/0005-run-console.md.
+# Runs on branch batch4, never on main. Run: factory lock --plan plan-batch4.yaml ; factory supervise --plan plan-batch4.yaml --start
+# Only V6 has a human gate, so the batch runs unattended to the end and waits there for Amir's review.
+project: governor
+notes: NOTES.md
+agents: AGENTS.md
+defaults:
+  max_fix_loops: 2
+  timeout_min: 75
+  run_budget_usd: 120
+  step_budget_usd: 25
+  review_budget_usd: {design: 3.0, mechanical: 0.75}
+roles:
+  design: {implementer: [claude-tc-opus, cursor-grok], reviewer: [claude-tc-fable, cursor-composer, cursor-grok]}
+steps:
+  - id: V1
+    title: Run-event contract, reducer and build-graph tracing
+    tier: design
+    prompt: plan/prompts/V1.md
+    accept: plan/accept/accept_v1.py
+    allowed_paths: [src/governor/core/runtrace/, src/governor/build/graph.py, tests/core/, tests/build/, tests/fixtures/console/]
+    human_gate: false
+    review_focus: "tracing never changes a node's return value or raises into the graph; GraphInterrupt is a pause, not a failure; summaries and the run log carry no data values (marker test); fold() follows section 34 exactly and the shared fold_cases.json has the 8 named cases; every compiled build node has a registry entry and every conditional edge a label; GOVERNOR_RUNTRACE=0 writes nothing; build events.jsonl and all existing tests unchanged"
+  - id: V2
+    title: Ask-graph tracing
+    tier: design
+    prompt: plan/prompts/V2.md
+    accept: plan/accept/accept_v2.py
+    allowed_paths: [src/governor/core/runtrace/, src/governor/ask/graph.py, src/governor/ask/checkpoints.py, src/governor/ask/service.py, src/governor/ask/agent.py, src/governor/ask/run.py, tests/ask/, tests/core/, tests/fixtures/console/]
+    human_gate: false
+    review_focus: "ask never imports governor.build; no question text, SQL text, answer text or row value in any event (marker test); clarify is a pause; a blocked guard ends with run_finished status refused; the ask API responses and traces.duckdb are unchanged"
+  - id: V3
+    title: Console API (SSE, replay, artifacts), demo runs and LangGraph Studio entry points
+    tier: design
+    prompt: plan/prompts/V3.md
+    accept: plan/accept/accept_v3.py
+    allowed_paths: [src/governor/integrations/console/, src/governor/integrations/studio.py, src/governor/api/app.py, src/governor/core/runtrace/, src/governor/build/graph.py, docs/console.md, scripts/make_console_demo.py, langgraph.json, tests/api/, tests/integrations/, tests/fixtures/console/]
+    human_gate: false
+    review_focus: "every console route is read-only; without GOVERNOR_CONSOLE_OPEN a token is required and the ask routes are unaffected either way; SSE framing, Last-Event-ID, replay pacing caps and the live tail end conditions follow section 36; artifacts carry names and counts only and degrade to empty values; demo runs are produced by the real traced graphs and the script is deterministic; studio functions compile without a checkpointer and make no network call at import"
+  - id: V4
+    title: React console with the live run canvas (React Flow)
+    tier: design
+    prompt: plan/prompts/V4.md
+    accept: plan/accept/accept_v4.py
+    allowed_paths: [apps/console/, tests/fixtures/console/]
+    human_gate: false
+    review_focus: "fold.ts matches fold_cases.json exactly; node states and edge states as in section 37; EventSource hook dedupes by seq and resumes with Last-Event-ID; strings in copy.ts; no third-party logos or copied assets; lint, typecheck, tests and build green; no secrets or tokens committed"
+  - id: V5
+    title: Result views (summary, lineage, build funnel, KPI evidence, guard path)
+    tier: design
+    prompt: plan/prompts/V5.md
+    accept: plan/accept/accept_v5.py
+    allowed_paths: [apps/console/, tests/fixtures/console/]
+    human_gate: false
+    review_focus: "each view reads only the artifacts/run-view fields named in section 38 and has an empty state; captions are plain English from copy.ts; charts are readable in dark and light theme; tests cover render + empty state per view"
+  - id: V6
+    title: Docker, screenshots, docs and README (showcase)
+    tier: design
+    prompt: plan/prompts/V6.md
+    accept: plan/accept/accept_v6.py
+    allowed_paths: [apps/console/, docker-compose.yml, docs/console.md, docs/showcase/, README.md, tests/fixtures/console/]
+    human_gate: true
+    review_focus: "the screenshots show a believable live run (running node, x2 badge, labels readable) with no console errors and no overflow; Docker build stage and nginx proxy are correct; compose defaults keep the console closed (no GOVERNOR_CONSOLE_OPEN set); docs are short, plain English and accurate; the whole suite and the console build are green"

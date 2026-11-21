@@ -1,0 +1,212 @@
+[
+  {
+    "name": "empty",
+    "events": [],
+    "expected": {
+      "run": {
+        "state": "running",
+        "status": null,
+        "elapsed_ms": 0,
+        "llm_calls": 0,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0,
+        "current_node": null
+      },
+      "nodes": {}
+    }
+  },
+  {
+    "name": "straight run",
+    "events": [
+      {"v": 1, "ts": "2026-01-01T00:00:00.000+00:00", "run_id": "r", "graph": "demo", "seq": 1, "type": "run_started"},
+      {"v": 1, "ts": "2026-01-01T00:00:00.100+00:00", "run_id": "r", "graph": "demo", "seq": 2, "type": "node_started", "node": "a", "attempt": 1},
+      {"v": 1, "ts": "2026-01-01T00:00:00.500+00:00", "run_id": "r", "graph": "demo", "seq": 3, "type": "node_finished", "node": "a", "attempt": 1, "duration_ms": 100, "summary": "3 tables", "metrics": {"llm_calls": 1, "tokens_in": 10, "tokens_out": 4, "cost_usd": 1}},
+      {"v": 1, "ts": "2026-01-01T00:00:01.000+00:00", "run_id": "r", "graph": "demo", "seq": 4, "type": "node_started", "node": "b", "attempt": 1},
+      {"v": 1, "ts": "2026-01-01T00:00:01.250+00:00", "run_id": "r", "graph": "demo", "seq": 5, "type": "node_finished", "node": "b", "attempt": 1, "duration_ms": 50, "summary": "ok", "metrics": {"llm_calls": 2, "tokens_in": 5, "tokens_out": 1, "cost_usd": 2}},
+      {"v": 1, "ts": "2026-01-01T00:00:02.000+00:00", "run_id": "r", "graph": "demo", "seq": 6, "type": "run_finished", "status": "built"}
+    ],
+    "expected": {
+      "run": {
+        "state": "finished",
+        "status": "built",
+        "elapsed_ms": 2000,
+        "llm_calls": 3,
+        "tokens_in": 15,
+        "tokens_out": 5,
+        "cost_usd": 3,
+        "current_node": null
+      },
+      "nodes": {
+        "a": {"state": "done", "attempts": 1, "duration_ms": 100, "summary": "3 tables", "error_code": null},
+        "b": {"state": "done", "attempts": 1, "duration_ms": 50, "summary": "ok", "error_code": null}
+      }
+    }
+  },
+  {
+    "name": "repair attempt 2",
+    "events": [
+      {"v": 1, "ts": "2026-01-01T00:00:00.000+00:00", "run_id": "r", "graph": "demo", "seq": 1, "type": "run_started"},
+      {"v": 1, "ts": "2026-01-01T00:00:00.100+00:00", "run_id": "r", "graph": "demo", "seq": 2, "type": "node_started", "node": "repair_silver", "attempt": 1},
+      {"v": 1, "ts": "2026-01-01T00:00:00.500+00:00", "run_id": "r", "graph": "demo", "seq": 3, "type": "node_finished", "node": "repair_silver", "attempt": 1, "duration_ms": 40, "summary": "repair 1 for int_orders", "metrics": {"llm_calls": 1, "tokens_in": 8, "tokens_out": 2, "cost_usd": 1}},
+      {"v": 1, "ts": "2026-01-01T00:00:01.000+00:00", "run_id": "r", "graph": "demo", "seq": 4, "type": "node_started", "node": "repair_silver", "attempt": 2},
+      {"v": 1, "ts": "2026-01-01T00:00:01.250+00:00", "run_id": "r", "graph": "demo", "seq": 5, "type": "node_finished", "node": "repair_silver", "attempt": 2, "duration_ms": 60, "summary": "repair 2 for int_orders", "metrics": {"llm_calls": 1, "tokens_in": 8, "tokens_out": 2, "cost_usd": 1}},
+      {"v": 1, "ts": "2026-01-01T00:00:02.000+00:00", "run_id": "r", "graph": "demo", "seq": 6, "type": "run_finished", "status": "built"}
+    ],
+    "expected": {
+      "run": {
+        "state": "finished",
+        "status": "built",
+        "elapsed_ms": 2000,
+        "llm_calls": 2,
+        "tokens_in": 16,
+        "tokens_out": 4,
+        "cost_usd": 2,
+        "current_node": null
+      },
+      "nodes": {
+        "repair_silver": {"state": "done", "attempts": 2, "duration_ms": 100, "summary": "repair 2 for int_orders", "error_code": null}
+      }
+    }
+  },
+  {
+    "name": "pause then resume then finish",
+    "events": [
+      {"v": 1, "ts": "2026-01-01T00:00:00.000+00:00", "run_id": "r", "graph": "demo", "seq": 1, "type": "run_started"},
+      {"v": 1, "ts": "2026-01-01T00:00:00.100+00:00", "run_id": "r", "graph": "demo", "seq": 2, "type": "node_started", "node": "design_gate", "attempt": 1},
+      {"v": 1, "ts": "2026-01-01T00:00:00.500+00:00", "run_id": "r", "graph": "demo", "seq": 3, "type": "run_paused", "node": "design_gate", "status": "awaiting_approval"},
+      {"v": 1, "ts": "2026-01-01T00:00:01.000+00:00", "run_id": "r", "graph": "demo", "seq": 4, "type": "run_resumed"},
+      {"v": 1, "ts": "2026-01-01T00:00:01.250+00:00", "run_id": "r", "graph": "demo", "seq": 5, "type": "node_started", "node": "design_gate", "attempt": 2},
+      {"v": 1, "ts": "2026-01-01T00:00:02.000+00:00", "run_id": "r", "graph": "demo", "seq": 6, "type": "node_finished", "node": "design_gate", "attempt": 2, "duration_ms": 10, "summary": "approved"},
+      {"v": 1, "ts": "2026-01-01T00:00:03.000+00:00", "run_id": "r", "graph": "demo", "seq": 7, "type": "run_finished", "status": "built"}
+    ],
+    "expected": {
+      "run": {
+        "state": "finished",
+        "status": "built",
+        "elapsed_ms": 3000,
+        "llm_calls": 0,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0,
+        "current_node": null
+      },
+      "nodes": {
+        "design_gate": {"state": "done", "attempts": 2, "duration_ms": 10, "summary": "approved", "error_code": null}
+      }
+    }
+  },
+  {
+    "name": "failed node",
+    "events": [
+      {"v": 1, "ts": "2026-01-01T00:00:00.000+00:00", "run_id": "r", "graph": "demo", "seq": 1, "type": "run_started"},
+      {"v": 1, "ts": "2026-01-01T00:00:00.100+00:00", "run_id": "r", "graph": "demo", "seq": 2, "type": "node_started", "node": "propose", "attempt": 1},
+      {"v": 1, "ts": "2026-01-01T00:00:00.500+00:00", "run_id": "r", "graph": "demo", "seq": 3, "type": "node_failed", "node": "propose", "attempt": 1, "duration_ms": 30, "error_code": "ValueError"}
+    ],
+    "expected": {
+      "run": {
+        "state": "failed",
+        "status": null,
+        "elapsed_ms": 500,
+        "llm_calls": 0,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0,
+        "current_node": null
+      },
+      "nodes": {
+        "propose": {"state": "failed", "attempts": 1, "duration_ms": 0, "summary": null, "error_code": "ValueError"}
+      }
+    }
+  },
+  {
+    "name": "duplicate and out-of-order seq",
+    "events": [
+      {"v": 1, "ts": "2026-01-01T00:00:00.000+00:00", "run_id": "r", "graph": "demo", "seq": 1, "type": "run_started"},
+      {"v": 1, "ts": "2026-01-01T00:00:00.500+00:00", "run_id": "r", "graph": "demo", "seq": 3, "type": "node_finished", "node": "a", "duration_ms": 20, "summary": "kept", "metrics": {"llm_calls": 1, "tokens_in": 1, "tokens_out": 1, "cost_usd": 1}},
+      {"v": 1, "ts": "2026-01-01T00:00:00.100+00:00", "run_id": "r", "graph": "demo", "seq": 2, "type": "node_started", "node": "a", "attempt": 1},
+      {"v": 1, "ts": "2026-01-01T00:00:09.000+00:00", "run_id": "r", "graph": "demo", "seq": 2, "type": "node_started", "node": "a", "attempt": 9}
+    ],
+    "expected": {
+      "run": {
+        "state": "running",
+        "status": null,
+        "elapsed_ms": 500,
+        "llm_calls": 1,
+        "tokens_in": 1,
+        "tokens_out": 1,
+        "cost_usd": 1,
+        "current_node": null
+      },
+      "nodes": {
+        "a": {"state": "done", "attempts": 1, "duration_ms": 20, "summary": "kept", "error_code": null}
+      }
+    }
+  },
+  {
+    "name": "up to date skips nodes",
+    "events": [
+      {"v": 1, "ts": "2026-01-01T00:00:00.000+00:00", "run_id": "r", "graph": "build", "seq": 1, "type": "run_started"},
+      {"v": 1, "ts": "2026-01-01T00:00:00.100+00:00", "run_id": "r", "graph": "build", "seq": 2, "type": "node_started", "node": "profile", "attempt": 1},
+      {"v": 1, "ts": "2026-01-01T00:00:00.500+00:00", "run_id": "r", "graph": "build", "seq": 3, "type": "node_finished", "node": "profile", "duration_ms": 15, "summary": "2 tables · 3 columns · 1 PII"},
+      {"v": 1, "ts": "2026-01-01T00:00:01.000+00:00", "run_id": "r", "graph": "build", "seq": 4, "type": "node_started", "node": "compare", "attempt": 1},
+      {"v": 1, "ts": "2026-01-01T00:00:01.250+00:00", "run_id": "r", "graph": "build", "seq": 5, "type": "node_finished", "node": "compare", "duration_ms": 5, "summary": "up to date"},
+      {"v": 1, "ts": "2026-01-01T00:00:02.000+00:00", "run_id": "r", "graph": "build", "seq": 6, "type": "run_finished", "status": "up_to_date"}
+    ],
+    "expected": {
+      "run": {
+        "state": "finished",
+        "status": "up_to_date",
+        "elapsed_ms": 2000,
+        "llm_calls": 0,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0,
+        "current_node": null
+      },
+      "nodes": {
+        "profile": {"state": "done", "attempts": 1, "duration_ms": 15, "summary": "2 tables · 3 columns · 1 PII", "error_code": null},
+        "compare": {"state": "done", "attempts": 1, "duration_ms": 5, "summary": "up to date", "error_code": null},
+        "propose": {"state": "skipped", "attempts": 0, "duration_ms": 0, "summary": null, "error_code": null},
+        "validate": {"state": "skipped", "attempts": 0, "duration_ms": 0, "summary": null, "error_code": null},
+        "write_report": {"state": "skipped", "attempts": 0, "duration_ms": 0, "summary": null, "error_code": null},
+        "design_gate": {"state": "skipped", "attempts": 0, "duration_ms": 0, "summary": null, "error_code": null},
+        "record_decisions": {"state": "skipped", "attempts": 0, "duration_ms": 0, "summary": null, "error_code": null},
+        "write_silver": {"state": "skipped", "attempts": 0, "duration_ms": 0, "summary": null, "error_code": null},
+        "dbt_build_silver": {"state": "skipped", "attempts": 0, "duration_ms": 0, "summary": null, "error_code": null},
+        "repair_silver": {"state": "skipped", "attempts": 0, "duration_ms": 0, "summary": null, "error_code": null},
+        "silver_done": {"state": "skipped", "attempts": 0, "duration_ms": 0, "summary": null, "error_code": null},
+        "write_gold": {"state": "skipped", "attempts": 0, "duration_ms": 0, "summary": null, "error_code": null},
+        "dbt_build_gold": {"state": "skipped", "attempts": 0, "duration_ms": 0, "summary": null, "error_code": null},
+        "summarise": {"state": "skipped", "attempts": 0, "duration_ms": 0, "summary": null, "error_code": null}
+      }
+    }
+  },
+  {
+    "name": "unknown cost",
+    "events": [
+      {"v": 1, "ts": "2026-01-01T00:00:00.000+00:00", "run_id": "r", "graph": "demo", "seq": 1, "type": "run_started"},
+      {"v": 1, "ts": "2026-01-01T00:00:00.100+00:00", "run_id": "r", "graph": "demo", "seq": 2, "type": "node_started", "node": "a", "attempt": 1},
+      {"v": 1, "ts": "2026-01-01T00:00:00.500+00:00", "run_id": "r", "graph": "demo", "seq": 3, "type": "node_finished", "node": "a", "duration_ms": 10, "summary": "drafted", "metrics": {"llm_calls": 1, "tokens_in": 3, "tokens_out": 1, "cost_usd": null}},
+      {"v": 1, "ts": "2026-01-01T00:00:01.000+00:00", "run_id": "r", "graph": "demo", "seq": 4, "type": "node_started", "node": "b", "attempt": 1},
+      {"v": 1, "ts": "2026-01-01T00:00:01.250+00:00", "run_id": "r", "graph": "demo", "seq": 5, "type": "node_finished", "node": "b", "duration_ms": 12, "summary": "ok", "metrics": {"llm_calls": 1, "tokens_in": 4, "tokens_out": 2, "cost_usd": 2}},
+      {"v": 1, "ts": "2026-01-01T00:00:02.000+00:00", "run_id": "r", "graph": "demo", "seq": 6, "type": "run_finished", "status": "answered"}
+    ],
+    "expected": {
+      "run": {
+        "state": "finished",
+        "status": "answered",
+        "elapsed_ms": 2000,
+        "llm_calls": 2,
+        "tokens_in": 7,
+        "tokens_out": 3,
+        "cost_usd": null,
+        "current_node": null
+      },
+      "nodes": {
+        "a": {"state": "done", "attempts": 1, "duration_ms": 10, "summary": "drafted", "error_code": null},
+        "b": {"state": "done", "attempts": 1, "duration_ms": 12, "summary": "ok", "error_code": null}
+      }
+    }
+  }
+]

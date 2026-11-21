@@ -1655,3 +1655,107 @@ publish() now runs sync_main(target) before 'checkout -B'. With an origin that h
 ## F6 result (implementer notes; the factory adds the reviewed result)
 One Slack bot for several tenants (section 32). SlackConfig.from_env loads GOVERNOR_TENANTS (TenantError -> ConfigError naming the variable): targets = tenant name -> tenant.target, config.tenants, and config.warnings carries TARGETS_IGNORED when GOVERNOR_SLACK_TARGETS is also set (printed by __main__). notifier.TenantThreads lists threads per tenant from each tenant's checkpoints (known_threads(tenant.checkpoints)) and reads a thread's state from its tenant's file; GovernorSlack takes tenant_threads= for tests. parse_command(..., tenant_threads=) puts the tenant on Command; resolve_tenant_thread raises UsageError naming both tenants when a token matches threads in two. Buttons and the reject modal resolve the tenant the same way. graph.start/approve/reject get tenant=<Tenant> only in multi-tenant mode (single-tenant calls unchanged); publish uses tenant.target; init_target gets dbt_project_name(name) ('-' -> '_', leading digit -> 't_'), the build's project name stays the tenant name. Messages: progress header '(tenant <name>)', design card title, every Notifier.reply gets a 'tenant <name>' context line (blocks.with_tenant); start line and usage footer list '<name>: host:port/db'. ask is refused before parsing. Docs: docs/tenants.md, docs/slack.md 'Several tenants'. Acceptance 7/7: tests/integrations 46, tests 549 (+21 skipped), tests/build 197 (+12 skipped). Limit: the message store, events and the channel stay process-wide; the build CLI still passes the raw tenant name to init_target (outside F6 paths).
 
+## Relocks
+- 20 Nov 2026 17:55: batch 4 spec (LangGraph events + React console), written by Claude (changed: plan-batch3.yaml, plan-batch4.yaml, plan/accept/_console.py, plan/accept/accept_v1.py, plan/accept/accept_v2.py, plan/accept/accept_v3.py, plan/accept/accept_v4.py, plan/accept/accept_v5.py, plan/accept/accept_v6.py, plan/prompts/F1.md, plan/prompts/F2.md, plan/prompts/F3.md, plan/prompts/F4.md, plan/prompts/F5.md, plan/prompts/F6.md, plan/prompts/V1.md, plan/prompts/V2.md, plan/prompts/V3.md, plan/prompts/V4.md, plan/prompts/V5.md, plan/prompts/V6.md)
+- 20 Nov 2026 18:31: V1 stopped no_profile (Claude Turing profiles unavailable, implementer cursor-grok): add cursor-composer as a reviewer between claude-tc-fable and cursor-grok (via supervise, by claude (delegated)) (changed: plan-batch4.yaml)
+
+## F5 result
+*Tenants (registry, per-tenant build, CLI --tenant), 17 Nov 2026 18:29.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass; 0 fix loop(s); branch `factory/F5`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| tenancy module | yes | missing in src/governor/core/tenancy.py |
+| graph takes a tenant | yes | missing in src/governor/build/graph.py |
+| CLI --tenant | yes | missing in src/governor/build/__main__.py |
+| pytest tests/core | yes | 120 passed, 12 skipped in 13.43s |
+| pytest tests/build | yes | 197 passed, 12 skipped in 87.99s (0:01:27) |
+| required tests present | yes | 8 found |
+
+Review: F5 does what section 31 asks. Tenant is a frozen dataclass with derived paths, build_dsn and dbt_env; load_tenants refuses bad names, unknown keys, missing knowledge files and shared root/target/database. graph.start/approve/reject inject the tenant's catalogue, blueprint, approved defaults, policy, checkpoints, profiler, inspector, row counter and dbt env via build_graph kwargs; no module-level state or os.environ is mutated. certify checks the admin DSN host:port/db before anything runs. CLI --tenant fills target/project name and refuses a foreign target (exit 2). All eight tests present.
+
+For Amir: No code changes needed. Two small inconsistencies worth a later tidy: the registry's duplicate-database check does not treat localhost/127.0.0.1/::1 as one host while certify's admin DSN check does, and the registry validates kpis.yaml and blueprint.md but not shop/policy.yaml or shop/access.yaml, so a tenant missing those fails later with a less helpful error. Events remain process-wide, as NOTES already records for F6.
+
+## Additions for F6
+For F6: (1) Use graph.start/approve/reject with tenant=<Tenant>; checkpoints default to tenant.checkpoints (root/artifacts/build_checkpoints.sqlite), so listing threads per tenant means opening each tenant's checkpoint file via graph.open_checkpointer(tenant.checkpoints). (2) Events (events_path) are still process-wide in GOVERNOR_STATE_DIR; map thread ids to tenants via checkpoints, not via events. (3) Tenant.address gives host:port/db for the start-up line and footer; never log build_dsn(). (4) Project name is the tenant name verbatim; names may contain '-', which dbt rejects as a project name, so either restrict names in the registry or map '-' to '_' when calling init_target. (5) load_tenants raises TenantError (a ValueError) naming the tenant; tenants_path() returns None when GOVERNOR_TENANTS is unset or empty. (6) The registry's shared-database check compares host strings lowercased only; certify's admin DSN check treats localhost/127.0.0.1/::1 as one host, so two entries differing only by localhost vs 127.0.0.1 are accepted by the registry. (7) The registry does not check policy.yaml/access.yaml exist; a tenant missing knowledge/shop/policy.yaml fails at profile time with a FileNotFoundError surfaced as 'build run failed'.
+
+## F6 result
+*One Slack bot for several tenants, 17 Nov 2026 20:44.*
+
+Implementer `claude-tc-opus`; reviewers `claude-tc-fable`: pass, `cursor-grok`: pass; 0 fix loop(s); branch `factory/F6`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| registry in Slack config | yes | missing in src/governor/integrations/slack/config.py |
+| tenants doc | yes | missing in docs/tenants.md |
+| pytest tests/integrations | yes | 46 passed in 10.04s |
+| pytest tests | yes | 549 passed, 21 skipped in 134.99s (0:02:14) |
+| pytest tests/build | yes | 197 passed, 12 skipped in 87.95s (0:01:27) |
+| required tests present | yes | 6 found |
+
+Review: claude-tc-fable: pass | cursor-grok: pass
+
+For Amir: Two non-blocking notes. The CLI --tenant path (F5) still gives init_target the raw tenant name, so a tenant like globex-eu started first from the CLI gets an invalid dbt project name; the Slack path maps it to globex_eu. Worth a one-line fix in build/__main__.py when convenient. Also, the reviewer's pytest run was blocked by the permission policy, so the green result is the acceptance script's.
+
+## Relocks
+- 20 Nov 2026 19:38: V3 scope stop was a spec gap: section 36 allows target_name on run_started (build/graph.py + runtrace/log.py) and asks for the Studio how-to in docs/console.md; added those paths to V3 allowed_paths (via supervise, by claude (delegated)) (changed: plan-batch4.yaml)
+
+## V1 result
+*Run-event contract, reducer and build-graph tracing, 20 Nov 2026 18:38.*
+
+Implementer `cursor-grok`; reviewers `cursor-composer`: pass; 0 fix loop(s); branch `factory/V1`.
+
+| check | ok | detail |
+|---|---|---|
+| capstone ground truth unchanged | yes | capstone ground truth unchanged |
+| runtrace package | yes | missing |
+| fold cases: at least 8 | yes | 8 cases |
+| fold cases cover section 34 | yes | ok |
+| build graph wraps nodes | yes | no traced( in build/graph.py |
+| build does not import ask/integrations | yes | bad import |
+| topology has every build node | yes | 14 nodes |
+| every conditional edge labelled | yes | [] |
+| pytest tests/core | yes | 131 passed, 12 skipped in 10.94s |
+| required tests present | yes | 7 found |
+| pytest tests/build | yes | 207 passed, 12 skipped in 91.56s (0:01:31) |
+| required tests present | yes | 5 found |
+| pytest tests | yes | 767 passed, 33 skipped in 209.26s (0:03:29) |
+
+Review: V1 matches batch4 §34–35: additive JSONL tracing, fold reducer with 8 shared cases, build registry/topology, and traced build nodes plus entry-point lifecycle events. Tracing re-raises exceptions, treats GraphInterrupt as pause, respects GOVERNOR_RUNTRACE=0, and marker tests show no warehouse/approver leakage. Acceptance tests and review_focus items are covered.
+
+For Amir: Accept script prints detail strings like "missing" and "no traced(" even on success — they are failure messages, not status.
+
+## V4 result
+*React console with the live run canvas (React Flow), 20 Nov 2026 20:21.*
+
+Implementer `cursor-grok`; reviewers `cursor-composer`: pass; 0 fix loop(s); branch `factory/V4`.
+
+| check | ok | detail |
+|---|---|---|
+| console dependencies | yes | ok |
+| npm scripts | yes | ok |
+| apps/console/src/run/fold.ts | yes | missing |
+| apps/console/src/graph/RunCanvas.tsx | yes | missing |
+| apps/console/src/graph/GovernorNode.tsx | yes | missing |
+| apps/console/src/copy.ts | yes | missing |
+| apps/console/src/pages/RunsPage.tsx | yes | missing |
+| apps/console/src/pages/RunPage.tsx | yes | missing |
+| apps/console/src/pages/GraphPage.tsx | yes | missing |
+| apps/console/package-lock.json | yes | missing |
+| console .gitignore covers node_modules and dist | yes | missing entries |
+| fold test reads the shared cases | yes | fold_cases.json not imported in a test |
+| required console tests present | yes | 4 found |
+| node 20+ on PATH | yes | v24.22.0 |
+| npm ci | yes | npm warn install-scripts   esbuild@0.21.5 (postinstall: node install.js) | npm warn install-scripts | npm warn install-s |
+| npm run lint | yes | > governor-console@0.0.0 lint | > eslint . |
+| npm run typecheck | yes | > governor-console@0.0.0 typecheck | > tsc --noEmit |
+| npm test | yes | [2m      Tests [22m [1m[32m19 passed[39m[22m[90m (19)[39m | [2m   Start at [22m 20:20:08 | [2m   Duration [2 |
+| npm run build | yes | [2mdist/[22m[35massets/index-DY-1M5sn.css  [39m[1m[2m 25.21 kB[22m[1m[22m[2m │ gzip:   5.03 kB[22m | [2mdist |
+
+Review: V4 delivers the console stack in apps/console/: fold.ts matches all eight fold_cases.json cases; RunCanvas implements §37 node and edge visuals; HeaderEventSource plus useRunEvents dedupe by seq and send Last-Event-ID on reconnect (tested). User strings live in copy.ts; icons are inline SVG. Lint, typecheck, 19 Vitest tests, and build passed per acceptance; no committed secrets.
+
+For Amir: Fold parity and the four required console tests give solid confidence; a quick manual pass with the API in GOVERNOR_CONSOLE_OPEN=1 mode would still validate HeaderEventSource against a real stream.
+

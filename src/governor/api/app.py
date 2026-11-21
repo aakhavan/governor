@@ -33,6 +33,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from governor.api.profiles import make_router as make_profiles_router
+from governor.integrations.console import mount_console
 from governor.ask import certified, service
 from governor.ask.policy import roles
 
@@ -213,6 +214,7 @@ def create_app(tokens: str | None = None, llm: Any = "env", **graph_options: Any
         return service.get_trace(trace_id, role)
 
     app.include_router(make_profiles_router(caller_role))
+    mount_console(app, caller_role)
     return app
 
 

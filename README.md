@@ -10,6 +10,14 @@ governor profiles raw tables, proposes a medallion design against a written laye
 
 Turing College AI Engineering capstone, November 2026. The 7-step walkthrough is in [`docs/showcase/`](docs/showcase/).
 
+## Run console
+
+![A build replay: one step working, one step on its second try](docs/showcase/console-build-live.png)
+
+Watch a build or a question move through the graph, including lineage, the build funnel and the ask guard path. Replay uses saved demo runs, so a demo makes no model calls.
+
+Start it with the API (`GOVERNOR_CONSOLE_OPEN=1`, `uv run uvicorn governor.api.app:app`) and `npm run dev` in `apps/console`. Details: [docs/console.md](docs/console.md).
+
 **Repos:** [governor](https://github.com/aakhavan/governor) · [olist-dbt](https://github.com/aakhavan/olist-dbt) (a generated dbt project) · [lineage-lab](https://github.com/aakhavan/lineage-lab) (catalogue and lineage) · [airflow-platform](https://github.com/aakhavan/airflow-platform) (orchestration)
 
 ## The problem

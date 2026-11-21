@@ -1,0 +1,189 @@
+[
+  {
+    "seq": 1,
+    "type": "run_started",
+    "graph": "ask"
+  },
+  {
+    "seq": 2,
+    "type": "node_started",
+    "node": "guard",
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 3,
+    "type": "node_finished",
+    "node": "guard",
+    "summary": "ok",
+    "duration_ms": 40,
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 4,
+    "type": "node_started",
+    "node": "retrieve_context",
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 5,
+    "type": "node_finished",
+    "node": "retrieve_context",
+    "summary": "2 tables \u00b7 0 metrics",
+    "duration_ms": 40,
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 6,
+    "type": "node_started",
+    "node": "plan",
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 7,
+    "type": "node_finished",
+    "node": "plan",
+    "summary": "answer",
+    "duration_ms": 40,
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 8,
+    "type": "node_started",
+    "node": "draft_sql",
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 9,
+    "type": "node_finished",
+    "node": "draft_sql",
+    "summary": "drafted",
+    "duration_ms": 40,
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 10,
+    "type": "node_started",
+    "node": "validate",
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 11,
+    "type": "node_finished",
+    "node": "validate",
+    "summary": "refused: COLUMN_UNKNOWN",
+    "duration_ms": 40,
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 12,
+    "type": "node_started",
+    "node": "repair",
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 13,
+    "type": "node_finished",
+    "node": "repair",
+    "summary": "repair 1",
+    "duration_ms": 40,
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 14,
+    "type": "node_started",
+    "node": "validate",
+    "attempt": 2,
+    "graph": "ask"
+  },
+  {
+    "seq": 15,
+    "type": "node_finished",
+    "node": "validate",
+    "summary": "ok",
+    "duration_ms": 40,
+    "attempt": 2,
+    "graph": "ask"
+  },
+  {
+    "seq": 16,
+    "type": "node_started",
+    "node": "dry_run",
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 17,
+    "type": "node_finished",
+    "node": "dry_run",
+    "summary": "ok",
+    "duration_ms": 40,
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 18,
+    "type": "node_started",
+    "node": "execute",
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 19,
+    "type": "node_finished",
+    "node": "execute",
+    "summary": "1 rows",
+    "duration_ms": 40,
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 20,
+    "type": "node_started",
+    "node": "answer",
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 21,
+    "type": "node_finished",
+    "node": "answer",
+    "summary": "answered",
+    "duration_ms": 40,
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 22,
+    "type": "node_started",
+    "node": "record_trace",
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 23,
+    "type": "node_finished",
+    "node": "record_trace",
+    "summary": "saved",
+    "duration_ms": 40,
+    "attempt": 1,
+    "graph": "ask"
+  },
+  {
+    "seq": 24,
+    "type": "run_finished",
+    "status": "answered",
+    "graph": "ask"
+  }
+]

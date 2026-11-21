@@ -1,0 +1,19 @@
+{
+  "run_id": "build-current",
+  "graph": "build",
+  "source": "demo",
+  "started": "2026-01-01T00:00:00.000+00:00",
+  "last_event": "2026-01-01T00:00:02.000+00:00",
+  "status": "up_to_date",
+  "elapsed_ms": 2000,
+  "cost_usd": 0,
+  "llm_calls": 0,
+  "events": [
+    {"v": 1, "ts": "2026-01-01T00:00:00.000+00:00", "run_id": "build-current", "graph": "build", "seq": 1, "type": "run_started"},
+    {"v": 1, "ts": "2026-01-01T00:00:00.100+00:00", "run_id": "build-current", "graph": "build", "seq": 2, "type": "node_started", "node": "profile", "attempt": 1},
+    {"v": 1, "ts": "2026-01-01T00:00:00.500+00:00", "run_id": "build-current", "graph": "build", "seq": 3, "type": "node_finished", "node": "profile", "duration_ms": 15, "summary": "2 tables · 3 columns · 1 PII"},
+    {"v": 1, "ts": "2026-01-01T00:00:01.000+00:00", "run_id": "build-current", "graph": "build", "seq": 4, "type": "node_started", "node": "compare", "attempt": 1},
+    {"v": 1, "ts": "2026-01-01T00:00:01.250+00:00", "run_id": "build-current", "graph": "build", "seq": 5, "type": "node_finished", "node": "compare", "duration_ms": 5, "summary": "up to date"},
+    {"v": 1, "ts": "2026-01-01T00:00:02.000+00:00", "run_id": "build-current", "graph": "build", "seq": 6, "type": "run_finished", "status": "up_to_date"}
+  ]
+}

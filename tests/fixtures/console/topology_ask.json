@@ -1,0 +1,256 @@
+{
+  "graph": "ask",
+  "nodes": [
+    {
+      "id": "start",
+      "label": "Start",
+      "kind": "io",
+      "description": "Where an ask run begins.",
+      "group": "understand",
+      "order": 0,
+      "planned": false
+    },
+    {
+      "id": "guard",
+      "label": "Guard",
+      "kind": "guard",
+      "description": "Stops a question that is not about the billing data.",
+      "group": "understand",
+      "order": 1,
+      "planned": false
+    },
+    {
+      "id": "retrieve_context",
+      "label": "Retrieve",
+      "kind": "io",
+      "description": "Finds catalog cards for the tables and metrics.",
+      "group": "understand",
+      "order": 2,
+      "planned": false
+    },
+    {
+      "id": "plan",
+      "label": "Plan",
+      "kind": "llm",
+      "description": "Asks the model what the question is asking for.",
+      "group": "understand",
+      "order": 3,
+      "planned": false
+    },
+    {
+      "id": "clarify",
+      "label": "Clarify",
+      "kind": "gate",
+      "description": "Waits for a person to fill in a missing detail.",
+      "group": "understand",
+      "order": 4,
+      "planned": false
+    },
+    {
+      "id": "draft_sql",
+      "label": "Draft SQL",
+      "kind": "llm",
+      "description": "Asks the model to draft a query.",
+      "group": "sql",
+      "order": 5,
+      "planned": false
+    },
+    {
+      "id": "validate",
+      "label": "Validate",
+      "kind": "check",
+      "description": "Checks the query against the access policy.",
+      "group": "sql",
+      "order": 6,
+      "planned": false
+    },
+    {
+      "id": "dry_run",
+      "label": "Dry run",
+      "kind": "check",
+      "description": "Checks the query with the warehouse planner.",
+      "group": "sql",
+      "order": 7,
+      "planned": false
+    },
+    {
+      "id": "repair",
+      "label": "Repair",
+      "kind": "llm",
+      "description": "Asks the model to repair a refused query.",
+      "group": "sql",
+      "order": 8,
+      "planned": false
+    },
+    {
+      "id": "execute",
+      "label": "Execute",
+      "kind": "io",
+      "description": "Runs the checked query and counts the rows.",
+      "group": "sql",
+      "order": 9,
+      "planned": false
+    },
+    {
+      "id": "answer",
+      "label": "Answer",
+      "kind": "llm",
+      "description": "Asks the model to word the answer.",
+      "group": "answer",
+      "order": 10,
+      "planned": false
+    },
+    {
+      "id": "record_trace",
+      "label": "Record",
+      "kind": "io",
+      "description": "Saves the decision trace for this question.",
+      "group": "answer",
+      "order": 11,
+      "planned": false
+    },
+    {
+      "id": "end",
+      "label": "End",
+      "kind": "io",
+      "description": "Where an ask run ends.",
+      "group": "answer",
+      "order": 100,
+      "planned": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "target": "guard",
+      "label": "",
+      "conditional": false
+    },
+    {
+      "source": "answer",
+      "target": "record_trace",
+      "label": "",
+      "conditional": false
+    },
+    {
+      "source": "clarify",
+      "target": "plan",
+      "label": "answered",
+      "conditional": true
+    },
+    {
+      "source": "clarify",
+      "target": "record_trace",
+      "label": "blocked",
+      "conditional": true
+    },
+    {
+      "source": "draft_sql",
+      "target": "validate",
+      "label": "",
+      "conditional": false
+    },
+    {
+      "source": "dry_run",
+      "target": "execute",
+      "label": "ok",
+      "conditional": true
+    },
+    {
+      "source": "dry_run",
+      "target": "record_trace",
+      "label": "refused",
+      "conditional": true
+    },
+    {
+      "source": "dry_run",
+      "target": "repair",
+      "label": "failed: repair",
+      "conditional": true
+    },
+    {
+      "source": "execute",
+      "target": "answer",
+      "label": "ok",
+      "conditional": true
+    },
+    {
+      "source": "execute",
+      "target": "record_trace",
+      "label": "refused",
+      "conditional": true
+    },
+    {
+      "source": "execute",
+      "target": "repair",
+      "label": "failed: repair",
+      "conditional": true
+    },
+    {
+      "source": "guard",
+      "target": "record_trace",
+      "label": "blocked",
+      "conditional": true
+    },
+    {
+      "source": "guard",
+      "target": "retrieve_context",
+      "label": "ok",
+      "conditional": true
+    },
+    {
+      "source": "plan",
+      "target": "clarify",
+      "label": "unclear",
+      "conditional": true
+    },
+    {
+      "source": "plan",
+      "target": "draft_sql",
+      "label": "ready",
+      "conditional": true
+    },
+    {
+      "source": "plan",
+      "target": "record_trace",
+      "label": "refused",
+      "conditional": true
+    },
+    {
+      "source": "repair",
+      "target": "validate",
+      "label": "",
+      "conditional": false
+    },
+    {
+      "source": "retrieve_context",
+      "target": "plan",
+      "label": "",
+      "conditional": false
+    },
+    {
+      "source": "validate",
+      "target": "dry_run",
+      "label": "ok",
+      "conditional": true
+    },
+    {
+      "source": "validate",
+      "target": "record_trace",
+      "label": "refused",
+      "conditional": true
+    },
+    {
+      "source": "validate",
+      "target": "repair",
+      "label": "refused: repair",
+      "conditional": true
+    },
+    {
+      "source": "record_trace",
+      "target": "end",
+      "label": "",
+      "conditional": false
+    }
+  ]
+}

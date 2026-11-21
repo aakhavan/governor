@@ -60,6 +60,7 @@ from governor.build.llm import BuildLLM, LLMOutputError
 from governor.build.models import Finding, Proposal
 from governor.core import paths
 from governor.core.catalogue import load_approved, load_blueprint, load_kpis
+from governor.core.runtrace.log import RunLog, bind_run, call_metrics, traced
 
 if TYPE_CHECKING:
     from governor.core.tenancy import Tenant
@@ -268,6 +269,114 @@ def _policy(path: str | None) -> dict[str, str]:
     from governor.build.profile import load_policy
 
     return load_policy(path) if path else {}
+
+
+def _sum_profile(update: dict, state: BuildState) -> str:
+    prof = update.get("profile") or state.get("profile") or {}
+    tables = prof.get("tables") or []
+    columns = pii = 0
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        for column in table.get("columns") or []:
+            columns += 1
+            if isinstance(column, dict) and column.get("pii"):
+                pii += 1
+    return f"{len(tables)} tables · {columns} columns · {pii} PII"
+
+
+def _sum_compare(update: dict, state: BuildState) -> str:
+    if update.get("status") == UP_TO_DATE:
+        return "up to date"
+    if update.get("drift"):
+        return f"changed: {len(update['drift'])}"
+    return "no fingerprint"
+
+
+def _sum_propose(update: dict, state: BuildState) -> str:
+    proposal = update.get("proposal")
+    if not proposal:
+        return "unparseable"
+    kpis = proposal.get("kpis") or []
+    built = sum(1 for kpi in kpis if isinstance(kpi, dict) and kpi.get("decision") == "build")
+    return f"{built} KPIs · {len(proposal.get('silver_models') or [])} models"
+
+
+def _sum_validate(update: dict, state: BuildState) -> str:
+    findings = update.get("findings") if "findings" in update else (state.get("findings") or [])
+    if not findings:
+        return "ok"
+    codes = sorted({str(item.get("code")) for item in findings if isinstance(item, dict) and item.get("code")})
+    return f"{len(findings)} findings: {', '.join(codes)}"
+
+
+def _sum_write_report(update: dict, state: BuildState) -> str:
+    if update.get("status") == INVALID:
+        return f"design invalid · {len(state.get('findings') or [])} findings"
+    return "awaiting approval"
+
+
+def _sum_design_gate(update: dict, state: BuildState) -> str:
+    status = update.get("status") or ""
+    if status == "approving":
+        return "approved"
+    if status in ("rejected", REJECTED):
+        return "rejected"
+    return "gate"
+
+
+def _sum_record(update: dict, state: BuildState) -> str:
+    return "decisions recorded"
+
+
+def _sum_write_silver(update: dict, state: BuildState) -> str:
+    return f"{len((update.get('silver') or {}).get('models') or [])} models written"
+
+
+def _sum_dbt_silver(update: dict, state: BuildState) -> str:
+    silver_state = update.get("silver") or {}
+    passed = int(silver_state.get("tests_passed") or 0)
+    failed = len(silver_state.get("failures") or {})
+    if failed:
+        return f"{passed} tests passed · {failed} failed"
+    return f"{passed} tests passed"
+
+
+def _sum_repair_silver(update: dict, state: BuildState) -> str:
+    silver_state = update.get("silver") or {}
+    repairs = int(silver_state.get("repairs") or 0)
+    attempts = silver_state.get("attempts") or {}
+    names = [name for name in attempts if isinstance(name, str)]
+    model = max(names, key=lambda name: attempts.get(name) or 0) if names else ""
+    if model:
+        return f"repair {repairs} for {model}"
+    return f"repair {repairs}"
+
+
+def _sum_silver_done(update: dict, state: BuildState) -> str:
+    if update.get("status") == silver.BUILT:
+        return "silver built"
+    return "escalated"
+
+
+def _sum_write_gold(update: dict, state: BuildState) -> str:
+    proposal = state.get("proposal")
+    if not proposal:
+        return "0 KPIs built · 0 gaps"
+    return f"{len(gold.built_kpis(proposal))} KPIs built · {len(gold.gaps(proposal))} gaps"
+
+
+def _sum_dbt_gold(update: dict, state: BuildState) -> str:
+    return f"{int((update.get('gold') or {}).get('tests_passed') or 0)} tests passed"
+
+
+def _sum_summarise(update: dict, state: BuildState) -> str:
+    summary = update.get("summary") or {}
+    status = summary.get("status") or state.get("status") or ""
+    cost = (summary.get("cost") or {}).get("cost_usd")
+    if cost is None:
+        return f"{status} · cost unknown"
+    return f"{status} · cost {cost}"
 
 
 def build_graph(
@@ -515,20 +624,23 @@ def build_graph(
         return {"summary": summary}
 
     g = StateGraph(BuildState)
-    g.add_node("profile", profile)
-    g.add_node("compare", compare)
-    g.add_node("propose", propose)
-    g.add_node("validate", validate)
-    g.add_node("write_report", write_report)
-    g.add_node("design_gate", design_gate)
-    g.add_node("record_decisions", record)
-    g.add_node("write_silver", write_silver)
-    g.add_node("dbt_build_silver", dbt_build_silver)
-    g.add_node("repair_silver", repair_silver)
-    g.add_node("silver_done", silver_done)
-    g.add_node("write_gold", write_gold)
-    g.add_node("dbt_build_gold", dbt_build_gold)
-    g.add_node("summarise", summarise)
+    for node_id, fn, summary_of in (
+        ("profile", profile, _sum_profile),
+        ("compare", compare, _sum_compare),
+        ("propose", propose, _sum_propose),
+        ("validate", validate, _sum_validate),
+        ("write_report", write_report, _sum_write_report),
+        ("design_gate", design_gate, _sum_design_gate),
+        ("record_decisions", record, _sum_record),
+        ("write_silver", write_silver, _sum_write_silver),
+        ("dbt_build_silver", dbt_build_silver, _sum_dbt_silver),
+        ("repair_silver", repair_silver, _sum_repair_silver),
+        ("silver_done", silver_done, _sum_silver_done),
+        ("write_gold", write_gold, _sum_write_gold),
+        ("dbt_build_gold", dbt_build_gold, _sum_dbt_gold),
+        ("summarise", summarise, _sum_summarise),
+    ):
+        g.add_node(node_id, traced("build", node_id, fn, summary_of))
     g.add_edge(START, "profile")
     g.add_edge("profile", "compare")
     g.add_conditional_edges("compare", after_compare, ["propose", END])
@@ -604,6 +716,21 @@ def _summary(graph, config: dict) -> dict:
     return out
 
 
+def _finish_run(run_log: RunLog, graph, config: dict, *, failed: bool) -> None:
+    """``run_finished`` when the thread ended. A pause (the design gate) writes nothing more."""
+    try:
+        snap = graph.get_state(config)
+    except Exception:  # noqa: BLE001 — tracing must not change the command's error
+        if failed:
+            run_log.emit("run_finished", status="failed")
+        return
+    if not failed and (snap.next or ()):
+        return
+    values = snap.values or {}
+    status = "failed" if failed else values.get("status")
+    run_log.emit("run_finished", status=status, metrics=call_metrics(list(values.get("calls") or [])))
+
+
 def start(target: str | Path, project_name: str, llm: BuildLLM, *, policy: str | Path | None = DEFAULT_POLICY,
           profile: dict | None = None, thread_id: str | None = None, checkpoints: str | Path | None = None,
           force: bool = False, tenant: Tenant | None = None, **graph_kwargs: Any) -> dict:
@@ -626,9 +753,16 @@ def start(target: str | Path, project_name: str, llm: BuildLLM, *, policy: str |
     if profile is not None:
         state["profile"] = profile
     emit("run_started", thread_id=thread_id, project=project_name, saved_profile=profile is not None)
-    with open_checkpointer(checkpoints) as saver:
+    run_log = RunLog("build", thread_id)
+    run_log.emit("run_started", target_name=Path(target).name)
+    with bind_run(thread_id), open_checkpointer(checkpoints) as saver:
         graph = build_graph(llm, saver, **graph_kwargs)
-        graph.invoke(state, config)
+        try:
+            graph.invoke(state, config)
+        except Exception:
+            _finish_run(run_log, graph, config, failed=True)
+            raise
+        _finish_run(run_log, graph, config, failed=False)
         return _summary(graph, config)
 
 
@@ -642,8 +776,16 @@ def _resume(thread_id: str, decision: dict, llm: BuildLLM, checkpoints: str | Pa
         if "design_gate" not in (pending.next or ()):
             raise BuildError(f"thread {thread_id} is not waiting at the design gate "
                              f"(status {pending.values.get('status')})")
-        graph.invoke(Command(resume=decision), config)
-        return _summary(graph, config)
+        run_log = RunLog("build", thread_id)
+        run_log.emit("run_resumed")
+        with bind_run(thread_id):
+            try:
+                graph.invoke(Command(resume=decision), config)
+            except Exception:
+                _finish_run(run_log, graph, config, failed=True)
+                raise
+            _finish_run(run_log, graph, config, failed=False)
+            return _summary(graph, config)
 
 
 def approve(thread_id: str, by: str, llm: BuildLLM, *, checkpoints: str | Path | None = None,

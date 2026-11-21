@@ -1,0 +1,39 @@
+{"v": 1, "ts": "2026-01-15T12:00:00.000+00:00", "run_id": "build-full", "graph": "build", "seq": 1, "type": "run_started", "target_name": "shop"}
+{"v": 1, "ts": "2026-01-15T12:00:00.250+00:00", "run_id": "build-full", "graph": "build", "seq": 2, "type": "node_started", "node": "profile", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:00.500+00:00", "run_id": "build-full", "graph": "build", "seq": 3, "type": "node_finished", "node": "profile", "attempt": 1, "duration_ms": 40, "summary": "9 tables · 52 columns · 12 PII"}
+{"v": 1, "ts": "2026-01-15T12:00:00.750+00:00", "run_id": "build-full", "graph": "build", "seq": 4, "type": "node_started", "node": "compare", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:01.000+00:00", "run_id": "build-full", "graph": "build", "seq": 5, "type": "node_finished", "node": "compare", "attempt": 1, "duration_ms": 40, "summary": "no fingerprint"}
+{"v": 1, "ts": "2026-01-15T12:00:01.250+00:00", "run_id": "build-full", "graph": "build", "seq": 6, "type": "node_started", "node": "propose", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:01.500+00:00", "run_id": "build-full", "graph": "build", "seq": 7, "type": "node_finished", "node": "propose", "attempt": 1, "duration_ms": 40, "summary": "8 KPIs · 7 models", "metrics": {"llm_calls": 1, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0}}
+{"v": 1, "ts": "2026-01-15T12:00:01.750+00:00", "run_id": "build-full", "graph": "build", "seq": 8, "type": "node_started", "node": "validate", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:02.000+00:00", "run_id": "build-full", "graph": "build", "seq": 9, "type": "node_finished", "node": "validate", "attempt": 1, "duration_ms": 40, "summary": "1 findings: MAPPING_UNKNOWN_COLUMN"}
+{"v": 1, "ts": "2026-01-15T12:00:02.250+00:00", "run_id": "build-full", "graph": "build", "seq": 10, "type": "node_started", "node": "propose", "attempt": 2}
+{"v": 1, "ts": "2026-01-15T12:00:02.500+00:00", "run_id": "build-full", "graph": "build", "seq": 11, "type": "node_finished", "node": "propose", "attempt": 2, "duration_ms": 40, "summary": "8 KPIs · 7 models", "metrics": {"llm_calls": 1, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0}}
+{"v": 1, "ts": "2026-01-15T12:00:02.750+00:00", "run_id": "build-full", "graph": "build", "seq": 12, "type": "node_started", "node": "validate", "attempt": 2}
+{"v": 1, "ts": "2026-01-15T12:00:03.000+00:00", "run_id": "build-full", "graph": "build", "seq": 13, "type": "node_finished", "node": "validate", "attempt": 2, "duration_ms": 40, "summary": "ok"}
+{"v": 1, "ts": "2026-01-15T12:00:03.250+00:00", "run_id": "build-full", "graph": "build", "seq": 14, "type": "node_started", "node": "write_report", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:03.500+00:00", "run_id": "build-full", "graph": "build", "seq": 15, "type": "node_finished", "node": "write_report", "attempt": 1, "duration_ms": 40, "summary": "awaiting approval"}
+{"v": 1, "ts": "2026-01-15T12:00:03.750+00:00", "run_id": "build-full", "graph": "build", "seq": 16, "type": "node_started", "node": "design_gate", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:04.000+00:00", "run_id": "build-full", "graph": "build", "seq": 17, "type": "run_paused", "node": "design_gate", "attempt": 1, "status": "awaiting_approval"}
+{"v": 1, "ts": "2026-01-15T12:00:04.250+00:00", "run_id": "build-full", "graph": "build", "seq": 18, "type": "run_resumed"}
+{"v": 1, "ts": "2026-01-15T12:00:04.500+00:00", "run_id": "build-full", "graph": "build", "seq": 19, "type": "node_started", "node": "design_gate", "attempt": 2}
+{"v": 1, "ts": "2026-01-15T12:00:04.750+00:00", "run_id": "build-full", "graph": "build", "seq": 20, "type": "node_finished", "node": "design_gate", "attempt": 2, "duration_ms": 40, "summary": "approved"}
+{"v": 1, "ts": "2026-01-15T12:00:05.000+00:00", "run_id": "build-full", "graph": "build", "seq": 21, "type": "node_started", "node": "record_decisions", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:05.250+00:00", "run_id": "build-full", "graph": "build", "seq": 22, "type": "node_finished", "node": "record_decisions", "attempt": 1, "duration_ms": 40, "summary": "decisions recorded"}
+{"v": 1, "ts": "2026-01-15T12:00:05.500+00:00", "run_id": "build-full", "graph": "build", "seq": 23, "type": "node_started", "node": "write_silver", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:05.750+00:00", "run_id": "build-full", "graph": "build", "seq": 24, "type": "node_finished", "node": "write_silver", "attempt": 1, "duration_ms": 40, "summary": "7 models written", "metrics": {"llm_calls": 3, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0}}
+{"v": 1, "ts": "2026-01-15T12:00:06.000+00:00", "run_id": "build-full", "graph": "build", "seq": 25, "type": "node_started", "node": "dbt_build_silver", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:06.250+00:00", "run_id": "build-full", "graph": "build", "seq": 26, "type": "node_finished", "node": "dbt_build_silver", "attempt": 1, "duration_ms": 40, "summary": "6 tests passed · 1 failed", "metrics": {"llm_calls": 0, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0}}
+{"v": 1, "ts": "2026-01-15T12:00:06.500+00:00", "run_id": "build-full", "graph": "build", "seq": 27, "type": "node_started", "node": "repair_silver", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:06.750+00:00", "run_id": "build-full", "graph": "build", "seq": 28, "type": "node_finished", "node": "repair_silver", "attempt": 1, "duration_ms": 40, "summary": "repair 1 for int_order_lines", "metrics": {"llm_calls": 1, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0}}
+{"v": 1, "ts": "2026-01-15T12:00:07.000+00:00", "run_id": "build-full", "graph": "build", "seq": 29, "type": "node_started", "node": "dbt_build_silver", "attempt": 2}
+{"v": 1, "ts": "2026-01-15T12:00:07.250+00:00", "run_id": "build-full", "graph": "build", "seq": 30, "type": "node_finished", "node": "dbt_build_silver", "attempt": 2, "duration_ms": 40, "summary": "7 tests passed", "metrics": {"llm_calls": 0, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0}}
+{"v": 1, "ts": "2026-01-15T12:00:07.500+00:00", "run_id": "build-full", "graph": "build", "seq": 31, "type": "node_started", "node": "silver_done", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:07.750+00:00", "run_id": "build-full", "graph": "build", "seq": 32, "type": "node_finished", "node": "silver_done", "attempt": 1, "duration_ms": 40, "summary": "silver built"}
+{"v": 1, "ts": "2026-01-15T12:00:08.000+00:00", "run_id": "build-full", "graph": "build", "seq": 33, "type": "node_started", "node": "write_gold", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:08.250+00:00", "run_id": "build-full", "graph": "build", "seq": 34, "type": "node_finished", "node": "write_gold", "attempt": 1, "duration_ms": 40, "summary": "8 KPIs built · 2 gaps"}
+{"v": 1, "ts": "2026-01-15T12:00:08.500+00:00", "run_id": "build-full", "graph": "build", "seq": 35, "type": "node_started", "node": "dbt_build_gold", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:08.750+00:00", "run_id": "build-full", "graph": "build", "seq": 36, "type": "node_finished", "node": "dbt_build_gold", "attempt": 1, "duration_ms": 40, "summary": "8 tests passed"}
+{"v": 1, "ts": "2026-01-15T12:00:09.000+00:00", "run_id": "build-full", "graph": "build", "seq": 37, "type": "node_started", "node": "summarise", "attempt": 1}
+{"v": 1, "ts": "2026-01-15T12:00:09.250+00:00", "run_id": "build-full", "graph": "build", "seq": 38, "type": "node_finished", "node": "summarise", "attempt": 1, "duration_ms": 40, "summary": "built · cost 0.0"}
+{"v": 1, "ts": "2026-01-15T12:00:09.500+00:00", "run_id": "build-full", "graph": "build", "seq": 39, "type": "run_finished", "status": "built", "metrics": {"llm_calls": 6, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0}}
